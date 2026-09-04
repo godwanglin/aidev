@@ -1,0 +1,134 @@
+/* Elegant Clean Light Mode Theme for Code Blocks (GitHub Light / Vercel Light Style) */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: #24292f;
+  font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  direction: ltr;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  tab-size: 2;
+  hyphens: none;
+}
+
+.code-window {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin-bottom: 16px;
+}
+
+.code-window-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+}
+
+.code-window-dots {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.code-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.code-dot.red { background: #fda4af; border: 1px solid #fb7185; }
+.code-dot.yellow { background: #fde68a; border: 1px solid #fcd34d; }
+.code-dot.green { background: #86efac; border: 1px solid #4ade80; }
+
+.code-window-title {
+  font-size: 11.5px;
+  font-family: "JetBrains Mono", monospace;
+  color: #475569;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-window-body {
+  padding: 14px;
+  margin: 0;
+  background: #f8fafc;
+  overflow-x: auto;
+}
+
+/* Syntax Highlighting Tokens (Light Palette) */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: #24292f;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #0550ae;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #0a3069;
+  font-weight: 500;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #cf222e;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #cf222e;
+  font-weight: 600;
+}
+
+.token.function,
+.token.class-name {
+  color: #8250df;
+  font-weight: 600;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #953800;
+}
+
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}

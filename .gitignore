@@ -1,0 +1,37 @@
+# Node & dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build output
+.next/
+out/
+build/
+dist/
+
+# Environment variables & secrets (Never push actual keys to GitHub)
+.env
+.env*.local
+.env.production
+.env.staging
+
+# Temporary files & logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+temp_*
+*.tmp
+
+# Aidev CLI nested node_modules / bun cache / local data
+aidev-cli/node_modules/
+aidev-cli/.bun/
+aidev-cli/.local/
+aidev-cli/**/.turbo/
+aidev-cli/**/dist/
+aidev-cli/**/build/
+
+# OS metadata
+.DS_Store
+Thumbs.db

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>API Activity Logs - DevPortal SaaS</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#dce2f7",
+                        "on-surface": "#151c27",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "surface-subtle": "#F9FAFB",
+                        "border-default": "#E5E7EB",
+                        "on-surface-variant": "#434655",
+                        "primary": "#004ac6",
+                        "error": "#ba1a1a",
+                        "surface-container-high": "#e2e8f8",
+                        "on-error": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "primary-fixed": "#dbe1ff",
+                        "on-tertiary-fixed": "#360f00",
+                        "secondary": "#575e70",
+                        "secondary-container": "#d9dff5",
+                        "on-background": "#151c27",
+                        "text-secondary": "#4B5563",
+                        "tertiary-fixed-dim": "#ffb596",
+                        "tertiary": "#943700",
+                        "inverse-surface": "#2a313d",
+                        "inverse-primary": "#b4c5ff",
+                        "on-primary-fixed": "#00174b",
+                        "text-tertiary": "#9CA3AF",
+                        "on-primary-container": "#eeefff",
+                        "surface-tint": "#0053db",
+                        "on-tertiary-container": "#ffede6",
+                        "surface-dim": "#d3daea",
+                        "on-tertiary-fixed-variant": "#7d2d00",
+                        "surface-container": "#e7eefe",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#003ea8",
+                        "primary-fixed-dim": "#b4c5ff",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-on-surface": "#ebf1ff",
+                        "surface": "#f9f9ff",
+                        "background": "#f9f9ff",
+                        "surface-container-highest": "#dce2f3",
+                        "error-container": "#ffdad6",
+                        "text-primary": "#111827",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-container-low": "#f0f3ff",
+                        "on-secondary-container": "#5c6274",
+                        "primary-container": "#2563eb",
+                        "on-error-container": "#93000a",
+                        "outline-variant": "#c3c6d7",
+                        "outline": "#737686",
+                        "surface-bright": "#f9f9ff",
+                        "tertiary-fixed": "#ffdbcd",
+                        "surface-variant": "#dce2f3",
+                        "on-secondary-fixed-variant": "#404758",
+                        "tertiary-container": "#bc4800"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "margin-page": "32px",
+                        "unit": "4px",
+                        "density-compact": "8px",
+                        "container-max": "1280px",
+                        "density-comfortable": "16px",
+                        "gutter": "16px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Geist"],
+                        "body-lg": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "headline-sm": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "body-md": ["Inter"],
+                        "code-sm": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["30px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "body-sm": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "headline-sm": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.015em", "fontWeight": "600" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "code-sm": ["13px", { "lineHeight": "20px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: theme('colors.background'); color: theme('colors.on-background'); }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; }
+        .icon-fill { font-variation-settings: 'FILL' 1; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: theme('colors.surface-subtle'); }
+        ::-webkit-scrollbar-thumb { background: theme('colors.border-default'); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: theme('colors.text-tertiary'); }
+    </style>
+</head>
+<body class="font-body-md text-body-md min-h-screen flex selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar -->
+<nav class="bg-surface dark:bg-on-surface text-primary dark:text-primary-fixed font-body-md text-body-md fixed left-0 top-0 h-screen w-64 border-r border-border-default dark:border-on-surface-variant flex flex-col h-full py-4 px-2 hidden md:flex z-50">
+<div class="px-4 mb-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary-container text-on-primary-container flex items-center justify-center font-bold">D</div>
+<div>
+<div class="font-headline-sm text-headline-sm font-bold text-on-surface dark:text-surface">DevPortal SaaS</div>
+<div class="font-label-md text-label-md text-text-tertiary">v2.4.0-stable</div>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto space-y-1 mt-4">
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="dashboard">dashboard</span>
+<span>Overview</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="science">science</span>
+<span>Playground</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="folder">folder</span>
+<span>Projects</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="vpn_key">vpn_key</span>
+<span>API Keys</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="monitoring">monitoring</span>
+<span>Usage</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT bg-surface-container-high dark:bg-secondary-container text-on-surface dark:text-on-secondary-container border-l-2 border-primary hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px] icon-fill" data-icon="list_alt">list_alt</span>
+<span class="font-medium">Logs</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="token">token</span>
+<span>Models</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="description">description</span>
+<span>Files</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="group">group</span>
+<span>Team</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="payments">payments</span>
+<span>Billing</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+<span>Help</span>
+</a>
+</div>
+<div class="mt-auto border-t border-border-default pt-4 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-on-surface-variant dark:text-outline-variant hover:bg-surface-container-low dark:hover:bg-on-secondary-fixed-variant hover:bg-surface-subtle dark:hover:bg-secondary-fixed-variant transition-colors duration-150 active:scale-[0.98] transition-transform" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="account_circle">account_circle</span>
+<span>Profile</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col md:ml-64 w-full min-h-screen relative bg-surface-subtle">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-on-surface text-primary dark:text-primary-fixed font-label-md text-label-md border-b border-border-default dark:border-on-surface-variant flex justify-between items-center h-14 px-margin-page sticky top-0 z-40">
+<div class="flex items-center gap-8">
+<div class="font-headline-sm text-headline-sm font-semibold text-on-surface dark:text-surface">Console</div>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed-dim transition-colors h-14 flex items-center border-b-2 border-transparent focus:ring-2 focus:ring-primary outline-none" href="#">Docs</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed-dim transition-colors h-14 flex items-center border-b-2 border-transparent focus:ring-2 focus:ring-primary outline-none" href="#">Support</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-primary dark:hover:text-primary-fixed-dim transition-colors h-14 flex items-center border-b-2 border-transparent focus:ring-2 focus:ring-primary outline-none" href="#">Changelog</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-1.5 text-on-surface-variant hover:text-primary transition-colors focus:ring-2 focus:ring-primary rounded-full outline-none">
+<span class="material-symbols-outlined text-[20px]" data-icon="search">search</span>
+</button>
+<button class="p-1.5 text-on-surface-variant hover:text-primary transition-colors focus:ring-2 focus:ring-primary rounded-full outline-none relative">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="bg-primary-container text-on-primary-container px-3 py-1.5 rounded-DEFAULT font-label-md text-label-md hover:opacity-90 transition-opacity focus:ring-2 focus:ring-primary outline-none active:scale-[0.98]">Deploy</button>
+<img class="w-8 h-8 rounded-full border border-border-default object-cover cursor-pointer hover:ring-2 hover:ring-primary transition-all" data-alt="A clean, minimalist developer avatar icon. A generic silhouette over a solid dark background, maintaining a professional and technical aesthetic suitable for a SaaS dashboard." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAlVmKJjYjZxJo684QTMRdxOEx7ldVmwf1FbONZ1iunFkIfQ93HD7zZkGngcqTI-tVO3ILeZ9iapvKODZ2hvvnN2XtDLzYrSFqsNeHGEvOBvb1Sm3op8YFSIa_dDViSXHbGQ_2H431bEk-3Ac0uW2ndm3NbWiwpCq2V-wWCj4vVPc08poYHMt_01ZNZbAPVWhcEVVry2hIc7zt1PFySiFwIrhnhkfnHAXeS1Nq1uCtTdMgoisdvgeIZMA"/>
+</div>
+</header>
+<!-- Canvas Area -->
+<main class="flex-1 p-margin-page max-w-container-max mx-auto w-full flex flex-col gap-6">
+<!-- Page Header -->
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-text-primary">Logs</h1>
+<p class="font-body-md text-body-md text-text-secondary mt-1">Real-time stream of API requests</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-surface border border-border-default px-3 py-1.5 rounded-DEFAULT text-text-primary hover:bg-surface-subtle transition-colors flex items-center gap-2 font-label-md text-label-md outline-none focus:ring-2 focus:ring-primary">
+<span class="material-symbols-outlined text-[16px]" data-icon="download">download</span>
+                        Export CSV
+                    </button>
+</div>
+</div>
+<!-- Toolbar & Filters -->
+<div class="bg-surface border border-border-default rounded-DEFAULT p-3 flex flex-col sm:flex-row gap-3 items-center">
+<div class="relative flex-1 w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary text-[18px]" data-icon="search">search</span>
+<input class="w-full bg-surface border border-border-default rounded-DEFAULT pl-9 pr-3 py-1.5 font-body-sm text-body-sm text-text-primary placeholder:text-text-tertiary focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" placeholder="Search Request ID or Endpoint..." type="text"/>
+</div>
+<div class="flex items-center gap-3 w-full sm:w-auto">
+<div class="relative">
+<select class="appearance-none bg-surface border border-border-default rounded-DEFAULT pl-3 pr-8 py-1.5 font-label-md text-label-md text-text-primary focus:border-primary focus:ring-1 focus:ring-primary outline-none cursor-pointer">
+<option value="">Status: All</option>
+<option value="200">200 OK</option>
+<option value="400">400 Bad Request</option>
+<option value="429">429 Too Many Requests</option>
+<option value="500">500 Server Error</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary text-[16px] pointer-events-none" data-icon="arrow_drop_down">arrow_drop_down</span>
+</div>
+<div class="relative">
+<select class="appearance-none bg-surface border border-border-default rounded-DEFAULT pl-3 pr-8 py-1.5 font-label-md text-label-md text-text-primary focus:border-primary focus:ring-1 focus:ring-primary outline-none cursor-pointer">
+<option value="">Model: All</option>
+<option value="gpt-4o">gpt-4o</option>
+<option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+<option value="text-embedding-3">text-embedding-3</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary text-[16px] pointer-events-none" data-icon="arrow_drop_down">arrow_drop_down</span>
+</div>
+<button class="p-1.5 text-text-tertiary hover:text-text-primary transition-colors focus:ring-2 focus:ring-primary rounded outline-none border border-transparent hover:border-border-default" title="Refresh">
+<span class="material-symbols-outlined text-[18px]" data-icon="refresh">refresh</span>
+</button>
+</div>
+</div>
+<!-- Data Table Container -->
+<div class="bg-surface border border-border-default rounded-DEFAULT overflow-hidden flex flex-col flex-1">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse whitespace-nowrap">
+<thead>
+<tr class="bg-surface-subtle border-b border-border-default">
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium">Timestamp</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium">Request ID</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium">Endpoint</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium">Model</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium">Status</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium text-right">Latency</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium text-right">Tokens</th>
+<th class="font-label-md text-label-md text-text-secondary py-2 px-4 font-medium text-right">Cost</th>
+</tr>
+</thead>
+<tbody class="font-code-sm text-code-sm text-text-primary divide-y divide-border-default">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group h-[40px]">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:32:01Z</td>
+<td class="py-2 px-4 text-primary">req_8f7b2a1c</td>
+<td class="py-2 px-4">/v1/chat/completions</td>
+<td class="py-2 px-4 text-text-secondary">gpt-4o</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+                                        200 OK
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">240ms</td>
+<td class="py-2 px-4 text-right">1.2k</td>
+<td class="py-2 px-4 text-right">$0.036</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group h-[40px]">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:31:45Z</td>
+<td class="py-2 px-4 text-primary">req_3e9d4c5f</td>
+<td class="py-2 px-4">/v1/embeddings</td>
+<td class="py-2 px-4 text-text-secondary">text-embedding-3</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+                                        200 OK
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">85ms</td>
+<td class="py-2 px-4 text-right">845</td>
+<td class="py-2 px-4 text-right">$0.001</td>
+</tr>
+<!-- Row 3 - Error -->
+<tr class="hover:bg-error-container/20 transition-colors cursor-pointer group h-[40px] bg-error-container/5">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:30:12Z</td>
+<td class="py-2 px-4 text-primary">req_9a2b1c4d</td>
+<td class="py-2 px-4">/v1/chat/completions</td>
+<td class="py-2 px-4 text-text-secondary">gpt-4o</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-error-container text-on-error-container border border-error-container/50 text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                                        429 Too Many Requests
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">12ms</td>
+<td class="py-2 px-4 text-right text-text-tertiary">-</td>
+<td class="py-2 px-4 text-right text-text-tertiary">-</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group h-[40px]">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:28:55Z</td>
+<td class="py-2 px-4 text-primary">req_5f6e7d8c</td>
+<td class="py-2 px-4">/v1/chat/completions</td>
+<td class="py-2 px-4 text-text-secondary">gpt-3.5-turbo</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+                                        200 OK
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">512ms</td>
+<td class="py-2 px-4 text-right">4.5k</td>
+<td class="py-2 px-4 text-right">$0.007</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group h-[40px]">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:25:33Z</td>
+<td class="py-2 px-4 text-primary">req_1a2b3c4d</td>
+<td class="py-2 px-4">/v1/models</td>
+<td class="py-2 px-4 text-text-secondary">-</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+                                        200 OK
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">45ms</td>
+<td class="py-2 px-4 text-right text-text-tertiary">-</td>
+<td class="py-2 px-4 text-right text-text-tertiary">$0.000</td>
+</tr>
+<!-- Row 6 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group h-[40px]">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:22:10Z</td>
+<td class="py-2 px-4 text-primary">req_9z8y7x6w</td>
+<td class="py-2 px-4">/v1/chat/completions</td>
+<td class="py-2 px-4 text-text-secondary">gpt-4o</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+                                        200 OK
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">180ms</td>
+<td class="py-2 px-4 text-right">850</td>
+<td class="py-2 px-4 text-right">$0.025</td>
+</tr>
+<!-- Row 7 - Error -->
+<tr class="hover:bg-surface-container-high transition-colors cursor-pointer group h-[40px] bg-surface-subtle">
+<td class="py-2 px-4 text-text-secondary group-hover:text-text-primary transition-colors">2023-10-27T14:20:05Z</td>
+<td class="py-2 px-4 text-primary">req_5v4u3t2s</td>
+<td class="py-2 px-4">/v1/chat/completions</td>
+<td class="py-2 px-4 text-text-secondary">gpt-4o</td>
+<td class="py-2 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high text-text-primary border border-border-default text-[11px] font-medium tracking-wide">
+<span class="w-1.5 h-1.5 rounded-full bg-[#F59E0B]"></span>
+                                        400 Bad Request
+                                    </span>
+</td>
+<td class="py-2 px-4 text-right">22ms</td>
+<td class="py-2 px-4 text-right text-text-tertiary">-</td>
+<td class="py-2 px-4 text-right text-text-tertiary">-</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="mt-auto border-t border-border-default bg-surface px-4 py-3 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-text-secondary">Showing 1 to 7 of 1,248 logs</span>
+<div class="flex items-center gap-2">
+<button class="px-2 py-1 rounded border border-border-default bg-surface hover:bg-surface-subtle text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed outline-none focus:ring-1 focus:ring-primary transition-colors flex items-center" disabled="">
+<span class="material-symbols-outlined text-[18px]" data-icon="chevron_left">chevron_left</span>
+</button>
+<div class="flex items-center gap-1 font-body-sm text-body-sm">
+<button class="w-7 h-7 rounded bg-primary-container text-on-primary-container flex items-center justify-center font-medium outline-none">1</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-text-primary flex items-center justify-center outline-none transition-colors">2</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-text-primary flex items-center justify-center outline-none transition-colors">3</button>
+<span class="text-text-tertiary px-1">...</span>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-text-primary flex items-center justify-center outline-none transition-colors">178</button>
+</div>
+<button class="px-2 py-1 rounded border border-border-default bg-surface hover:bg-surface-subtle text-text-secondary outline-none focus:ring-1 focus:ring-primary transition-colors flex items-center">
+<span class="material-symbols-outlined text-[18px]" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

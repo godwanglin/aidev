@@ -1,0 +1,36 @@
+{
+  "$schema": "https://v2-8-13.turborepo.dev/schema.json",
+  "globalEnv": ["CI", "AIDEV_CLI_DISABLE_SHARE"],
+  "globalPassThroughEnv": ["CI", "AIDEV_CLI_DISABLE_SHARE"],
+  "tasks": {
+    "typecheck": {},
+    "build": {
+      "dependsOn": [],
+      "outputs": ["dist/**"]
+    },
+    "aidev-cli#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "passThroughEnv": ["*"]
+    },
+    "@aidev-cli/core#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@aidev-cli/function#test": {
+      "outputs": []
+    },
+    "@aidev-cli/app#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@aidev-cli/ui#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@aidev-cli/session-ui#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    }
+  }
+}

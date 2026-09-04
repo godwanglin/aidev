@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Disallow shared content pages
+Disallow: /s/
+Disallow: /share/
+
+Sitemap: https://aidev-cli.ai/sitemap.xml
+Sitemap: https://aidev-cli.ai/data/sitemap.xml

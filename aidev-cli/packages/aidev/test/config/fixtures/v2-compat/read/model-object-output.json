@@ -1,0 +1,4 @@
+{
+  "$schema": "https://aidev-cli.ai/config.json",
+  "model": "anthropic/claude-sonnet"
+}

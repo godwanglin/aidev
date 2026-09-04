@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String?
+  passwordHash     String            @default("")
+  role             String            @default("USER")
+  tokenBalance     BigInt            @default(10000000)
+  createdAt        DateTime          @default(now())
+  apiKeys          ApiKey[]
+  tokenTopups      TokenTopup[]
+  orders           Order[]
+  loyaltyDiscounts LoyaltyDiscount[]
+  supportTickets   SupportTicket[]
+}
+
+model ApiKey {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String?
+  prefix      String
+  hashedKey   String       @unique
+  isActive    Boolean      @default(true)
+  rateLimit   Int          @default(30)
+  lastUsedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  revokedAt   DateTime?
+  requestLogs RequestLog[]
+
+  @@index([userId])
+}
+
+model RequestLog {
+  id               String   @id @default(cuid())
+  apiKeyId         String
+  apiKey           ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  path             String
+  method           String
+  statusCode       Int
+  model            String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  durationMs       Int?
+  createdAt        DateTime @default(now())
+
+  @@index([apiKeyId])
+  @@index([apiKeyId, createdAt])
+  @@index([apiKeyId, statusCode, createdAt])
+  @@index([apiKeyId, model, createdAt])
+  @@index([apiKeyId, method, createdAt])
+  @@index([createdAt])
+}
+
+model TokenTopup {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      BigInt
+  priceIdr    Int      @default(0)
+  method      String   @default("QRIS")
+  description String
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model Order {
+  id             String    @id @default(cuid())
+  orderId        String    @unique
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenAmount    BigInt
+  basePrice      Int       @default(0)
+  priceIdr       Int
+  discountPct    Int       @default(0)
+  discountReason String?
+  method         String
+  status         String    @default("PENDING")
+  qrString       String?   @db.Text
+  vaNumber       String?
+  createdAt      DateTime  @default(now())
+  paidAt         DateTime?
+
+  @@index([userId])
+  @@index([userId, status, paidAt])
+}
+
+model SystemSetting {
+  id                       String    @id @default("global_config")
+  promoDiscountActive      Boolean   @default(false)
+  promoDiscountPct         Int       @default(0)
+  promoStartedAt           DateTime?
+  promoExpiresAt           DateTime?
+  firstTopupDiscountActive Boolean   @default(true)
+  firstTopupDiscountPct    Int       @default(20)
+  highUsageDiscountActive  Boolean   @default(true)
+  highUsageThresholdTokens BigInt    @default(50000000)
+  highUsageDiscountPct     Int       @default(10)
+  highUsageDays            Int       @default(3)
+  discordWebhookUrl        String?   @db.Text
+  midtransServerKey        String?   @db.Text
+  midtransClientKey        String?   @db.Text
+  midtransIsProduction     Boolean   @default(false)
+  updatedAt                DateTime  @default(now()) @updatedAt
+}
+
+model LoyaltyDiscount {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  discountPct Int      @default(10)
+  expiresAt   DateTime
+  reason      String   @default("High Usage Reward")
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, expiresAt])
+}
+
+model AiModel {
+  id             String   @id @default(cuid())
+  modelId        String   @unique
+  name           String
+  provider       String
+  promptCost     Decimal  @db.Decimal(10, 4)
+  completionCost Decimal  @db.Decimal(10, 4)
+  contextWindow  String   @default("128k")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String
+  subject   String
+  message   String   @db.Text
+  status    String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  response  String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([userId])
+  @@index([status, createdAt])
+}
