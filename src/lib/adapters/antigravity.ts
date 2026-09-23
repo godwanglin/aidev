@@ -1,4 +1,5 @@
 import { logUpstreamRequest, refreshConnectionOn401 } from "@/lib/router";
+import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
 
 export const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
@@ -901,6 +902,21 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
           statusCode: 200,
           isFailover: false,
         }).catch(() => {});
+
+        if (params.clientApiKeyId && !params.reqPath.includes("/responses")) {
+          logRequest({
+            apiKeyId: params.clientApiKeyId,
+            path: params.reqPath,
+            method: "POST",
+            statusCode: 200,
+            model: responseModel,
+            promptTokens: (promptTokens || 15) + rtkSaved,
+            completionTokens: completionTokens || 25,
+            totalTokens: (totalTokens || (promptTokens + completionTokens) || 40) + rtkSaved,
+            creditsCost: undefined,
+            durationMs,
+          });
+        }
       },
     });
 
@@ -981,6 +997,21 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     statusCode: 200,
     isFailover: false,
   }).catch(() => {});
+
+  if (params.clientApiKeyId && !params.reqPath.includes("/responses")) {
+    logRequest({
+      apiKeyId: params.clientApiKeyId,
+      path: params.reqPath,
+      method: "POST",
+      statusCode: 200,
+      model: responseModel,
+      promptTokens: upstreamPrompt + rtkSaved,
+      completionTokens: completionTokens || 25,
+      totalTokens: upstreamTotal + rtkSaved,
+      creditsCost: undefined,
+      durationMs,
+    });
+  }
 
   const assistantMessage: any = {
     role: "assistant",

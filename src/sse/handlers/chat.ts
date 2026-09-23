@@ -944,22 +944,22 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               });
             }
 
-            if (subPath === "chat/completions") {
-              logUpstreamRequest({
-                connectionId: activeConnectionId,
-                provider: activeProvider,
-                model: upstreamLogModel,
-                clientApiKeyId: apiKeyId,
-                clientUserId,
-                promptTokens: upstreamPromptTokens,
-                completionTokens: upstreamCompletionTokens,
-                totalTokens: upstreamTotalTokens,
-                tokensSavedRtk,
-                latencyMs: durationMs,
-                statusCode: finalStatus,
-                isFailover: false,
-              }).catch(() => {});
+            logUpstreamRequest({
+              connectionId: activeConnectionId,
+              provider: activeProvider,
+              model: upstreamLogModel,
+              clientApiKeyId: apiKeyId,
+              clientUserId,
+              promptTokens: upstreamPromptTokens,
+              completionTokens: upstreamCompletionTokens,
+              totalTokens: upstreamTotalTokens,
+              tokensSavedRtk,
+              latencyMs: durationMs,
+              statusCode: finalStatus,
+              isFailover: false,
+            }).catch(() => {});
 
+            if (subPath !== "responses") {
               logRequest({
                 apiKeyId,
                 path: reqPath,
@@ -1037,22 +1037,22 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       const upstreamCompletionTokens = completionTokens || 25;
       const upstreamTotalTokens = totalTokens || (upstreamPromptTokens + upstreamCompletionTokens);
 
-      if (subPath === "chat/completions") {
-        logUpstreamRequest({
-          connectionId: activeConnectionId,
-          provider: activeProvider,
-          model: upstreamLogModel,
-          clientApiKeyId: apiKeyId,
-          clientUserId,
-          promptTokens: upstreamPromptTokens,
-          completionTokens: upstreamCompletionTokens,
-          totalTokens: upstreamTotalTokens,
-          tokensSavedRtk,
-          latencyMs: durationMs,
-          statusCode: upstreamRes.status,
-          isFailover: false,
-        }).catch(() => {});
+      logUpstreamRequest({
+        connectionId: activeConnectionId,
+        provider: activeProvider,
+        model: upstreamLogModel,
+        clientApiKeyId: apiKeyId,
+        clientUserId,
+        promptTokens: upstreamPromptTokens,
+        completionTokens: upstreamCompletionTokens,
+        totalTokens: upstreamTotalTokens,
+        tokensSavedRtk,
+        latencyMs: durationMs,
+        statusCode: upstreamRes.status,
+        isFailover: false,
+      }).catch(() => {});
 
+      if (subPath !== "responses") {
         logRequest({
           apiKeyId,
           path: reqPath,
@@ -1125,6 +1125,18 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         model: clientRequestedModel,
         upstreamModel: candidateModel,
         account: userEmail,
+      });
+      logRequest({
+        apiKeyId,
+        path: reqPath,
+        method: "POST",
+        statusCode: 502,
+        model: clientRequestedModel,
+        promptTokens: estimatedPromptTokens || 15,
+        completionTokens: 0,
+        totalTokens: estimatedPromptTokens || 15,
+        creditsCost: 0,
+        durationMs: Date.now() - startTime,
       });
       console.error(`[Gateway Catch Error] candidate=${candidateModel}:`, err);
       return NextResponse.json(
