@@ -57,28 +57,3 @@ export async function GET() {
     captchaToken,
   });
 }
-
-export function verifyCaptchaToken(token: string, userAnswer: string): boolean {
-  try {
-    const raw = Buffer.from(token, "base64").toString("utf-8");
-    const [salt, ts, hashedSolution, sig] = raw.split(":");
-    if (!salt || !ts || !hashedSolution || !sig) return false;
-
-    // Check expiration (3 minutes)
-    if (Date.now() - Number(ts) > 3 * 60 * 1000) return false;
-
-    const tokenData = `${salt}:${ts}:${hashedSolution}`;
-    const computedSig = crypto.createHmac("sha256", CAPTCHA_SECRET).update(tokenData).digest("hex");
-    if (sig !== computedSig) return false;
-
-    // Verify user's answer against salted hash
-    const userHashed = crypto
-      .createHash("sha256")
-      .update(`${userAnswer.trim().toUpperCase()}:${salt}:${CAPTCHA_SECRET}`)
-      .digest("hex");
-
-    return userHashed === hashedSolution;
-  } catch {
-    return false;
-  }
-}

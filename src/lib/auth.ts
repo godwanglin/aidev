@@ -5,24 +5,44 @@ import type { ApiKey } from "@prisma/client";
 // Maximum overdraft limit allowed for any user account (-50,000 Tokens)
 export const MAX_OVERDRAFT_TOKENS = -100000;
 
-const rateLimitMap = new Map<string, number[]>();
-const lastUsedBuffer = new Map<string, Date>();
+const globalForAuth = globalThis as unknown as {
+  authIntervalStarted?: boolean;
+  rateLimitMap?: Map<string, number[]>;
+  lastUsedBuffer?: Map<string, Date>;
+};
 
-// Flush lastUsedAt every 10 seconds to avoid excessive DB writes
-intervalAsync();
-function intervalAsync() {
+const rateLimitMap = globalForAuth.rateLimitMap ?? new Map<string, number[]>();
+globalForAuth.rateLimitMap = rateLimitMap;
+
+const lastUsedBuffer = globalForAuth.lastUsedBuffer ?? new Map<string, Date>();
+globalForAuth.lastUsedBuffer = lastUsedBuffer;
+
+// Flush lastUsedAt and prune expired rate limits every 10s
+if (!globalForAuth.authIntervalStarted) {
+  globalForAuth.authIntervalStarted = true;
   setInterval(async () => {
-    if (lastUsedBuffer.size === 0) return;
-    const entries = Array.from(lastUsedBuffer.entries());
-    lastUsedBuffer.clear();
+    if (lastUsedBuffer.size > 0) {
+      const entries = Array.from(lastUsedBuffer.entries());
+      lastUsedBuffer.clear();
+      for (const [id, lastUsedAt] of entries) {
+        try {
+          await prisma.apiKey.update({
+            where: { id },
+            data: { lastUsedAt },
+          });
+        } catch {}
+      }
+    }
 
-    for (const [id, lastUsedAt] of entries) {
-      try {
-        await prisma.apiKey.update({
-          where: { id },
-          data: { lastUsedAt },
-        });
-      } catch {}
+    // Prune expired rate limit entries to prevent memory leak
+    const now = Date.now();
+    for (const [keyId, timestamps] of rateLimitMap.entries()) {
+      const active = timestamps.filter((t) => now - t < 60000);
+      if (active.length === 0) {
+        rateLimitMap.delete(keyId);
+      } else {
+        rateLimitMap.set(keyId, active);
+      }
     }
   }, 10000).unref();
 }
@@ -36,16 +56,17 @@ export interface AuthResult {
 
 export function invalidateApiKeyCache(_hashedKey?: string) {}
 
-export async function authenticateApiKey(authHeader: string | null): Promise<AuthResult> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+export async function authenticateApiKey(authHeader: string | null, xApiKey?: string | null): Promise<AuthResult> {
+  const token = (xApiKey && xApiKey.trim()) || (authHeader && authHeader.trim()) || "";
+  if (!token) {
     return {
       success: false,
-      error: "Missing or malformed Authorization header. Expected Bearer token",
+      error: "Missing Authorization or x-api-key header. Expected Bearer token or x-api-key",
       status: 401,
     };
   }
 
-  const rawKey = authHeader.replace("Bearer ", "").trim();
+  const rawKey = token.startsWith("Bearer ") ? token.replace(/^Bearer\s+/i, "").trim() : token.trim();
   if (!rawKey) {
     return {
       success: false,
@@ -61,7 +82,16 @@ export async function authenticateApiKey(authHeader: string | null): Promise<Aut
     where: { hashedKey },
     include: {
       user: {
-        select: { id: true, tokenBalance: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          tokenBalance: true,
+          creditBalance: true,
+          subscriptionTier: true,
+          subscriptionExpiresAt: true,
+        },
       },
     },
   });
@@ -82,32 +112,36 @@ export async function authenticateApiKey(authHeader: string | null): Promise<Aut
     };
   }
 
-  // 1. Strict Overdraft Tolerance Check (Max minus allowed: -50,000 Tokens)
-  const currentBalance = Number(apiKeyRecord.user?.tokenBalance ?? 0);
-  if (currentBalance <= MAX_OVERDRAFT_TOKENS) {
+  // 1. Strict Credit Balance Check (Exempt ADMIN role)
+  const isAdmin = apiKeyRecord.user?.role === "ADMIN";
+  const currentCredits = Number(apiKeyRecord.user?.creditBalance ?? 0);
+  console.log(`[DEBUG auth.ts check] key=${apiKeyRecord.name} role=${apiKeyRecord.user?.role} creditBalance=${apiKeyRecord.user?.creditBalance} currentCredits=${currentCredits} isLeq0=${currentCredits <= 0}`);
+  if (!isAdmin && currentCredits <= 0) {
     return {
       success: false,
       apiKey: apiKeyRecord,
-      error: "Insufficient token balance. Please top up your account to continue.",
+      error: "Saldo credit Anda telah habis (0 CR). Silakan top up saldo atau perbarui paket langganan Anda di http://localhost:3000/billing",
       status: 402,
     };
   }
 
-  // 2. Sliding Window Rate Limiting (default 30/60 req/min)
-  const windowMs = 60 * 1000;
-  const timestamps = (rateLimitMap.get(apiKeyRecord.id) || []).filter((t) => now - t < windowMs);
+  // 2. Sliding Window Rate Limiting (exempt ADMIN role)
+  if (!isAdmin) {
+    const windowMs = 60 * 1000;
+    const timestamps = (rateLimitMap.get(apiKeyRecord.id) || []).filter((t) => now - t < windowMs);
 
-  if (timestamps.length >= apiKeyRecord.rateLimit) {
-    return {
-      success: false,
-      apiKey: apiKeyRecord,
-      error: `Rate limit exceeded (${apiKeyRecord.rateLimit} req/min). Please slow down.`,
-      status: 429,
-    };
+    if (timestamps.length >= apiKeyRecord.rateLimit) {
+      return {
+        success: false,
+        apiKey: apiKeyRecord,
+        error: `Rate limit exceeded (${apiKeyRecord.rateLimit} req/min). Please slow down.`,
+        status: 429,
+      };
+    }
+
+    timestamps.push(now);
+    rateLimitMap.set(apiKeyRecord.id, timestamps);
   }
-
-  timestamps.push(now);
-  rateLimitMap.set(apiKeyRecord.id, timestamps);
 
   lastUsedBuffer.set(apiKeyRecord.id, new Date(now));
 

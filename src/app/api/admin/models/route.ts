@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { invalidateModelsCache } from "@/app/api/models/route";
+import { invalidateModelsCache } from "@/lib/models-cache";
+import { validateModelForProvider } from "@/lib/model-normalizer";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -31,12 +32,49 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    const models = await prisma.aiModel.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-    });
+    const [models, combos] = await Promise.all([
+      prisma.aiModel.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.comboModel.findMany({
+        where: search
+          ? {
+              OR: [
+                { comboId: { contains: search } },
+                { name: { contains: search } },
+                { description: { contains: search } },
+              ],
+            }
+          : undefined,
+        include: {
+          items: {
+            orderBy: { priority: "asc" },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
-    return NextResponse.json({ success: true, data: models });
+    const comboModelsMapped = combos.map((c) => ({
+      id: c.id,
+      modelId: c.comboId,
+      name: c.name,
+      provider: "COMBO",
+      promptCost: 0,
+      completionCost: 0,
+      contextWindow: `${c.items.length} targets (${c.strategy === "ROUND_ROBIN" ? "Rotate" : "Fallback"})`,
+      isActive: c.isActive,
+      isPublic: c.isPublic,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      isCombo: true,
+      comboStrategy: c.strategy,
+      comboItems: c.items.map((i) => i.modelId),
+      firstCandidate: c.items[0]?.modelId || null,
+    }));
+
+    return NextResponse.json({ success: true, data: [...models, ...comboModelsMapped] });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -51,7 +89,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { modelId, name, provider, promptCost, completionCost, contextWindow, isActive } = body;
+    const { modelId, name, provider, promptCost, completionCost, contextWindow, isActive, isPublic } = body;
 
     if (!modelId || !name || !provider) {
       return NextResponse.json({ error: "Model ID, Name, and Provider are required" }, { status: 400 });
@@ -74,6 +112,7 @@ export async function POST(req: NextRequest) {
         completionCost: Number(completionCost) || 0,
         contextWindow: contextWindow ? String(contextWindow).trim() : "128k",
         isActive: isActive !== undefined ? Boolean(isActive) : true,
+        isPublic: isPublic !== undefined ? Boolean(isPublic) : true,
       },
     });
 
@@ -85,7 +124,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PUT update existing model
+// PUT update existing model or combo
 export async function PUT(req: NextRequest) {
   try {
     const admin = await verifyAdmin();
@@ -94,10 +133,27 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { id, modelId, name, provider, promptCost, completionCost, contextWindow, isActive } = body;
+    const { id, modelId, name, provider, promptCost, completionCost, contextWindow, isActive, isPublic } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Model ID (uuid) is required" }, { status: 400 });
+    }
+
+    // Check if it's a ComboModel
+    const existingCombo = await prisma.comboModel.findUnique({ where: { id } });
+    if (existingCombo) {
+      const updatedCombo = await prisma.comboModel.update({
+        where: { id },
+        data: {
+          ...(modelId ? { comboId: modelId.trim() } : {}),
+          ...(name ? { name: name.trim() } : {}),
+          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+          ...(isPublic !== undefined ? { isPublic: Boolean(isPublic) } : {}),
+        },
+      });
+
+      invalidateModelsCache();
+      return NextResponse.json({ success: true, data: updatedCombo });
     }
 
     const updated = await prisma.aiModel.update({
@@ -110,6 +166,7 @@ export async function PUT(req: NextRequest) {
         ...(completionCost !== undefined ? { completionCost: Number(completionCost) } : {}),
         ...(contextWindow ? { contextWindow: String(contextWindow).trim() } : {}),
         ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+        ...(isPublic !== undefined ? { isPublic: Boolean(isPublic) } : {}),
       },
     });
 
@@ -121,7 +178,7 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// DELETE model
+// DELETE model or combo
 export async function DELETE(req: NextRequest) {
   try {
     const admin = await verifyAdmin();
@@ -134,6 +191,14 @@ export async function DELETE(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ error: "Model ID is required" }, { status: 400 });
+    }
+
+    // Check if it's a ComboModel
+    const existingCombo = await prisma.comboModel.findUnique({ where: { id } });
+    if (existingCombo) {
+      await prisma.comboModel.delete({ where: { id } });
+      invalidateModelsCache();
+      return NextResponse.json({ success: true });
     }
 
     await prisma.aiModel.delete({

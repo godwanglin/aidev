@@ -14,6 +14,9 @@ export async function GET() {
       name: user.name,
       role: user.role,
       tokenBalance: Number(user.tokenBalance),
+      creditBalance: Number(user.creditBalance || 0),
+      subscriptionTier: user.subscriptionTier || "FREE",
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
     },
   });
 }

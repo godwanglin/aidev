@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [totalCount, topups, tokenAgg, pendingOrders, discountInfo] = await Promise.all([
+    const [totalCount, topups, tokenAgg, pendingOrders, discountInfo, tierConfigs, freshUser] = await Promise.all([
       prisma.tokenTopup.count({ where: { userId: user.id } }),
       prisma.tokenTopup.findMany({
         where: { userId: user.id },
@@ -54,13 +54,59 @@ export async function GET(req: NextRequest) {
         take: 1,
       }),
       calculateUserDiscount(user.id),
+      prisma.subscriptionTierConfig.findMany({
+        where: { isActive: true },
+        orderBy: { priceIdr: "asc" },
+      }),
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          email: true,
+          tokenBalance: true,
+          creditBalance: true,
+          subscriptionTier: true,
+          subscriptionExpiresAt: true,
+          monthlyCreditsAllocated: true,
+          monthlyCreditsRemaining: true,
+          bonusRescueClaimed: true,
+        },
+      }),
     ]);
 
+    const activeUser: any = freshUser || user;
     const totalPages = Math.ceil(totalCount / limit) || 1;
     const totalConsumed = tokenAgg._sum.totalTokens || 0;
 
+    const allocated = Number(activeUser.monthlyCreditsAllocated) || 20000;
+    const remaining = Number(activeUser.monthlyCreditsRemaining);
+    const used = Math.max(0, allocated - remaining);
+    const usagePct = allocated > 0 ? Math.min(100, Math.round((used / allocated) * 100)) : 0;
+    const isProOrUltra = activeUser.subscriptionTier === "PRO" || activeUser.subscriptionTier === "ULTRA";
+    const canClaimRescueBonus = isProOrUltra && !activeUser.bonusRescueClaimed && (usagePct >= 95 || remaining <= allocated * 0.05);
+
     return NextResponse.json({
-      balanceTokens: Number(user.tokenBalance),
+      balanceTokens: Number(activeUser.tokenBalance),
+      creditBalance: Number(activeUser.creditBalance || 0),
+      subscriptionTier: activeUser.subscriptionTier || "FREE",
+      subscriptionExpiresAt: activeUser.subscriptionExpiresAt,
+      monthlyCreditsAllocated: allocated,
+      monthlyCreditsRemaining: remaining,
+      bonusRescueClaimed: Boolean(activeUser.bonusRescueClaimed),
+      usagePct,
+      canClaimRescueBonus,
+      tiers: tierConfigs.map((t) => ({
+        id: t.id,
+        name: t.name,
+        priceIdr: t.priceIdr,
+        monthlyCredits: Number(t.monthlyCredits),
+        rpmLimit: t.rpmLimit,
+        maxKeys: t.maxKeys,
+        routingPriority: t.routingPriority,
+        bonusPercentage: t.bonusPercentage,
+        badgeColor: t.badgeColor,
+        description: t.description,
+      })),
       totalConsumedTokens: totalConsumed,
       userDiscount: discountInfo,
       activeOrder:
@@ -68,6 +114,9 @@ export async function GET(req: NextRequest) {
           ? {
               orderId: pendingOrders[0].orderId,
               tokenAmount: Number(pendingOrders[0].tokenAmount),
+              creditAmount: Number(pendingOrders[0].creditAmount || 0),
+              orderType: pendingOrders[0].orderType || "TOPUP",
+              tierTarget: pendingOrders[0].tierTarget,
               basePrice: pendingOrders[0].basePrice,
               priceIdr: pendingOrders[0].priceIdr,
               discountPct: pendingOrders[0].discountPct,
@@ -103,7 +152,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const tokenAmount = Number(body.amount) || 5000000;
+    const orderType = body.orderType === "SUBSCRIPTION" ? "SUBSCRIPTION" : "TOPUP";
     const method = body.method || "QRIS";
     const bank = body.bank || "bca";
 
@@ -112,14 +161,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const basePrice =
-      PRICING[tokenAmount] || Math.round((tokenAmount / 1_000_000) * 1500);
+    let basePrice = 15000;
+    let finalPrice = 15000;
+    let creditAmount = 150000;
+    let tokenAmount = 1500000;
+    let tierTarget: string | null = null;
+    let discountPct = 0;
+    let discountReason: string | null = null;
 
-    // Calculate applied discounts
-    const discountInfo = await calculateUserDiscount(user.id);
-    let finalPrice = basePrice;
-    if (discountInfo.discountPct > 0) {
-      finalPrice = Math.round(basePrice * (1 - discountInfo.discountPct / 100));
+    if (orderType === "SUBSCRIPTION") {
+      const targetId = String(body.tier || "PRO").toUpperCase();
+      tierTarget = targetId;
+      const tierConfig = await prisma.subscriptionTierConfig.findUnique({
+        where: { id: targetId },
+      });
+
+      if (!tierConfig) {
+        return NextResponse.json({ error: "Tier langganan tidak ditemukan" }, { status: 400 });
+      }
+
+      basePrice = tierConfig.priceIdr;
+      finalPrice = tierConfig.priceIdr;
+      creditAmount = Number(tierConfig.monthlyCredits);
+      tokenAmount = creditAmount * 10;
+    } else {
+      // TOPUP KETENGAN
+      creditAmount = Number(body.creditAmount) || Number(body.amount) || 150000;
+      basePrice = Math.round(creditAmount / 10);
+
+      // Calculate applied discounts for topups
+      const discountInfo = await calculateUserDiscount(user.id);
+      discountPct = discountInfo.discountPct;
+      discountReason = discountInfo.reason;
+      finalPrice = basePrice;
+      if (discountPct > 0) {
+        finalPrice = Math.round(basePrice * (1 - discountPct / 100));
+      }
+      tokenAmount = creditAmount * 10;
     }
 
     const orderId = `AIDEV-${Date.now().toString().slice(-6)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
@@ -174,11 +252,14 @@ export async function POST(req: NextRequest) {
       data: {
         orderId,
         userId: user.id,
+        orderType,
+        tierTarget: tierTarget || null,
+        creditAmount: BigInt(creditAmount),
         tokenAmount: BigInt(tokenAmount),
         basePrice,
         priceIdr: finalPrice,
-        discountPct: discountInfo.discountPct,
-        discountReason: discountInfo.reason,
+        discountPct,
+        discountReason,
         method,
         qrString,
         vaNumber,
@@ -190,6 +271,9 @@ export async function POST(req: NextRequest) {
       success: true,
       order: {
         orderId: order.orderId,
+        orderType: order.orderType,
+        tierTarget: order.tierTarget,
+        creditAmount: Number(order.creditAmount),
         tokenAmount: Number(order.tokenAmount),
         basePrice: order.basePrice,
         priceIdr: order.priceIdr,
@@ -213,44 +297,71 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Order ID required" }, { status: 400 });
     }
 
-    const order = await prisma.order.findUnique({ where: { orderId } });
-    if (!order || order.status !== "PENDING") {
-      return NextResponse.json(
-        { error: "Order not found or already settled" },
-        { status: 400 }
-      );
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const descNote = order.discountPct > 0 ? ` (${order.discountPct}% Discount Applied)` : "";
+    const order = await prisma.order.findUnique({ where: { orderId } });
+    if (!order) {
+      return NextResponse.json({ error: "Pesanan tidak ditemukan" }, { status: 404 });
+    }
 
-    const [updatedOrder, updatedUser] = await prisma.$transaction([
-      prisma.order.update({
-        where: { id: order.id },
-        data: {
-          status: "PAID",
-          paidAt: new Date(),
-        },
-      }),
-      prisma.user.update({
+    // Pastikan pesanan milik user yang sedang login, atau caller adalah Admin
+    if (order.userId !== user.id && user.role !== "ADMIN" && user.email !== "admin@devportal.local") {
+      return NextResponse.json({ error: "Akses ditolak" }, { status: 403 });
+    }
+
+    // Jika pesanan sudah disetujui oleh Admin atau webhook Midtrans
+    if (order.status === "PAID") {
+      const freshUser = await prisma.user.findUnique({
         where: { id: order.userId },
-        data: {
-          tokenBalance: { increment: order.tokenAmount },
+        select: {
+          tokenBalance: true,
+          creditBalance: true,
+          subscriptionTier: true,
         },
-      }),
-      prisma.tokenTopup.create({
-        data: {
-          userId: order.userId,
-          amount: order.tokenAmount,
-          priceIdr: order.priceIdr,
-          method: order.method,
-          description: `Token Purchase via ${order.method} (${(Number(order.tokenAmount) / 1_000_000).toFixed(1)}M Tokens)${descNote}`,
-        },
-      }),
-    ]);
+      });
 
+      return NextResponse.json({
+        success: true,
+        status: "PAID",
+        message: "Pembayaran telah berhasil diverifikasi! Saldo dan paket telah aktif.",
+        newBalanceTokens: Number(freshUser?.tokenBalance || 0),
+        newCreditBalance: Number(freshUser?.creditBalance || 0),
+        tier: freshUser?.subscriptionTier,
+      });
+    }
+
+    // Jika masih PENDING, periksa apakah Midtrans Core API sudah mencatat pembayaran sukses
+    const { getMidtransTransactionStatus } = await import("@/lib/midtrans");
+    const midtransStatus = await getMidtransTransactionStatus(orderId);
+
+    const isMidtransPaid =
+      midtransStatus &&
+      ((midtransStatus.transaction_status === "capture" && midtransStatus.fraud_status === "accept") ||
+        midtransStatus.transaction_status === "settlement");
+
+    if (isMidtransPaid) {
+      const { settleOrder } = await import("@/lib/orders");
+      const settleResult = await settleOrder(orderId, "MIDTRANS", midtransStatus.payment_type);
+
+      return NextResponse.json({
+        success: true,
+        status: "PAID",
+        message: "Pembayaran berhasil diverifikasi oleh payment gateway!",
+        newBalanceTokens: Number(settleResult.user.tokenBalance),
+        newCreditBalance: Number(settleResult.user.creditBalance),
+        tier: settleResult.user.subscriptionTier,
+      });
+    }
+
+    // Jika pembayaran belum lunas atau mode sandbox menunggu verifikasi manual admin:
+    // PENTING: JANGAN AUTO-SETTLE! Cegah user mendapatkan kredit gratis sepihak.
     return NextResponse.json({
-      success: true,
-      newBalanceTokens: Number(updatedUser.tokenBalance),
+      success: false,
+      status: "PENDING",
+      message: "Pembayaran belum terkonfirmasi oleh gateway atau masih menunggu approval manual oleh Admin.",
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

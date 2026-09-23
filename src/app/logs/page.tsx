@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import Status from "@/components/Status";
+import CustomDropdown from "@/components/CustomDropdown";
 import {
   Search,
   Filter,
@@ -13,6 +14,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Coins,
 } from "lucide-react";
 
 export default function LogsPage() {
@@ -37,6 +39,20 @@ export default function LogsPage() {
   const [rangeFilter, setRangeFilter] = useState("all");
   const [minLatency, setMinLatency] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function fetchPublicModels() {
+      try {
+        const res = await fetch("/api/models");
+        const json = await res.json();
+        if (Array.isArray(json.data)) {
+          setAvailableModels(json.data);
+        }
+      } catch {}
+    }
+    fetchPublicModels();
+  }, []);
 
   async function fetchLogs(targetPage = page) {
     setLoading(true);
@@ -128,37 +144,37 @@ export default function LogsPage() {
               placeholder="Search Path, Key, or Model (press Enter)..."
             />
           </form>
-          <div className="toolbar-filters">
-            <div className="select-wrap">
-              <Filter size={12} strokeWidth={1.5} className="select-icon" />
-              <select suppressHydrationWarning
-                className="control select-compact"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="all">Status: All</option>
-                <option value="200">200 OK</option>
-                <option value="400">400 Bad Request</option>
-                <option value="401">401 Unauthorized</option>
-                <option value="429">429 Rate Limit</option>
-                <option value="500">5xx Server Error</option>
-                <option value="errors">All Errors (4xx/5xx)</option>
-              </select>
-            </div>
+          <div className="toolbar-filters flex items-center gap-2">
+            <CustomDropdown
+              size="sm"
+              value={statusFilter}
+              onChange={(val) => setStatusFilter(val)}
+              options={[
+                { value: "all", label: "Status: All", icon: <Filter size={12} className="text-muted" /> },
+                { value: "200", label: "200 OK", sublabel: "Success" },
+                { value: "400", label: "400 Bad Request" },
+                { value: "401", label: "401 Unauthorized" },
+                { value: "429", label: "429 Rate Limit" },
+                { value: "500", label: "5xx Server Error" },
+                { value: "errors", label: "All Errors (4xx/5xx)" },
+              ]}
+              minWidth={135}
+            />
 
-            <select suppressHydrationWarning
-              className="control select-compact"
+            <CustomDropdown
+              size="sm"
               value={modelFilter}
-              onChange={(e) => setModelFilter(e.target.value)}
-            >
-              <option value="all">Model: All</option>
-              <option value="gpt-5.2">gpt-5.2</option>
-              <option value="gpt-5.5">gpt-5.5</option>
-              <option value="gpt-5.6-luna">gpt-5.6-luna</option>
-              <option value="claude-opus-4.6">claude-opus-4.6</option>
-              <option value="claude-fable-5">claude-fable-5</option>
-              <option value="claude-sonet-5">claude-sonet-5</option>
-            </select>
+              onChange={(val) => setModelFilter(val)}
+              options={[
+                { value: "all", label: "Model: All" },
+                ...availableModels.map((m: any) => ({
+                  value: m.modelId,
+                  label: m.modelId,
+                  sublabel: m.name !== m.modelId ? m.name : undefined,
+                })),
+              ]}
+              minWidth={140}
+            />
           </div>
         </div>
 
@@ -168,30 +184,34 @@ export default function LogsPage() {
             <div className="filter-grid">
               <div className="filter-item">
                 <label className="filter-label">Time Window</label>
-                <select suppressHydrationWarning
-                  className="control w-full"
+                <CustomDropdown
+                  size="md"
+                  width="100%"
                   value={rangeFilter}
-                  onChange={(e) => setRangeFilter(e.target.value)}
-                >
-                  <option value="all">All Time</option>
-                  <option value="24h">Past 24 Hours</option>
-                  <option value="7d">Past 7 Days</option>
-                  <option value="30d">Past 30 Days</option>
-                </select>
+                  onChange={(val) => setRangeFilter(val)}
+                  options={[
+                    { value: "all", label: "All Time" },
+                    { value: "24h", label: "Past 24 Hours" },
+                    { value: "7d", label: "Past 7 Days" },
+                    { value: "30d", label: "Past 30 Days" },
+                  ]}
+                />
               </div>
 
               <div className="filter-item">
                 <label className="filter-label">HTTP Method</label>
-                <select suppressHydrationWarning
-                  className="control w-full"
+                <CustomDropdown
+                  size="md"
+                  width="100%"
                   value={methodFilter}
-                  onChange={(e) => setMethodFilter(e.target.value)}
-                >
-                  <option value="all">Any Method</option>
-                  <option value="POST">POST</option>
-                  <option value="GET">GET</option>
-                  <option value="DELETE">DELETE</option>
-                </select>
+                  onChange={(val) => setMethodFilter(val)}
+                  options={[
+                    { value: "all", label: "Any Method" },
+                    { value: "POST", label: "POST" },
+                    { value: "GET", label: "GET" },
+                    { value: "DELETE", label: "DELETE" },
+                  ]}
+                />
               </div>
 
               <div className="filter-item">
@@ -233,7 +253,15 @@ export default function LogsPage() {
                   <th>Method</th>
                   <th>Endpoint</th>
                   <th>Status</th>
-                  <th>Tokens (P/C/Total)</th>
+                  <th>
+                    <div className="flex items-center gap-1.5">
+                      <Coins size={12} className="text-amber-500 shrink-0" />
+                      <span>Credit</span>
+                    </div>
+                    <div className="text-[10px] text-muted font-normal lowercase tracking-normal">
+                      in / out / total ≈ cr
+                    </div>
+                  </th>
                   <th>Latency</th>
                 </tr>
               </thead>
@@ -251,8 +279,32 @@ export default function LogsPage() {
                       <td><span className="env">{row.method}</span></td>
                       <td className="mono">{row.path}</td>
                       <td><Status value={row.statusCode.toString() + (row.statusCode === 200 ? " OK" : "")} /></td>
-                      <td className="mono text-muted">
-                        {row.totalTokens !== null ? `${row.promptTokens || 0}/${row.completionTokens || 0}/${row.totalTokens}` : "-"}
+                      <td className="mono text-xs">
+                        {row.totalTokens !== null ? (
+                          <div
+                            className="inline-flex items-center gap-1.5 whitespace-nowrap"
+                            title={`Input: ${(row.promptTokens || 0).toLocaleString()} · Output: ${(row.completionTokens || 0).toLocaleString()} · Total: ${(row.totalTokens || 0).toLocaleString()} tokens → Digunakan: ${(row.creditsCost ?? 0).toLocaleString()} CR`}
+                          >
+                            <span className="text-slate-600 font-medium">
+                              {(row.promptTokens || 0).toLocaleString()}/{(row.completionTokens || 0).toLocaleString()}/{(row.totalTokens || 0).toLocaleString()}
+                            </span>
+                            <span className="text-muted" style={{ margin: "0 1px" }}>≈</span>
+                            <span
+                              className="inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded shadow-xs"
+                              style={{
+                                background: "#fffbeb",
+                                color: "#b45309",
+                                border: "1px solid #fef3c7",
+                                fontSize: "11px",
+                              }}
+                            >
+                              <Coins size={11} className="text-amber-500 shrink-0" />
+                              <span>{(row.creditsCost ?? 0).toLocaleString()} CR</span>
+                            </span>
+                          </div>
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td className="mono text-muted">{row.durationMs ? `${row.durationMs}ms` : "-"}</td>
                     </tr>
@@ -269,18 +321,21 @@ export default function LogsPage() {
                 Showing {pagination.totalCount === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
                 {Math.min(page * pageSize, pagination.totalCount)} of {pagination.totalCount.toLocaleString()} logs
               </span>
-              <div className="per-page-wrap">
-                <span className="text-muted">Per page:</span>
-                <select suppressHydrationWarning
-                  className="per-page-select"
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                >
-                  <option value="10">10</option>
-                  <option value="15">15</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                </select>
+              <div className="per-page-wrap flex items-center gap-2">
+                <span className="text-muted text-xs">Per page:</span>
+                <CustomDropdown
+                  size="sm"
+                  value={String(pageSize)}
+                  onChange={(val) => setPageSize(Number(val))}
+                  options={[
+                    { value: "10", label: "10" },
+                    { value: "15", label: "15" },
+                    { value: "25", label: "25" },
+                    { value: "50", label: "50" },
+                  ]}
+                  minWidth={72}
+                  align="right"
+                />
               </div>
             </div>
 

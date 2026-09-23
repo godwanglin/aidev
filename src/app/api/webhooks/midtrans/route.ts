@@ -52,34 +52,9 @@ export async function POST(req: NextRequest) {
       transactionStatus === "settlement";
 
     if (isSuccess) {
-      const descNote = order.discountPct > 0 ? ` (${order.discountPct}% Discount Applied)` : "";
-
-      await prisma.$transaction([
-        prisma.order.update({
-          where: { id: order.id },
-          data: {
-            status: "PAID",
-            paidAt: new Date(),
-          },
-        }),
-        prisma.user.update({
-          where: { id: order.userId },
-          data: {
-            tokenBalance: { increment: order.tokenAmount },
-          },
-        }),
-        prisma.tokenTopup.create({
-          data: {
-            userId: order.userId,
-            amount: order.tokenAmount,
-            priceIdr: order.priceIdr,
-            method: paymentType ? paymentType.toUpperCase() : order.method,
-            description: `Token Purchase via Midtrans (${(Number(order.tokenAmount) / 1_000_000).toFixed(1)}M Tokens)${descNote}`,
-          },
-        }),
-      ]);
-
-      return NextResponse.json({ success: true, message: "Payment settled and token balance credited" });
+      const { settleOrder } = await import("@/lib/orders");
+      await settleOrder(orderId, "MIDTRANS", paymentType);
+      return NextResponse.json({ success: true, message: "Payment settled and credits/subscription activated" });
     }
 
     if (transactionStatus === "cancel" || transactionStatus === "deny" || transactionStatus === "expire") {

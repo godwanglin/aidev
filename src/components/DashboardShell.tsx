@@ -21,6 +21,15 @@ import {
   ShieldCheck,
   AlertTriangle,
   LifeBuoy,
+  Network,
+  Activity,
+  Gauge,
+  Layers,
+  Crown,
+  Coins,
+  Terminal,
+  Users,
+  Receipt,
 } from "lucide-react";
 
 const searchableItems = [
@@ -28,7 +37,7 @@ const searchableItems = [
   { title: "API Keys Management", category: "Navigation", href: "/keys", keywords: "api keys token secrets generate revoke 30 rpm" },
   { title: "Logs & Usage History", category: "Navigation", href: "/logs", keywords: "logs usage history requests latency latency status errors" },
   { title: "AI Models & Pricing", category: "Navigation", href: "/models", keywords: "models pricing cost tokens gpt-5.2 gpt-5.5 claude opus sonnet" },
-  { title: "Token Billing & Top-Up", category: "Navigation", href: "/billing", keywords: "billing token balance buy payment qris virtual account invoice" },
+  { title: "Subscription & Billing", category: "Navigation", href: "/billing", keywords: "billing token balance credits buy payment qris virtual account invoice subscription plus pro ultra" },
   { title: "Account Settings", category: "Navigation", href: "/settings", keywords: "settings profile email password security" },
   { title: "GPT-5.2 Core Model", category: "AI Models", href: "/models", keywords: "gpt-5.2 openai 128k prompt cost" },
   { title: "GPT-5.5 Ultra Model", category: "AI Models", href: "/models", keywords: "gpt-5.5 openai 256k ultra" },
@@ -38,6 +47,14 @@ const searchableItems = [
   { title: "Claude 5 Sonnet Model", category: "AI Models", href: "/models", keywords: "claude-sonet-5 sonnet anthropic 200k" },
   { title: "Endpoint /v1/chat/completions", category: "Endpoints", href: "/logs?filter=/v1/chat/completions", keywords: "chat completions stream proxy endpoint" },
   { title: "Endpoint /v1/models", category: "Endpoints", href: "/logs?filter=/v1/models", keywords: "models list api" },
+  { title: "Admin Overview Dashboard", category: "Admin", href: "/admin", keywords: "admin overview dashboard providers health upstream" },
+  { title: "Provider Connections", category: "Admin", href: "/admin/providers", keywords: "providers connections openai anthropic google openrouter accounts" },
+  { title: "Subscriptions & Access Matrix", category: "Admin", href: "/admin/subscriptions", keywords: "admin subscriptions tiers matrix access models free plus pro ultra limits" },
+  { title: "Realtime Upstream Usage", category: "Admin", href: "/admin/usage", keywords: "realtime usage upstream sse stream live tokens" },
+  { title: "Admin Console Logs", category: "Admin", href: "/admin/logs", keywords: "console logs admin stream terminal live fallback token refresh" },
+  { title: "Promo Discounts Control", category: "Admin", href: "/admin/discounts", keywords: "promo discounts flash sale loyalty first topup" },
+  { title: "Quota Tracker", category: "Admin", href: "/admin/quota", keywords: "quota tracker limits api usage remaining reset countdown balance" },
+  { title: "Combo Models & Auto-Rotate", category: "Admin", href: "/admin/combos", keywords: "combo models auto-rotate fallback round-robin tiered failover multi-account" },
 ];
 
 export default function DashboardShell({ children }: { children: ReactNode }) {
@@ -84,8 +101,11 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     ...searchableItems,
     ...(isAdmin
       ? [
-          { title: "Admin Discount Control", category: "Admin", href: "/admin", keywords: "admin discounts flash sale promo loyalty" },
+          { title: "Admin User Management", category: "Admin", href: "/admin/users", keywords: "admin users accounts daftar user tier credits inject balance pelanggan" },
+          { title: "Admin Transaksi & Order", category: "Admin", href: "/admin/orders", keywords: "admin orders transactions transaksi pembayaran approve manual bayar pesanan qris va" },
+          { title: "Admin Discount Control", category: "Admin", href: "/admin/discounts", keywords: "admin discounts flash sale promo loyalty" },
           { title: "Admin Models Management", category: "Admin", href: "/admin/models", keywords: "admin models crud add edit delete pricing" },
+          { title: "Combo Models & Auto-Rotate", category: "Admin", href: "/admin/combos", keywords: "admin combo models auto rotate fallback round robin tiered failover" },
         ]
       : []),
   ];
@@ -121,29 +141,38 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     { label: "API Keys", href: "/keys", icon: KeyRound },
     { label: "Logs & Usage", href: "/logs", icon: ScrollText },
     { label: "Models & Pricing", href: "/models", icon: Boxes },
-    { label: "Token Billing", href: "/billing", icon: CreditCard },
+    { label: "Subscription & Billing", href: "/billing", icon: CreditCard },
     { label: "Settings", href: "/settings", icon: Settings },
   ];
 
   const adminNavItems = [
-    { label: "Promo Discounts", href: "/admin", icon: Flame },
-    { label: "Manage AI Models", href: "/admin/models", icon: Boxes },
+    { label: "Admin Overview", href: "/admin", icon: LayoutDashboard },
+    { label: "Daftar Pengguna", href: "/admin/users", icon: Users },
+    { label: "Transaksi & Order", href: "/admin/orders", icon: Receipt },
+    { label: "Subscriptions", href: "/admin/subscriptions", icon: Crown },
+    { label: "Providers", href: "/admin/providers", icon: Network },
+    { label: "Quota Tracker", href: "/admin/quota", icon: Gauge },
+    { label: "Realtime Usage", href: "/admin/usage", icon: Activity },
+    { label: "Console Logs", href: "/admin/logs", icon: Terminal },
+    { label: "AI Models", href: "/admin/models", icon: Boxes },
+    { label: "Combo Models", href: "/admin/combos", icon: Layers },
+    { label: "Promo Discounts", href: "/admin/discounts", icon: Flame },
     { label: "Support Tickets", href: "/admin/tickets", icon: LifeBuoy },
     { label: "Payment Gateway", href: "/admin/payment", icon: CreditCard },
   ];
 
   return (
     <div className="shell">
-      <aside className="sidebar flex flex-col justify-between">
-        <div>
-          <div className="brand">
-            <img src="/logo.png" alt="Aidev Gateway Logo" className="brand-logo-img" />
-            <div className="brand-text">
-              <strong>Aidev Gateway</strong>
-              <small>High-Performance AI Proxy</small>
-            </div>
+      <aside className="sidebar">
+        <div className="brand">
+          <img src="/logo.png" alt="Aidev Gateway Logo" className="brand-logo-img" />
+          <div className="brand-text">
+            <strong>Aidev Gateway</strong>
+            <small>High-Performance AI Proxy</small>
           </div>
+        </div>
 
+        <div className="sidebar-nav-container">
           <nav>
             {/* General User Nav */}
             <div className="space-y-0.5">
@@ -178,14 +207,16 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                 </div>
                 <div className="space-y-0.5">
                   {adminNavItems.map(({ label, href, icon: Icon }) => {
-                    const isActive = pathname === href;
+                    const isActive =
+                      pathname === href ||
+                      (href !== "/admin" && pathname.startsWith(href + "/"));
                     return (
                       <Link
                         className={"nav-item admin-nav-item " + (isActive ? "active" : "")}
                         href={href}
                         key={label}
                       >
-                        <Icon className="nav-icon text-amber-500" size={14} strokeWidth={1.5} />
+                        <Icon className="nav-icon" size={15} strokeWidth={1.5} />
                         <span>{label}</span>
                       </Link>
                     );
@@ -233,7 +264,9 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                 : pathname === "/models"
                 ? "Models & Pricing"
                 : pathname === "/billing"
-                ? "Token Billing"
+                ? "Subscription & Billing"
+                : pathname === "/admin/subscriptions"
+                ? "Subscriptions & Access"
                 : pathname === "/docs"
                 ? "Documentation"
                 : pathname === "/support"
@@ -241,11 +274,25 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                 : pathname === "/changelog"
                 ? "Changelog"
                 : pathname === "/admin"
-                ? "Admin Discounts Control"
+                ? "Admin Overview"
+                : pathname === "/admin/quota"
+                ? "Quota Tracker"
                 : pathname === "/admin/models"
                 ? "Admin Models Management"
                 : pathname === "/settings"
                 ? "Account Settings"
+                : pathname.startsWith("/admin/providers")
+                ? "Provider Connections"
+                : pathname === "/admin/usage"
+                ? "Realtime Upstream Usage"
+                : pathname === "/admin/logs"
+                ? "Admin Console Logs"
+                : pathname === "/admin/discounts"
+                ? "Promo Discounts"
+                : pathname === "/admin/combos"
+                ? "Combo Models & Auto-Rotate"
+                : pathname === "/admin/users"
+                ? "Daftar Pengguna"
                 : "Overview"}
             </span>
           </div>
@@ -314,6 +361,34 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             <Link href="/changelog">Changelog</Link>
           </div>
           <div className="top-actions">
+            {currentUser && (
+              <Link
+                href="/billing"
+                className="topbar-credit-pill"
+                title={`Saldo: ${Number(currentUser.creditBalance ?? 0).toLocaleString("id-ID")} Credits | Tier: ${currentUser.subscriptionTier || "FREE"} (Klik untuk kelola billing)`}
+              >
+                <Coins size={13} className="topbar-credit-icon" />
+                <span className="topbar-credit-val">
+                  {Number(currentUser.creditBalance ?? 0).toLocaleString("id-ID")}
+                  <span className="topbar-credit-unit">CR</span>
+                </span>
+                <span className="topbar-credit-divider" />
+                <span
+                  className={`topbar-tier-tag ${
+                    currentUser.subscriptionTier === "ULTRA"
+                      ? "tier-ultra"
+                      : currentUser.subscriptionTier === "PRO"
+                      ? "tier-pro"
+                      : currentUser.subscriptionTier === "PLUS"
+                      ? "tier-plus"
+                      : "tier-free"
+                  }`}
+                >
+                  {currentUser.subscriptionTier || "FREE"}
+                </span>
+              </Link>
+            )}
+
             {isAdmin && (
               <Link
                 href="/admin"
@@ -335,23 +410,21 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        {/* Low Token Warning Banner */}
-        {currentUser && Number(currentUser.tokenBalance) <= 500000 && (
+        {/* Low Balance Warning Banner */}
+        {currentUser && (Number(currentUser.creditBalance ?? 0) <= 20000 && Number(currentUser.tokenBalance ?? 0) <= 500000) && (
           <div className="low-token-banner">
             <div className="flex items-center gap-2">
               <AlertTriangle size={15} className="text-amber-500 shrink-0" />
               <span className="text-xs">
-                <strong>Peringatan Kuota Menipis:</strong> Sisa saldo token Anda saat ini adalah{" "}
+                <strong>Peringatan Kuota Menipis:</strong> Sisa saldo kredit Anda saat ini adalah{" "}
                 <span className="mono font-semibold">
-                  {Number(currentUser.tokenBalance) < 0
-                    ? `-${Math.abs(Number(currentUser.tokenBalance)).toLocaleString()} Tokens`
-                    : `${Number(currentUser.tokenBalance).toLocaleString()} Tokens`}
+                  {Number(currentUser.creditBalance ?? 0).toLocaleString()} Credits
                 </span>
-                . Segera lakukan top up agar layanan AI tidak terputus.
+                . Segera lakukan top-up ketengan atau upgrade paket langganan agar layanan AI tidak terputus.
               </span>
             </div>
             <Link href="/billing" className="low-token-btn">
-              <span>Top Up Sekarang</span>
+              <span>Top Up / Upgrade</span>
               <ArrowRight size={12} />
             </Link>
           </div>

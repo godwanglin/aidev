@@ -14,7 +14,9 @@ import {
   ChevronRight,
   RefreshCw,
   Sparkles,
+  Search,
 } from "lucide-react";
+import CustomDropdown from "@/components/CustomDropdown";
 
 interface ApiKeyItem {
   id: string;
@@ -45,6 +47,7 @@ export default function KeysPage() {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [filter, setFilter] = useState("");
 
   async function fetchKeys(targetPage = page) {
     setLoading(true);
@@ -125,6 +128,27 @@ export default function KeysPage() {
           </button>
         </PageHead>
 
+        {/* Search Toolbar */}
+        <div className="toolbar">
+          <div className="toolbar-search">
+            <Search size={13} strokeWidth={1.5} />
+            <input
+              suppressHydrationWarning
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search API keys by name or prefix..."
+            />
+          </div>
+          {filter && (
+            <button
+              className="control btn-inline text-muted"
+              onClick={() => setFilter("")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         <article className="panel logs">
           <div className="logs-wrap">
             <table className="table">
@@ -147,14 +171,26 @@ export default function KeysPage() {
                       Loading API keys...
                     </td>
                   </tr>
-                ) : keys.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-4">
-                      No API keys found. Click above to generate one.
-                    </td>
-                  </tr>
-                ) : (
-                  keys.map((k) => (
+                ) : (() => {
+                  const filtered = keys.filter((k) => {
+                    if (!filter.trim()) return true;
+                    const q = filter.toLowerCase().trim();
+                    return (k.name && k.name.toLowerCase().includes(q)) || k.prefix.toLowerCase().includes(q);
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={8} className="text-center py-4 text-muted">
+                          {keys.length === 0
+                            ? "No API keys found. Click above to generate one."
+                            : "No API keys match your search filter."}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return filtered.map((k) => (
                     <tr key={k.id}>
                       <td className="cell-project">
                         <span className="project-icon">
@@ -196,8 +232,8 @@ export default function KeysPage() {
                         )}
                       </td>
                     </tr>
-                  ))
-                )}
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
@@ -208,21 +244,23 @@ export default function KeysPage() {
                 Showing {pagination.totalCount === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
                 {Math.min(page * pageSize, pagination.totalCount)} of {pagination.totalCount} keys
               </span>
-              <div className="per-page-wrap">
-                <span className="text-muted">Per page:</span>
-                <select
-                  suppressHydrationWarning
-                  className="per-page-select"
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
+              <div className="per-page-wrap flex items-center gap-2">
+                <span className="text-muted text-xs">Per page:</span>
+                <CustomDropdown
+                  size="sm"
+                  value={String(pageSize)}
+                  onChange={(val) => {
+                    setPageSize(Number(val));
                     setPage(1);
                   }}
-                >
-                  <option value="5">5</option>
-                  <option value="10">10</option>
-                  <option value="20">20</option>
-                </select>
+                  options={[
+                    { value: "5", label: "5" },
+                    { value: "10", label: "10" },
+                    { value: "20", label: "20" },
+                  ]}
+                  minWidth={65}
+                  width={65}
+                />
               </div>
             </div>
 

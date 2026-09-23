@@ -18,6 +18,27 @@ interface LoginFormProps {
   };
 }
 
+function formatUserFriendlyError(errMsg: string | undefined): string {
+  if (!errMsg) return "Autentikasi gagal. Silakan periksa email dan password Anda.";
+  const lower = errMsg.toLowerCase();
+  // Filter out internal code leaks / stack traces / raw query dumps
+  if (
+    lower.includes("prisma") ||
+    lower.includes("invocation") ||
+    lower.includes("unknown argument") ||
+    lower.includes("syntaxerror") ||
+    lower.includes("typeerror") ||
+    lower.includes("database") ||
+    lower.includes("sqlite") ||
+    lower.includes("at ") ||
+    lower.includes("select ") ||
+    lower.includes("where:")
+  ) {
+    return "Terjadi kendala pada server internal. Silakan coba beberapa saat lagi.";
+  }
+  return errMsg;
+}
+
 export default function LoginForm({ initialCaptcha }: LoginFormProps) {
   const router = useRouter();
   const [isRegister, setIsRegister] = useState(false);
@@ -70,16 +91,16 @@ export default function LoginForm({ initialCaptcha }: LoginFormProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "Authentication failed");
+        setError(formatUserFriendlyError(json.error));
         if (isRegister) reloadCaptcha();
       } else {
         router.push("/");
         router.refresh();
       }
     } catch {
-      setError("Network error. Please try again.");
+      setError("Gagal terhubung ke server. Silakan periksa koneksi Anda.");
       if (isRegister) reloadCaptcha();
     }
     setLoading(false);
@@ -143,13 +164,14 @@ export default function LoginForm({ initialCaptcha }: LoginFormProps) {
             )}
 
             <div className="form-group">
-              <label>Email Address</label>
+              <label>Email or Username</label>
               <div className="input-icon-wrap">
                 <Mail size={13} className="input-icon" />
                 <input suppressHydrationWarning
-                  type="email"
+                  type="text"
+                  autoComplete="username"
                   className="control w-full pl-7"
-                  placeholder="admin@devportal.local"
+                  placeholder="admin@devportal.local atau admin"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required

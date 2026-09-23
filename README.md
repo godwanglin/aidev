@@ -1,6 +1,6 @@
 # AI Gateway & Proxy Platform (Next.js + Prisma + MySQL)
 
-Platform AI Gateway berkinerja tinggi sebagai proxy aman ke upstream provider (`https://9rt.topupin.store/v1`).
+Platform AI Gateway berkinerja tinggi sebagai proxy aman dan load balancer multi-provider AI (OpenAI, Anthropic, Gemini, Codex, Antigravity, dll).
 
 ## Fitur Utama
 1. **Internal API Key Management**:
@@ -17,9 +17,9 @@ Platform AI Gateway berkinerja tinggi sebagai proxy aman ke upstream provider (`
 
 ## Environment Variables (.env)
 ```env
-DATABASE_URL="mysql://root:Aiden2209@localhost:3306/aigateway"
-UPSTREAM_BASE_URL="https://9rt.topupin.store/v1"
-UPSTREAM_API_KEY="sk-8da3726fc4510e7e-nyds8m-18bf1594"
+DATABASE_URL="mysql://root:password@localhost:3306/aigateway"
+# UPSTREAM_BASE_URL=""
+# UPSTREAM_API_KEY=""
 INTERNAL_KEY_PREFIX="sk-int-"
 PORT=3000
 ```

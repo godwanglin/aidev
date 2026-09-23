@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 
@@ -10,7 +10,7 @@ async function verifyAdmin() {
   return user;
 }
 
-// GET all tickets for Admin
+// GET all tickets for Admin with full message threads
 export async function GET(req: NextRequest) {
   try {
     const admin = await verifyAdmin();
@@ -29,10 +29,13 @@ export async function GET(req: NextRequest) {
     const [tickets, setting] = await Promise.all([
       prisma.supportTicket.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: { updatedAt: "desc" },
         include: {
           user: {
             select: { id: true, name: true, email: true },
+          },
+          messages: {
+            orderBy: { createdAt: "asc" },
           },
         },
       }),
@@ -61,9 +64,9 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { ticketId, status, response, discordWebhookUrl } = body;
+    const { ticketId, status, response, message, discordWebhookUrl } = body;
 
-    // Update Discord Webhook Setting if provided
+    // 1. Update Discord Webhook Setting if provided
     if (discordWebhookUrl !== undefined) {
       await prisma.systemSetting.upsert({
         where: { id: "global_config" },
@@ -72,17 +75,36 @@ export async function PUT(req: NextRequest) {
       });
     }
 
-    // Update Ticket if ticketId provided
+    // 2. Update Ticket if ticketId provided
     let updatedTicket = null;
     if (ticketId) {
+      const replyContent = message || response;
+
+      // Add new admin message to conversation thread
+      if (replyContent && replyContent.trim()) {
+        await prisma.ticketMessage.create({
+          data: {
+            ticketId,
+            senderId: admin.id,
+            senderRole: "ADMIN",
+            senderName: admin.name || "System Admin",
+            message: replyContent.trim(),
+          },
+        });
+      }
+
       updatedTicket = await prisma.supportTicket.update({
         where: { id: ticketId },
         data: {
           ...(status ? { status } : {}),
-          ...(response !== undefined ? { response } : {}),
+          response: replyContent ? replyContent.trim() : undefined, // Maintain backwards compatibility
+          updatedAt: new Date(),
         },
         include: {
           user: { select: { email: true, name: true } },
+          messages: {
+            orderBy: { createdAt: "asc" },
+          },
         },
       });
     }

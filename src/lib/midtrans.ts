@@ -172,3 +172,26 @@ export async function createDirectVaCharge(params: {
     transactionStatus: data.transaction_status || "pending",
   };
 }
+
+// 3. Query Transaction Status from Midtrans API
+export async function getMidtransTransactionStatus(orderId: string) {
+  const config = await getMidtransConfig();
+  if (!config.serverKey) return null;
+
+  try {
+    const res = await fetch(`${config.coreBase}/${orderId}/status`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: config.authHeader,
+      },
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to query Midtrans transaction status:", err);
+    return null;
+  }
+}
+

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, createSessionToken } from "@/lib/session";
-import { verifyCaptchaToken } from "../captcha/route";
+import { verifyCaptchaToken } from "@/lib/captcha";
 
 // In-memory registration rate limiter by IP
 const regAttemptsByIp = new Map<string, number[]>();
@@ -105,6 +105,10 @@ export async function POST(req: NextRequest) {
 
     return res;
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("[Auth Register Error]:", err);
+    return NextResponse.json(
+      { error: "Terjadi kesalahan saat memproses pendaftaran. Silakan coba beberapa saat lagi." },
+      { status: 500 }
+    );
   }
 }

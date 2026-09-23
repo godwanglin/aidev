@@ -24,14 +24,20 @@ pnpm-debug.log*
 temp_*
 *.tmp
 
-# Aidev CLI nested node_modules / bun cache / local data
-aidev-cli/node_modules/
-aidev-cli/.bun/
-aidev-cli/.local/
-aidev-cli/**/.turbo/
-aidev-cli/**/dist/
-aidev-cli/**/build/
+# Ignored subprojects
+aidev-cli/
+coding-agent/
 
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Binaries & executables
+*.exe
+cloudflared.exe
+
+# Build cache & artifacts
+*.tsbuildinfo
+scripts/dist/
+scripts/9router_ref/
+

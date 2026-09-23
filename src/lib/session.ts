@@ -8,9 +8,12 @@ export function hashPassword(password: string): string {
   return crypto.createHash("sha256").update(password.trim()).digest("hex");
 }
 
+const SESSION_SECRET = process.env.SESSION_SECRET || "aidev_prod_secure_hmac_sign_gateway_2026";
+const MAX_SESSION_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 export function createSessionToken(userId: string): string {
   const data = `${userId}:${Date.now()}`;
-  const sig = crypto.createHmac("sha256", "secret_gateway_sign").update(data).digest("hex");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
   return Buffer.from(`${data}:${sig}`).toString("base64");
 }
 
@@ -19,7 +22,14 @@ export function parseSessionToken(token: string): string | null {
     const raw = Buffer.from(token, "base64").toString("utf-8");
     const [userId, ts, sig] = raw.split(":");
     if (!userId || !ts || !sig) return null;
-    const expectedSig = crypto.createHmac("sha256", "secret_gateway_sign").update(`${userId}:${ts}`).digest("hex");
+    
+    // Check expiration (30 days max)
+    const tokenTime = Number(ts);
+    if (isNaN(tokenTime) || Date.now() - tokenTime > MAX_SESSION_AGE_MS || tokenTime > Date.now() + 60000) {
+      return null;
+    }
+
+    const expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(`${userId}:${ts}`).digest("hex");
     if (sig !== expectedSig) return null;
     return userId;
   } catch {
@@ -37,6 +47,15 @@ export async function getCurrentUser() {
 
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, tokenBalance: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      tokenBalance: true,
+      creditBalance: true,
+      subscriptionTier: true,
+      subscriptionExpiresAt: true,
+    },
   });
 }

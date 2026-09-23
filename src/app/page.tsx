@@ -183,56 +183,58 @@ export default function OverviewPage() {
                 <ArrowUpRight size={12} strokeWidth={1.75} />
               </Link>
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>TIME</th>
-                  <th>KEY</th>
-                  <th>MODEL</th>
-                  <th>ENDPOINT</th>
-                  <th>STATUS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
                   <tr>
-                    <td colSpan={5} className="text-center py-4">
-                      Loading real-time logs...
-                    </td>
+                    <th>TIME</th>
+                    <th>KEY</th>
+                    <th>MODEL</th>
+                    <th>ENDPOINT</th>
+                    <th>STATUS</th>
                   </tr>
-                ) : data.recentLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-4">
-                      No requests logged yet for this period ({range}). Send a request to
-                      /v1/chat/completions to see live logs.
-                    </td>
-                  </tr>
-                ) : (
-                  data.recentLogs.map((row: any) => (
-                    <tr key={row.id}>
-                      <td className="mono">
-                        {new Date(row.createdAt).toLocaleTimeString()}
-                      </td>
-                      <td className="cell-strong">
-                        {row.apiKey?.name || row.apiKey?.prefix}
-                      </td>
-                      <td className="mono font-medium text-blue">
-                        {row.model || "-"}
-                      </td>
-                      <td className="mono">{row.path}</td>
-                      <td>
-                        <Status
-                          value={
-                            row.statusCode.toString() +
-                            (row.statusCode === 200 ? " OK" : "")
-                          }
-                        />
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-4">
+                        Loading real-time logs...
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : data.recentLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-4">
+                        No requests logged yet for this period ({range}). Send a request to
+                        /v1/chat/completions to see live logs.
+                      </td>
+                    </tr>
+                  ) : (
+                    data.recentLogs.map((row: any) => (
+                      <tr key={row.id}>
+                        <td className="mono">
+                          {new Date(row.createdAt).toLocaleTimeString()}
+                        </td>
+                        <td className="cell-strong">
+                          {row.apiKey?.name || row.apiKey?.prefix}
+                        </td>
+                        <td className="mono font-medium text-blue">
+                          {row.model || "-"}
+                        </td>
+                        <td className="mono">{row.path}</td>
+                        <td>
+                          <Status
+                            value={
+                              row.statusCode.toString() +
+                              (row.statusCode === 200 ? " OK" : "")
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </article>
           <article className="panel">
             <div className="panel-title">

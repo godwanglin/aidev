@@ -1,301 +1,361 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import {
-  Tag,
-  Clock,
+  RefreshCw,
+  Network,
+  Activity,
+  LifeBuoy,
   Zap,
-  Save,
+  ArrowUpRight,
   CheckCircle2,
-  AlertCircle,
-  Percent,
+  AlertTriangle,
+  XCircle,
   Flame,
-  UserCheck,
+  Plus,
+  MessageSquare,
+  TrendingUp,
 } from "lucide-react";
 
-export default function AdminDiscountPage() {
-  const [config, setConfig] = useState<any>(null);
+interface OverviewData {
+  providers: {
+    total: number;
+    healthy: number;
+    rateLimited: number;
+    exhausted: number;
+    byProvider: { provider: string; count: number; healthy: number }[];
+  };
+  upstream: {
+    totalRequests24h: number;
+    totalTokensIn24h: number;
+    totalTokensOut24h: number;
+    healthScore: number;
+    recentEvents: {
+      id: string;
+      provider: string;
+      model: string;
+      statusCode: number;
+      isFailover: boolean;
+      latencyMs: number;
+      createdAt: string;
+    }[];
+  };
+  tickets: {
+    open: number;
+    inProgress: number;
+    total: number;
+  };
+}
+
+const PROVIDER_COLORS: Record<string, string> = {
+  OPENAI: "#10a37f",
+  ANTHROPIC: "#d97706",
+  GOOGLE: "#4285f4",
+  OPENROUTER: "#8b5cf6",
+  OPENCODE: "#06b6d4",
+  CUSTOM: "#64748b",
+};
+
+export default function AdminOverviewPage() {
+  const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
 
-  // Form states
-  const [promoActive, setPromoActive] = useState(false);
-  const [promoPct, setPromoPct] = useState(15);
-  const [promoHours, setPromoHours] = useState(24);
-
-  const [firstTopupActive, setFirstTopupActive] = useState(true);
-  const [firstTopupPct, setFirstTopupPct] = useState(20);
-
-  const [highUsageActive, setHighUsageActive] = useState(true);
-  const [highUsagePct, setHighUsagePct] = useState(10);
-  const [highUsageDays, setHighUsageDays] = useState(3);
-
-  async function fetchConfig() {
+  async function fetchOverview() {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/discounts");
+      const res = await fetch("/api/admin/overview");
       const json = await res.json();
-      if (json.config) {
-        setConfig(json.config);
-        setPromoActive(json.config.promoDiscountActive);
-        setPromoPct(json.config.promoDiscountPct || 15);
-        setFirstTopupActive(json.config.firstTopupDiscountActive);
-        setFirstTopupPct(json.config.firstTopupDiscountPct || 20);
-        setHighUsageActive(json.config.highUsageDiscountActive);
-        setHighUsagePct(json.config.highUsageDiscountPct || 10);
-        setHighUsageDays(json.config.highUsageDays || 3);
-      } else if (json.error) {
-        setErrorMsg(json.error);
+      if (json.success) {
+        setData(json.data);
       }
-    } catch {
-      setErrorMsg("Failed to connect to admin API.");
-    }
+    } catch {}
     setLoading(false);
   }
 
   useEffect(() => {
-    fetchConfig();
+    fetchOverview();
   }, []);
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      const res = await fetch("/api/admin/discounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          promoDiscountActive: promoActive,
-          promoDiscountPct: Number(promoPct),
-          promoDurationHours: Number(promoHours),
-          firstTopupDiscountActive: firstTopupActive,
-          firstTopupDiscountPct: Number(firstTopupPct),
-          highUsageDiscountActive: highUsageActive,
-          highUsageDiscountPct: Number(highUsagePct),
-          highUsageDays: Number(highUsageDays),
-        }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setSuccessMsg("Discount strategies saved & applied globally!");
-        setTimeout(() => setSuccessMsg(""), 3000);
-        fetchConfig();
-      } else {
-        setErrorMsg(json.error || "Failed to update discounts.");
-      }
-    } catch {
-      setErrorMsg("Network error.");
-    }
-    setSaving(false);
-  }
+  const providers = data?.providers || { total: 0, healthy: 0, rateLimited: 0, exhausted: 0, byProvider: [] };
+  const upstream = data?.upstream || { totalRequests24h: 0, totalTokensIn24h: 0, totalTokensOut24h: 0, healthScore: 100, recentEvents: [] };
+  const tickets = data?.tickets || { open: 0, inProgress: 0, total: 0 };
+
+  const healthColor = upstream.healthScore >= 90 ? "#059669" : upstream.healthScore >= 70 ? "#d97706" : "#dc2626";
 
   return (
     <DashboardShell>
       <div className="content">
         <PageHead
-          title="Admin Discount Master Control"
-          subtitle="Configure promotional flash sales, newcomer discounts, and high-usage loyalty rewards."
-        />
+          title="Admin Command Center"
+          subtitle="Multi-provider gateway status, upstream health, and operational overview."
+        >
+          <button className="control btn-icon-only" aria-label="Refresh" onClick={fetchOverview}>
+            <RefreshCw size={13} strokeWidth={1.5} />
+          </button>
+        </PageHead>
 
-        {successMsg && (
-          <div className="banner-alert mb-3">
-            <CheckCircle2 size={16} className="text-green" />
-            <div className="banner-text">
-              <strong>Success!</strong>
-              <p>{successMsg}</p>
+        {/* KPI Metric Cards */}
+        <div className="cards">
+          <article className="card metric">
+            <div className="metric-header">
+              <label>CONNECTED PROVIDERS</label>
             </div>
-          </div>
-        )}
-
-        {errorMsg && (
-          <div className="login-error mb-3 flex items-center gap-2">
-            <AlertCircle size={14} />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="panel p-6 text-center text-muted">Loading discount settings...</div>
-        ) : (
-          <form onSubmit={handleSave} className="settings-grid">
-            {/* Strategy 1: First-Time Top-up Discount */}
-            <article className="panel">
-              <div className="panel-title">
-                <h2>
-                  <UserCheck size={14} className="text-blue shrink-0" />
-                  <span>1. Newcomer First Top-Up Discount (Auto-Applied)</span>
-                </h2>
-                <label className="switch-label">
-                  <input suppressHydrationWarning
-                    type="checkbox"
-                    checked={firstTopupActive}
-                    onChange={(e) => setFirstTopupActive(e.target.checked)}
-                  />
-                  <span>{firstTopupActive ? "Active" : "Disabled"}</span>
-                </label>
-              </div>
-              <div className="settings-body">
-                <p className="text-xs text-muted mb-3">
-                  Automatically discounts user token purchase if they have 0 previous top-up history.
-                </p>
-                <div className="setting-row">
-                  <div>
-                    <strong>Discount Rate (%)</strong>
-                    <p>Applied exclusively on user first invoice.</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input suppressHydrationWarning
-                      type="number"
-                      className="control"
-                      style={{ width: "90px" }}
-                      value={firstTopupPct}
-                      onChange={(e) => setFirstTopupPct(Number(e.target.value))}
-                      min="1"
-                      max="90"
-                    />
-                    <span className="text-xs font-semibold">%</span>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            {/* Strategy 2: Admin Flash Sale Promo */}
-            <article className="panel">
-              <div className="panel-title">
-                <h2>
-                  <Flame size={14} className="text-red shrink-0" />
-                  <span>2. Global Flash Sale Promo (Max 1x Use per Period)</span>
-                </h2>
-                <label className="switch-label">
-                  <input suppressHydrationWarning
-                    type="checkbox"
-                    checked={promoActive}
-                    onChange={(e) => setPromoActive(e.target.checked)}
-                  />
-                  <span>{promoActive ? "Active" : "Disabled"}</span>
-                </label>
-              </div>
-              <div className="settings-body">
-                <p className="text-xs text-muted mb-3">
-                  Admin can enable custom discount rate with an automatic expiration countdown.
-                </p>
-                <div className="setting-row">
-                  <div>
-                    <strong>Promo Discount Rate (%)</strong>
-                    <p>Percentage off on all token packages.</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input suppressHydrationWarning
-                      type="number"
-                      className="control"
-                      style={{ width: "90px" }}
-                      value={promoPct}
-                      onChange={(e) => setPromoPct(Number(e.target.value))}
-                      min="1"
-                      max="90"
-                    />
-                    <span className="text-xs font-semibold">%</span>
-                  </div>
-                </div>
-
-                <div className="setting-row">
-                  <div>
-                    <strong>Duration (Hours from now)</strong>
-                    <p>
-                      {config?.promoExpiresAt && new Date(config.promoExpiresAt) > new Date()
-                        ? `Currently active until: ${new Date(config.promoExpiresAt).toLocaleString()}`
-                        : "Promo inactive"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input suppressHydrationWarning
-                      type="number"
-                      className="control"
-                      style={{ width: "90px" }}
-                      value={promoHours}
-                      onChange={(e) => setPromoHours(Number(e.target.value))}
-                      min="1"
-                      max="720"
-                    />
-                    <span className="text-xs font-semibold">Hours</span>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            {/* Strategy 3: High Token Usage Loyalty Reward */}
-            <article className="panel">
-              <div className="panel-title">
-                <h2>
-                  <Zap size={14} className="text-green shrink-0" />
-                  <span>3. Heavy Usage VIP Loyalty Reward (3-Days Reward)</span>
-                </h2>
-                <label className="switch-label">
-                  <input suppressHydrationWarning
-                    type="checkbox"
-                    checked={highUsageActive}
-                    onChange={(e) => setHighUsageActive(e.target.checked)}
-                  />
-                  <span>{highUsageActive ? "Active" : "Disabled"}</span>
-                </label>
-              </div>
-              <div className="settings-body">
-                <p className="text-xs text-muted mb-3">
-                  Accounts that heavily consume tokens get an automatic discount voucher valid for 3 days.
-                </p>
-                <div className="setting-row">
-                  <div>
-                    <strong>Loyalty Discount Rate (%)</strong>
-                    <p>Reward percentage given to heavy token users.</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input suppressHydrationWarning
-                      type="number"
-                      className="control"
-                      style={{ width: "90px" }}
-                      value={highUsagePct}
-                      onChange={(e) => setHighUsagePct(Number(e.target.value))}
-                      min="1"
-                      max="90"
-                    />
-                    <span className="text-xs font-semibold">%</span>
-                  </div>
-                </div>
-
-                <div className="setting-row">
-                  <div>
-                    <strong>Reward Validity Period (Days)</strong>
-                    <p>Default: 3 Days from reward qualification.</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input suppressHydrationWarning
-                      type="number"
-                      className="control"
-                      style={{ width: "90px" }}
-                      value={highUsageDays}
-                      onChange={(e) => setHighUsageDays(Number(e.target.value))}
-                      min="1"
-                      max="30"
-                    />
-                    <span className="text-xs font-semibold">Days</span>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <div className="flex justify-end pt-2">
-              <button type="submit" className="primary btn-inline" disabled={saving}>
-                <Save size={13} />
-                <span>{saving ? "Saving Changes..." : "Save Discount Strategy"}</span>
-              </button>
+            <div className="metric-body">
+              <strong>{providers.total}</strong>
             </div>
-          </form>
-        )}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs" style={{ color: "#059669" }}>● {providers.healthy} Healthy</span>
+              {providers.rateLimited > 0 && (
+                <span className="text-xs" style={{ color: "#d97706" }}>● {providers.rateLimited} Limited</span>
+              )}
+              {providers.exhausted > 0 && (
+                <span className="text-xs" style={{ color: "#dc2626" }}>● {providers.exhausted} Exhausted</span>
+              )}
+            </div>
+          </article>
+
+          <article className="card metric">
+            <div className="metric-header">
+              <label>UPSTREAM HEALTH (24H)</label>
+            </div>
+            <div className="metric-body">
+              <strong style={{ color: healthColor }}>{upstream.healthScore.toFixed(1)}%</strong>
+            </div>
+            <div className="flex items-center gap-1 mt-1">
+              {upstream.healthScore >= 90 ? (
+                <CheckCircle2 size={12} style={{ color: "#059669" }} />
+              ) : upstream.healthScore >= 70 ? (
+                <AlertTriangle size={12} style={{ color: "#d97706" }} />
+              ) : (
+                <XCircle size={12} style={{ color: "#dc2626" }} />
+              )}
+              <span className="text-xs text-muted">
+                {upstream.totalRequests24h.toLocaleString()} requests today
+              </span>
+            </div>
+          </article>
+
+          <article className="card metric">
+            <div className="metric-header">
+              <label>TOKEN THROUGHPUT (24H)</label>
+            </div>
+            <div className="metric-body">
+              <strong>
+                {upstream.totalTokensIn24h + upstream.totalTokensOut24h > 1000000
+                  ? ((upstream.totalTokensIn24h + upstream.totalTokensOut24h) / 1000000).toFixed(2) + "M"
+                  : (upstream.totalTokensIn24h + upstream.totalTokensOut24h).toLocaleString()}
+              </strong>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-muted">
+                In: {upstream.totalTokensIn24h.toLocaleString()}
+              </span>
+              <span className="text-xs text-muted">
+                Out: {upstream.totalTokensOut24h.toLocaleString()}
+              </span>
+            </div>
+          </article>
+
+          <article className="card metric">
+            <div className="metric-header">
+              <label>PENDING TICKETS</label>
+            </div>
+            <div className="metric-body">
+              <strong style={{ color: tickets.open + tickets.inProgress > 0 ? "#d97706" : "#059669" }}>
+                {tickets.open + tickets.inProgress}
+              </strong>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs" style={{ color: "#dc2626" }}>● {tickets.open} Open</span>
+              <span className="text-xs" style={{ color: "#d97706" }}>● {tickets.inProgress} In Progress</span>
+            </div>
+          </article>
+        </div>
+
+        <div className="bottom">
+          {/* Provider Status Quick Glance */}
+          <article className="panel">
+            <div className="panel-title">
+              <h2>
+                <Network size={14} strokeWidth={1.5} />
+                <span>Provider Status</span>
+              </h2>
+              <Link href="/admin/providers" className="link-inline">
+                <span>Manage All</span>
+                <ArrowUpRight size={12} strokeWidth={1.75} />
+              </Link>
+            </div>
+            {loading ? (
+              <div className="p-4 text-center text-muted text-xs">Loading providers...</div>
+            ) : providers.byProvider.length === 0 ? (
+              <div className="p-4 text-center">
+                <p className="text-xs text-muted mb-2">No providers connected yet.</p>
+                <Link href="/admin/providers" className="control btn-inline text-xs">
+                  <Plus size={12} />
+                  <span>Add First Provider</span>
+                </Link>
+              </div>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>PROVIDER</th>
+                    <th>CONNECTIONS</th>
+                    <th>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {providers.byProvider.map((p) => (
+                    <tr key={p.provider}>
+                      <td>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-2 h-2 rounded-full"
+                            style={{ backgroundColor: PROVIDER_COLORS[p.provider] || "#64748b" }}
+                          />
+                          <span className="font-medium">{p.provider}</span>
+                        </span>
+                      </td>
+                      <td className="mono">{p.count}</td>
+                      <td>
+                        {p.healthy === p.count ? (
+                          <span className="flex items-center gap-1 text-xs" style={{ color: "#059669" }}>
+                            <CheckCircle2 size={12} /> All Healthy
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs" style={{ color: "#d97706" }}>
+                            <AlertTriangle size={12} /> {p.healthy}/{p.count} Healthy
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </article>
+
+          {/* Quick Actions */}
+          <article className="panel">
+            <div className="panel-title">
+              <h2>Quick Actions</h2>
+            </div>
+            <div className="quick">
+              <Link href="/admin/providers" className="quick-item">
+                <div className="quick-icon">
+                  <Plus size={14} strokeWidth={1.5} />
+                </div>
+                <div>
+                  <strong>Add Provider Connection</strong>
+                  <small>Connect OpenAI, Anthropic, Google & more</small>
+                </div>
+              </Link>
+              <Link href="/admin/usage" className="quick-item">
+                <div className="quick-icon">
+                  <Activity size={14} strokeWidth={1.5} />
+                </div>
+                <div>
+                  <strong>Realtime Upstream Monitor</strong>
+                  <small>Live SSE stream of all upstream requests</small>
+                </div>
+              </Link>
+              <Link href="/admin/discounts" className="quick-item">
+                <div className="quick-icon">
+                  <Flame size={14} strokeWidth={1.5} />
+                </div>
+                <div>
+                  <strong>Configure Promos & Discounts</strong>
+                  <small>Flash sales, loyalty rewards, newcomer perks</small>
+                </div>
+              </Link>
+              <Link href="/admin/tickets" className="quick-item">
+                <div className="quick-icon">
+                  <MessageSquare size={14} strokeWidth={1.5} />
+                </div>
+                <div>
+                  <strong>Reply Support Tickets</strong>
+                  <small>{tickets.open > 0 ? `${tickets.open} ticket(s) awaiting response` : "All caught up!"}</small>
+                </div>
+              </Link>
+            </div>
+          </article>
+        </div>
+
+        {/* Recent Upstream Events */}
+        <article className="panel mt-4">
+          <div className="panel-title">
+            <h2>
+              <Activity size={14} strokeWidth={1.5} />
+              <span>Recent Upstream Events</span>
+            </h2>
+            <Link href="/admin/usage" className="link-inline">
+              <span>View Live Stream</span>
+              <ArrowUpRight size={12} strokeWidth={1.75} />
+            </Link>
+          </div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>TIME</th>
+                <th>PROVIDER</th>
+                <th>MODEL</th>
+                <th>LATENCY</th>
+                <th>STATUS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-4 text-muted text-xs">
+                    Loading upstream events...
+                  </td>
+                </tr>
+              ) : upstream.recentEvents.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-4 text-muted text-xs">
+                    No upstream events recorded yet. Connect a provider and send requests to /v1/*.
+                  </td>
+                </tr>
+              ) : (
+                upstream.recentEvents.slice(0, 10).map((ev) => (
+                  <tr key={ev.id}>
+                    <td className="mono text-xs">
+                      {new Date(ev.createdAt).toLocaleTimeString()}
+                    </td>
+                    <td>
+                      <span className="flex items-center gap-1">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full"
+                          style={{ backgroundColor: PROVIDER_COLORS[ev.provider] || "#64748b" }}
+                        />
+                        <span className="text-xs font-medium">{ev.provider}</span>
+                      </span>
+                    </td>
+                    <td className="mono text-xs font-medium" style={{ color: "#2563eb" }}>
+                      {ev.model}
+                    </td>
+                    <td className="mono text-xs">{ev.latencyMs}ms</td>
+                    <td>
+                      <span
+                        className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: ev.statusCode === 200 ? "#dcfce7" : ev.statusCode === 429 ? "#fef3c7" : "#fee2e2",
+                          color: ev.statusCode === 200 ? "#166534" : ev.statusCode === 429 ? "#92400e" : "#991b1b",
+                        }}
+                      >
+                        {ev.statusCode}
+                        {ev.isFailover && " ⚡"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </article>
       </div>
     </DashboardShell>
   );
