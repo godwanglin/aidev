@@ -169,6 +169,12 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     { label: "Payment Gateway", href: "/admin/payment", icon: CreditCard },
   ];
 
+  const helpNavItems = [
+    { label: "Dokumentasi API", href: "/docs", icon: ScrollText },
+    { label: "Bantuan & Tiket", href: "/support", icon: LifeBuoy },
+    { label: "Changelog", href: "/changelog", icon: Activity },
+  ];
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -232,6 +238,32 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                 </div>
               </div>
             )}
+
+            {/* Help & Resources Section */}
+            <div className="help-nav-section" style={{ marginTop: "12px" }}>
+              <div className="admin-divider" />
+              <div className="admin-header-label">
+                <span className="flex items-center gap-1 text-[#64748b]">
+                  <LifeBuoy size={11} className="text-blue" />
+                  <span>Bantuan & Panduan</span>
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {helpNavItems.map(({ label, href, icon: Icon }) => {
+                  const isActive = pathname === href;
+                  return (
+                    <Link
+                      className={"nav-item " + (isActive ? "active" : "")}
+                      href={href}
+                      key={label}
+                    >
+                      <Icon className="nav-icon" size={15} strokeWidth={1.5} />
+                      <span>{label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           </nav>
         </div>
 
@@ -374,11 +406,6 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             )}
           </div>
 
-          <div className="links desktop-only">
-            <Link href="/docs">Docs</Link>
-            <Link href="/support">Support</Link>
-            <Link href="/changelog">Changelog</Link>
-          </div>
           <div className="top-actions">
             {currentUser && (
               <Link
