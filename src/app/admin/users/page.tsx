@@ -1220,6 +1220,8 @@ export default function AdminUsersPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "8px",
                       padding: "10px 14px",
                       borderRadius: "8px",
                       border:
@@ -1231,7 +1233,7 @@ export default function AdminUsersPage() {
                       transition: "all 0.15s ease",
                     }}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3" style={{ flex: "1 1 200px" }}>
                       <input
                         type="radio"
                         name="targetTier"
@@ -1246,7 +1248,7 @@ export default function AdminUsersPage() {
                         </div>
                       </div>
                     </div>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", marginLeft: "auto" }}>
                       Rp 0 / bln
                     </span>
                   </label>
@@ -1263,6 +1265,8 @@ export default function AdminUsersPage() {
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
+                            flexWrap: "wrap",
+                            gap: "8px",
                             padding: "10px 14px",
                             borderRadius: "8px",
                             border: isSelected
@@ -1273,7 +1277,7 @@ export default function AdminUsersPage() {
                             transition: "all 0.15s ease",
                           }}
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3" style={{ flex: "1 1 200px" }}>
                             <input
                               type="radio"
                               name="targetTier"
@@ -1302,7 +1306,7 @@ export default function AdminUsersPage() {
                               </div>
                             </div>
                           </div>
-                          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink)" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink)", marginLeft: "auto" }}>
                             Rp {t.priceIdr.toLocaleString("id-ID")}
                           </span>
                         </label>
@@ -1401,6 +1405,8 @@ export default function AdminUsersPage() {
                 maxWidth: "520px",
                 padding: "22px",
                 borderRadius: "var(--radius-xl)",
+                maxHeight: "90vh",
+                overflowY: "auto",
               }}
             >
               {/* Header */}
