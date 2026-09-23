@@ -1,5 +1,0 @@
-{
-  "$schema": "https://aidev-cli.ai/config.json",
-  "model": "example/demo",
-  "snapshot": false
-}
