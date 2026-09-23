@@ -348,66 +348,59 @@ export default function AdminUsersPage() {
         )}
 
         {/* Top Metric Stats Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-            gap: "14px",
-            marginBottom: "20px",
-          }}
-        >
+        <div className="admin-stats-grid">
           {/* Card 1: Total Users */}
-          <div className="card" style={{ padding: "16px" }}>
-            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 500 }}>Total Pengguna</span>
-              <Users size={16} style={{ color: "var(--blue)" }} />
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 500 }}>Total Pengguna</span>
+              <Users size={16} style={{ color: "var(--blue)" }} className="shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--ink)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 700, color: "var(--ink)" }}>
               {stats.totalUsers.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               Akun terdaftar di database
             </div>
           </div>
 
           {/* Card 2: Active Subscribers */}
-          <div className="card" style={{ padding: "16px" }}>
-            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 500 }}>Pelanggan Berbayar</span>
-              <Crown size={16} style={{ color: "#8b5cf6" }} />
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 500 }}>Pelanggan Berbayar</span>
+              <Crown size={16} style={{ color: "#8b5cf6" }} className="shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "#8b5cf6" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 700, color: "#8b5cf6" }}>
               {stats.activeSubscribers.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               Tier Plus, Pro, & Ultra aktif
             </div>
           </div>
 
           {/* Card 3: Total Credits in Circulation */}
-          <div className="card" style={{ padding: "16px" }}>
-            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 500 }}>Total Kredit Beredar</span>
-              <Coins size={16} style={{ color: "var(--green)" }} />
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 500 }}>Total Kredit Beredar</span>
+              <Coins size={16} style={{ color: "var(--green)" }} className="shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--green)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 700, color: "var(--green)" }}>
               {(stats.totalCreditsInCirculation / 1_000_000).toFixed(2)}M CR
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               {stats.totalCreditsInCirculation.toLocaleString("id-ID")} CR di dompet user
             </div>
           </div>
 
           {/* Card 4: Total Admins */}
-          <div className="card" style={{ padding: "16px" }}>
-            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 500 }}>Administrator</span>
-              <ShieldCheck size={16} style={{ color: "var(--amber)" }} />
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div className="flex items-center justify-between text-muted" style={{ marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 500 }}>Administrator</span>
+              <ShieldCheck size={16} style={{ color: "var(--amber)" }} className="shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--amber)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 700, color: "var(--amber)" }}>
               {stats.totalAdmins}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               Akses kontrol penuh
             </div>
           </div>
@@ -432,6 +425,7 @@ export default function AdminUsersPage() {
               flexWrap: "wrap",
               alignItems: "center",
               gap: "10px",
+              flex: "1 1 300px",
             }}
           >
             {/* Search Input */}
@@ -443,10 +437,13 @@ export default function AdminUsersPage() {
                 border: "1px solid var(--line)",
                 borderRadius: "var(--radius-md)",
                 padding: "6px 10px",
-                width: "280px",
+                flex: "1 1 200px",
+                minWidth: "180px",
+                maxWidth: "100%",
                 gap: "8px",
               }}
             >
+
               <Search size={14} className="text-muted shrink-0" />
               <input
                 type="text"

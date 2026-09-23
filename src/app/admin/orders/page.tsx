@@ -303,24 +303,17 @@ export default function AdminOrdersPage() {
         )}
 
         {/* 4 Stat Summary Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "12px",
-            marginBottom: "20px",
-          }}
-        >
+        <div className="admin-stats-grid">
           {/* Card 1: Total Orders */}
-          <div className="card" style={{ padding: "16px 18px", borderRadius: "var(--radius-lg)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Total Transaksi</span>
-              <Receipt size={17} className="text-blue" />
+          <div className="card" style={{ padding: "14px 16px", borderRadius: "var(--radius-lg)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Total Transaksi</span>
+              <Receipt size={16} className="text-blue shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 800, color: "var(--ink)" }}>
               {stats.totalOrders.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               Semua order masuk di sistem
             </div>
           </div>
@@ -329,54 +322,55 @@ export default function AdminOrdersPage() {
           <div
             className="card"
             style={{
-              padding: "16px 18px",
+              padding: "14px 16px",
               borderRadius: "var(--radius-lg)",
               border: stats.pendingOrders > 0 ? "1px solid #fde68a" : "1px solid var(--line)",
               background: stats.pendingOrders > 0 ? "#fffbeb" : "var(--card)",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: stats.pendingOrders > 0 ? "#92400e" : "var(--muted)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 600, color: stats.pendingOrders > 0 ? "#92400e" : "var(--muted)" }}>
                 Menunggu Approval
               </span>
-              <Clock size={17} className={stats.pendingOrders > 0 ? "text-amber-500 animate-pulse" : "text-muted"} />
+              <Clock size={16} className={stats.pendingOrders > 0 ? "text-amber-500 animate-pulse shrink-0" : "text-muted shrink-0"} />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 800, color: stats.pendingOrders > 0 ? "#b45309" : "var(--ink)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 800, color: stats.pendingOrders > 0 ? "#b45309" : "var(--ink)" }}>
               {stats.pendingOrders.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: stats.pendingOrders > 0 ? "#92400e" : "var(--muted)", marginTop: "4px" }}>
-              {stats.pendingOrders > 0 ? "Perlu tindakan verifikasi admin" : "Tidak ada antrian pending"}
+            <div className="stat-sub" style={{ fontSize: "11px", color: stats.pendingOrders > 0 ? "#92400e" : "var(--muted)", marginTop: "4px" }}>
+              {stats.pendingOrders > 0 ? "Perlu verifikasi admin" : "Tidak ada antrian pending"}
             </div>
           </div>
 
           {/* Card 3: Transaksi Selesai (Paid) */}
-          <div className="card" style={{ padding: "16px 18px", borderRadius: "var(--radius-lg)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Transaksi Berhasil</span>
-              <CheckCircle2 size={17} className="text-green" />
+          <div className="card" style={{ padding: "14px 16px", borderRadius: "var(--radius-lg)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Transaksi Berhasil</span>
+              <CheckCircle2 size={16} className="text-green shrink-0" />
             </div>
-            <div style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>
+            <div className="stat-value" style={{ fontSize: "22px", fontWeight: 800, color: "var(--ink)" }}>
               {stats.paidOrders.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
               Telah disetujui & kredit terinjeksi
             </div>
           </div>
 
           {/* Card 4: Total Omset (IDR) */}
-          <div className="card" style={{ padding: "16px 18px", borderRadius: "var(--radius-lg)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Total Nilai Transaksi</span>
-              <Coins size={17} className="text-amber-500" />
+          <div className="card" style={{ padding: "14px 16px", borderRadius: "var(--radius-lg)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span className="stat-title" style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Total Omset</span>
+              <Coins size={16} className="text-amber-500 shrink-0" />
             </div>
-            <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--ink)" }}>
+            <div className="stat-value" style={{ fontSize: "20px", fontWeight: 800, color: "var(--ink)" }}>
               Rp {stats.totalRevenueIdr.toLocaleString("id-ID")}
             </div>
-            <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
-              Total omset dari pesanan berstatus PAID
+            <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+              Total omset pesanan PAID
             </div>
           </div>
         </div>
+
 
         {/* Filter & Search Toolbar */}
         <div
