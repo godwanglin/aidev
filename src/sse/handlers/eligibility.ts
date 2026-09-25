@@ -2,26 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateApiKey } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-function matchesModel(allowedPattern: string, comboId: string, underlyingModelId: string): boolean {
+/**
+ * Checks if a combo model is allowed by an allowedPattern from SubscriptionTierConfig.
+ * 
+ * Rules:
+ * 1. Wildcard "*" allows everything.
+ * 2. Combo models must match on their public comboId (e.g. "gpt-6-astra", "gemini-3.8-flash-high")
+ *    or normalized prefix ("cx/gpt-6-astra" matches "gpt-6-astra").
+ * 3. Combo models DO NOT inherit access from underlying internal models (to prevent
+ *    a restricted combo like "gpt-6-astra" from being opened just because its internal worker
+ *    is an allowed model like "deepseek-v4-pro").
+ */
+function matchesModel(allowedPattern: string, comboId: string): boolean {
   const p = allowedPattern.toLowerCase().trim();
   if (p === "*") return true;
 
   const cId = comboId.toLowerCase().trim();
-  const uId = underlyingModelId.toLowerCase().trim();
 
-  // Strip provider prefix if any, e.g. "ag/gemini-3.8-flash-high" -> "gemini-3.8-flash-high"
+  // Strip provider prefix if any, e.g. "cx/gpt-6-astra" -> "gpt-6-astra"
   const pStrip = p.includes("/") ? p.split("/").slice(1).join("/") : p;
-  const uStrip = uId.includes("/") ? uId.split("/").slice(1).join("/") : uId;
+  const cStrip = cId.includes("/") ? cId.split("/").slice(1).join("/") : cId;
 
-  if (p === cId || p === uId || pStrip === cId || pStrip === uStrip) return true;
-  if (cId === pStrip || uStrip === pStrip) return true;
-
-  // Substring matching as in checkTierModelAccess in credits.ts
-  if (cId.includes(p) || p.includes(cId) || (uId && (uId.includes(p) || p.includes(uId)))) {
-    return true;
-  }
-
-  return false;
+  return p === cId || pStrip === cId || p === cStrip || pStrip === cStrip;
 }
 
 /**
@@ -75,7 +77,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
 
   const isWildcardUser = isAdmin || userAllowedList.includes("*");
 
-  // Fetch all active public combo models
+  // Fetch all active public combo models (Strictly isPublic: true, isActive: true)
   const dbCombos = await prisma.comboModel.findMany({
     where: { isActive: true, isPublic: true },
     include: {
@@ -120,11 +122,11 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
       ? "openrouter"
       : "system";
 
-    // 1. Determine minTier (the lowest tier that unlocks this model)
+    // 1. Determine minTier (the lowest tier that explicitly unlocks this combo model)
     let unlockingTier = tierConfigs.find((t) => {
       try {
         const list: string[] = JSON.parse(t.allowedModelIds || "[]");
-        return list.some((pattern) => matchesModel(pattern, c.comboId, firstItem));
+        return list.some((pattern) => matchesModel(pattern, c.comboId));
       } catch {
         return false;
       }
@@ -154,7 +156,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
     if (isWildcardUser) {
       isEligible = true;
     } else {
-      isEligible = userAllowedList.some((pattern) => matchesModel(pattern, c.comboId, firstItem));
+      isEligible = userAllowedList.some((pattern) => matchesModel(pattern, c.comboId));
     }
 
     const reason = isEligible
