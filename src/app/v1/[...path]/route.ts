@@ -4,6 +4,7 @@ import { handleEmbeddings } from "@/sse/handlers/embeddings";
 import { handleModelsList, handleModelDetail } from "@/sse/handlers/models";
 import { handleEligibility } from "@/sse/handlers/eligibility";
 import { handleUsage } from "@/sse/handlers/usage";
+import { handleImagesGenerations } from "@/sse/handlers/images";
 
 /**
  * Universal fallback catch-all for /v1/* (9router pattern).
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const { path } = await params;
   const subPath = path ? path.join("/") : "";
 
+  if (subPath === "images/generations" || subPath === "images/generations/") {
+    return handleImagesGenerations(req);
+  }
   if (subPath === "embeddings") {
     return handleEmbeddings(req);
   }
