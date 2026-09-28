@@ -180,7 +180,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           Authorization: `Bearer ${resolvedRoute.apiKey}`,
         },
         body: JSON.stringify(candidatePayload),
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(90000),
       });
 
       if (upstreamRes.ok) {
