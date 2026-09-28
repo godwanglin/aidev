@@ -27,6 +27,8 @@ export async function PUT(
       comboId,
       name,
       description,
+      type,
+      costPerImage,
       strategy,
       cooldownSeconds,
       rateInPer1k,
@@ -62,6 +64,7 @@ export async function PUT(
 
     const inRate = rateInPer1k !== undefined && Number(rateInPer1k) >= 0 ? Math.round(Number(rateInPer1k)) : existing.rateInPer1k;
     const outRate = rateOutPer1k !== undefined && Number(rateOutPer1k) >= 0 ? Math.round(Number(rateOutPer1k)) : existing.rateOutPer1k;
+    const imageCost = costPerImage !== undefined && Number(costPerImage) >= 0 ? Math.round(Number(costPerImage)) : existing.costPerImage;
 
     // Execute update transaction
     const updated = await prisma.$transaction(async (tx) => {
@@ -90,6 +93,8 @@ export async function PUT(
           comboId: cleanComboId,
           name: name !== undefined ? name.trim() : existing.name,
           description: description !== undefined ? (description?.trim() || null) : existing.description,
+          type: type !== undefined ? (type === "image" ? "image" : "chat") : existing.type,
+          costPerImage: imageCost,
           strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : strategy === "FALLBACK" ? "FALLBACK" : existing.strategy,
           cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : existing.cooldownSeconds,
           rateInPer1k: inRate,

@@ -48,6 +48,8 @@ export async function POST(req: NextRequest) {
       comboId,
       name,
       description,
+      type,
+      costPerImage,
       strategy,
       cooldownSeconds,
       rateInPer1k,
@@ -80,12 +82,15 @@ export async function POST(req: NextRequest) {
 
     const inRate = Number(rateInPer1k) >= 0 ? Math.round(Number(rateInPer1k)) : 25;
     const outRate = Number(rateOutPer1k) >= 0 ? Math.round(Number(rateOutPer1k)) : 100;
+    const imageCost = Number(costPerImage) >= 0 ? Math.round(Number(costPerImage)) : 500;
 
     const newCombo = await prisma.comboModel.create({
       data: {
         comboId: cleanComboId,
         name: name.trim(),
         description: description?.trim() || null,
+        type: type === "image" ? "image" : "chat",
+        costPerImage: imageCost,
         strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : "FALLBACK",
         cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : 60,
         rateInPer1k: inRate,

@@ -26,6 +26,7 @@ import {
   ArrowDown,
   Info,
   Coins,
+  Image as ImageIcon,
 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
 
@@ -34,6 +35,8 @@ interface ComboItem {
   comboId: string;
   name: string;
   description: string | null;
+  type?: "chat" | "image" | string;
+  costPerImage?: number;
   strategy: "FALLBACK" | "ROUND_ROBIN";
   cooldownSeconds: number;
   rateInPer1k?: number;
@@ -94,6 +97,7 @@ export default function AdminCombosPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [strategyFilter, setStrategyFilter] = useState<"ALL" | "FALLBACK" | "ROUND_ROBIN">("ALL");
+  const [modelTypeFilter, setModelTypeFilter] = useState<"ALL" | "chat" | "image">("ALL");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -104,6 +108,8 @@ export default function AdminCombosPage() {
   const [comboId, setComboId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [modelType, setModelType] = useState<"chat" | "image">("chat");
+  const [costPerImage, setCostPerImage] = useState<number>(500);
   const [strategy, setStrategy] = useState<"FALLBACK" | "ROUND_ROBIN">("FALLBACK");
   const [cooldownSeconds, setCooldownSeconds] = useState(60);
   const [isActive, setIsActive] = useState(true);
@@ -194,6 +200,8 @@ export default function AdminCombosPage() {
     setComboId("");
     setName("");
     setDescription("");
+    setModelType("chat");
+    setCostPerImage(500);
     setStrategy("FALLBACK");
     setCooldownSeconds(60);
     setIsActive(true);
@@ -211,6 +219,8 @@ export default function AdminCombosPage() {
     setComboId(combo.comboId);
     setName(combo.name);
     setDescription(combo.description || "");
+    setModelType((combo.type as any) === "image" ? "image" : "chat");
+    setCostPerImage(combo.costPerImage !== undefined ? combo.costPerImage : 500);
     setStrategy(combo.strategy);
     setCooldownSeconds(combo.cooldownSeconds);
     setIsActive(combo.isActive);
@@ -348,6 +358,8 @@ export default function AdminCombosPage() {
       comboId: comboId.trim().toLowerCase(),
       name: name.trim(),
       description: description.trim() || null,
+      type: modelType,
+      costPerImage: modelType === "image" ? (Number(costPerImage) >= 0 ? Number(costPerImage) : 500) : 500,
       strategy,
       cooldownSeconds: Number(cooldownSeconds) || 60,
       rateInPer1k: Number(rateInPer1k) >= 0 ? Number(rateInPer1k) : 25,
@@ -396,7 +408,9 @@ export default function AdminCombosPage() {
       c.items.some((it) => it.modelId.toLowerCase().includes(search.toLowerCase()));
 
     const matchStrategy = strategyFilter === "ALL" || c.strategy === strategyFilter;
-    return matchSearch && matchStrategy;
+    const currentType = (c.type as string) || "chat";
+    const matchType = modelTypeFilter === "ALL" || currentType === modelTypeFilter;
+    return matchSearch && matchStrategy && matchType;
   });
 
   const activeCombosCount = combos.filter((c) => c.isActive).length;
@@ -456,6 +470,9 @@ export default function AdminCombosPage() {
               <span className="text-xs text-green font-medium">● {activeCombosCount} Active</span>
               <span className="text-xs text-muted">
                 ● {combos.length - activeCombosCount} Inactive
+              </span>
+              <span className="text-xs font-semibold" style={{ color: "#7e22ce" }}>
+                ● {combos.filter((c) => c.type === "image").length} Image
               </span>
             </div>
           </article>
@@ -533,6 +550,31 @@ export default function AdminCombosPage() {
           <div className="toolbar-filters flex items-center gap-2">
             <CustomDropdown
               size="sm"
+              value={modelTypeFilter}
+              onChange={(val) => setModelTypeFilter(val as any)}
+              options={[
+                {
+                  value: "ALL",
+                  label: "All Types",
+                  icon: <Layers size={13} style={{ color: "var(--blue)" }} />,
+                },
+                {
+                  value: "chat",
+                  label: "Chat Models",
+                  icon: <Zap size={13} className="text-emerald-500" />,
+                },
+                {
+                  value: "image",
+                  label: "Image Models",
+                  icon: <ImageIcon size={13} style={{ color: "#a855f7" }} />,
+                },
+              ]}
+              minWidth={140}
+              title="Filter by model category"
+            />
+
+            <CustomDropdown
+              size="sm"
               value={strategyFilter}
               onChange={(val) => setStrategyFilter(val as any)}
               options={[
@@ -608,11 +650,38 @@ export default function AdminCombosPage() {
                   filtered.map((combo) => (
                     <tr key={combo.id}>
                       <td>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="mono font-semibold text-xs text-blue">
                               {combo.comboId}
                             </span>
+                            {combo.type === "image" ? (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                                style={{
+                                  backgroundColor: "#f3e8ff",
+                                  color: "#7e22ce",
+                                  border: "1px solid #d8b4fe",
+                                }}
+                                title="Image Generation Model (/v1/images/generations)"
+                              >
+                                <ImageIcon size={10} />
+                                <span>IMAGE</span>
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                                style={{
+                                  backgroundColor: "#ecfdf5",
+                                  color: "#047857",
+                                  border: "1px solid #a7f3d0",
+                                }}
+                                title="Chat / Text LLM (/v1/chat/completions)"
+                              >
+                                <Zap size={10} />
+                                <span>CHAT</span>
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleCopyComboId(combo.comboId)}
@@ -668,13 +737,23 @@ export default function AdminCombosPage() {
                       </td>
 
                       <td>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#1e293b" }}>
-                            <Coins size={12} className="text-amber-500 shrink-0" />
-                            <span>{combo.rateInPer1k ?? 25} In / {combo.rateOutPer1k ?? 100} Out</span>
+                        {combo.type === "image" ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#7e22ce" }}>
+                              <ImageIcon size={12} className="shrink-0" style={{ color: "#a855f7" }} />
+                              <span>{combo.costPerImage ?? 500} CR</span>
+                            </div>
+                            <span className="text-[10.5px] text-muted">Fixed per image</span>
                           </div>
-                          <span className="text-[10.5px] text-muted">Credits / 1k tokens</span>
-                        </div>
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#1e293b" }}>
+                              <Coins size={12} className="text-amber-500 shrink-0" />
+                              <span>{combo.rateInPer1k ?? 25} In / {combo.rateOutPer1k ?? 100} Out</span>
+                            </div>
+                            <span className="text-[10.5px] text-muted">Credits / 1k tokens</span>
+                          </div>
+                        )}
                       </td>
 
                       <td style={{ whiteSpace: "normal", padding: "10px 14px" }}>
@@ -875,6 +954,92 @@ export default function AdminCombosPage() {
               </div>
 
               <form onSubmit={handleSubmit}>
+                {/* Model Category / Type Selector */}
+                <div className="form-group" style={{ marginBottom: "16px" }}>
+                  <label className="text-xs font-semibold" style={{ color: "#1e293b", marginBottom: "8px", display: "block" }}>
+                    Model Category / Target Endpoint
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    <div
+                      onClick={() => setModelType("chat")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        border: modelType === "chat" ? "2px solid #10b981" : "1px solid #e2e8f0",
+                        backgroundColor: modelType === "chat" ? "#f0fdf4" : "#ffffff",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          borderRadius: "6px",
+                          backgroundColor: modelType === "chat" ? "#dcfce7" : "#f1f5f9",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: modelType === "chat" ? "#15803d" : "#64748b",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Zap size={16} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "chat" ? "#166534" : "#1e293b" }}>
+                          Chat / Text LLM
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                          /v1/chat/completions (per-token rate)
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      onClick={() => setModelType("image")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        border: modelType === "image" ? "2px solid #a855f7" : "1px solid #e2e8f0",
+                        backgroundColor: modelType === "image" ? "#faf5ff" : "#ffffff",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          borderRadius: "6px",
+                          backgroundColor: modelType === "image" ? "#f3e8ff" : "#f1f5f9",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: modelType === "image" ? "#7e22ce" : "#64748b",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <ImageIcon size={16} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "image" ? "#6b21a8" : "#1e293b" }}>
+                          Image Generation
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                          /v1/images/generations (fixed per image)
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Row 1: Combo ID + Display Name */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                   <div className="form-group">
@@ -885,7 +1050,7 @@ export default function AdminCombosPage() {
                       className="control w-full mono text-xs"
                       value={comboId}
                       onChange={(e) => setComboId(e.target.value)}
-                      placeholder="e.g. gpt-5.5 or free-rotation"
+                      placeholder={modelType === "image" ? "e.g. gpt-image-2.5 or flux-combo" : "e.g. gpt-5.5 or free-rotation"}
                       required
                     />
                     <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
@@ -901,7 +1066,7 @@ export default function AdminCombosPage() {
                       className="control w-full text-xs"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. GPT 5.5 Auto-Rotate Stack"
+                      placeholder={modelType === "image" ? "e.g. GPT Image 2.5 Auto-Rotate" : "e.g. GPT 5.5 Auto-Rotate Stack"}
                       required
                     />
                   </div>
@@ -960,48 +1125,72 @@ export default function AdminCombosPage() {
                   </div>
                 </div>
 
-                {/* Credit Consumption Pricing (Rates per 1k tokens) */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", background: "#f8fafc", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "14px" }}>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
-                      <Coins size={12} className="text-amber-500 shrink-0" />
-                      <span>Input Rate (Credits / 1k tokens)</span>
-                    </label>
-                    <input
-                      suppressHydrationWarning
-                      type="number"
-                      className="control w-full text-xs font-semibold"
-                      value={rateInPer1k}
-                      onChange={(e) => setRateInPer1k(Math.max(0, Number(e.target.value)))}
-                      min={0}
-                      placeholder="e.g. 25"
-                      required
-                    />
-                    <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
-                      Biaya kredit per 1.000 token prompt input user.
-                    </p>
+                {/* Credit Consumption Pricing */}
+                {modelType === "image" ? (
+                  <div style={{ background: "#faf5ff", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e9d5ff", marginBottom: "14px" }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#6b21a8", marginBottom: "6px" }}>
+                        <ImageIcon size={13} className="text-purple-600 shrink-0" />
+                        <span>Cost Per Image (Credits)</span>
+                      </label>
+                      <input
+                        suppressHydrationWarning
+                        type="number"
+                        className="control w-full text-xs font-semibold"
+                        value={costPerImage}
+                        onChange={(e) => setCostPerImage(Math.max(0, Number(e.target.value)))}
+                        min={0}
+                        placeholder="e.g. 500"
+                        required
+                      />
+                      <p className="text-[11px] text-purple-700" style={{ marginTop: "4px" }}>
+                        Biaya kredit flat per generate gambar (default 500 CR = Rp 500). Bebas dari billing rate token input/output.
+                      </p>
+                    </div>
                   </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", background: "#f8fafc", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "14px" }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
+                        <Coins size={12} className="text-amber-500 shrink-0" />
+                        <span>Input Rate (Credits / 1k tokens)</span>
+                      </label>
+                      <input
+                        suppressHydrationWarning
+                        type="number"
+                        className="control w-full text-xs font-semibold"
+                        value={rateInPer1k}
+                        onChange={(e) => setRateInPer1k(Math.max(0, Number(e.target.value)))}
+                        min={0}
+                        placeholder="e.g. 25"
+                        required
+                      />
+                      <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
+                        Biaya kredit per 1.000 token prompt input user.
+                      </p>
+                    </div>
 
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
-                      <Coins size={12} className="text-amber-500 shrink-0" />
-                      <span>Output Rate (Credits / 1k tokens)</span>
-                    </label>
-                    <input
-                      suppressHydrationWarning
-                      type="number"
-                      className="control w-full text-xs font-semibold"
-                      value={rateOutPer1k}
-                      onChange={(e) => setRateOutPer1k(Math.max(0, Number(e.target.value)))}
-                      min={0}
-                      placeholder="e.g. 100"
-                      required
-                    />
-                    <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
-                      Biaya kredit per 1.000 token completion output LLM.
-                    </p>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
+                        <Coins size={12} className="text-amber-500 shrink-0" />
+                        <span>Output Rate (Credits / 1k tokens)</span>
+                      </label>
+                      <input
+                        suppressHydrationWarning
+                        type="number"
+                        className="control w-full text-xs font-semibold"
+                        value={rateOutPer1k}
+                        onChange={(e) => setRateOutPer1k(Math.max(0, Number(e.target.value)))}
+                        min={0}
+                        placeholder="e.g. 100"
+                        required
+                      />
+                      <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
+                        Biaya kredit per 1.000 token completion output LLM.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Row 4: Toggles */}
                 <div className="form-group" style={{ display: "flex", gap: "24px", alignItems: "center" }}>
