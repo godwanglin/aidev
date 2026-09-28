@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401 } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
@@ -909,5 +910,114 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       headers: { "Content-Type": "application/json" },
     }
   );
+}
+
+export interface CodexImageParams {
+  model: string;
+  prompt: string;
+  accessToken: string;
+  connectionId?: string;
+  size?: string;
+  quality?: string;
+  output_format?: string;
+  n?: number;
+}
+
+export async function dispatchCodexImage(params: CodexImageParams): Promise<{ created: number; data: { b64_json: string }[] }> {
+  let activeToken = params.accessToken;
+  const accountId = extractAccountId(activeToken);
+
+  let toolModel = params.model.replace(/^cx\//i, "").trim() || "gpt-image-2.5";
+  if (!toolModel.includes("image")) {
+    toolModel = "gpt-image-2.5";
+  }
+
+  const codexBody = {
+    model: "gpt-5.5",
+    instructions: "",
+    input: [
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: params.prompt }],
+      },
+    ],
+    tools: [
+      {
+        type: "image_generation",
+        action: "generate",
+        model: toolModel,
+        output_format: (params.output_format || "png").toLowerCase(),
+        ...(params.size ? { size: params.size } : {}),
+        ...(params.quality ? { quality: params.quality } : {}),
+      },
+    ],
+    tool_choice: { type: "image_generation" },
+    parallel_tool_calls: false,
+    prompt_cache_key: crypto.randomUUID(),
+    stream: true,
+    store: false,
+    reasoning: { effort: "medium", summary: "auto" },
+  };
+
+  const getHeaders = (token: string): Record<string, string> => ({
+    Authorization: `Bearer ${token}`,
+    originator: "codex_cli_rs",
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+    "User-Agent": "codex_cli_rs/0.155.0",
+    version: "0.155.0",
+    session_id: crypto.randomUUID(),
+    "x-client-request-id": crypto.randomUUID(),
+    ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+  });
+
+  let response = await fetch(CODEX_RESPONSES_ENDPOINT, {
+    method: "POST",
+    headers: getHeaders(activeToken),
+    body: JSON.stringify(codexBody),
+    signal: AbortSignal.timeout(120000),
+  });
+
+  if (response.status === 401 && params.connectionId) {
+    try {
+      activeToken = await refreshConnectionOn401(params.connectionId);
+      response = await fetch(CODEX_RESPONSES_ENDPOINT, {
+        method: "POST",
+        headers: getHeaders(activeToken),
+        body: JSON.stringify(codexBody),
+        signal: AbortSignal.timeout(120000),
+      });
+    } catch {}
+  }
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`Codex image HTTP ${response.status}: ${errText.slice(0, 300)}`);
+  }
+
+  const text = await response.text();
+  const lines = text.split("\n");
+  let imageB64: string | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("data: ")) {
+      try {
+        const d = JSON.parse(line.slice(6));
+        if (d.item?.type === "image_generation_call" && d.item.result) {
+          imageB64 = d.item.result;
+        }
+      } catch {}
+    }
+  }
+
+  if (!imageB64) {
+    throw new Error("Codex did not return an image. Account may not be entitled (Plus/Pro required).");
+  }
+
+  return {
+    created: Math.floor(Date.now() / 1000),
+    data: [{ b64_json: imageB64 }],
+  };
 }
 

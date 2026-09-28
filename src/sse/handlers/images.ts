@@ -7,6 +7,7 @@ import { isComboModel, findCombo, resolveComboCandidates, markComboModelCooldown
 import { checkTierModelAccess } from "@/lib/credits";
 import { adminLogger } from "@/lib/admin-logger";
 import { isAntigravityProvider, dispatchAntigravityImage } from "@/lib/adapters/antigravity";
+import { isCodexProvider, dispatchCodexImage } from "@/lib/adapters/codex";
 
 interface ImageGenerationBody {
   prompt: string;
@@ -247,6 +248,64 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
         });
 
         return NextResponse.json(agResult);
+      }
+
+      // Native OpenAI Codex Image Generation (ChatGPT Plus/Pro account)
+      if (isCodexProvider(resolvedRoute.provider, resolvedRoute.authType)) {
+        const cxResult = await dispatchCodexImage({
+          model: resolvedRoute.upstreamModel || candidateModel,
+          prompt,
+          accessToken: resolvedRoute.apiKey,
+          connectionId: resolvedRoute.connectionId,
+          size: body.size,
+          quality: body.quality,
+          n: body.n,
+        });
+
+        const latencyMs = Date.now() - upstreamStartTime;
+
+        // 1. Real-time token / credit deduction log
+        logRequest({
+          apiKeyId,
+          path: reqPath,
+          method: "POST",
+          statusCode: 200,
+          model: requestedModel,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          creditsCost: creditsCostPerImage,
+          durationMs: latencyMs,
+        });
+
+        // 2. Admin Live Logger
+        adminLogger.done({
+          model: requestedModel,
+          upstreamModel: resolvedRoute.upstreamModel || candidateModel,
+          durationMs: latencyMs,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          account: resolvedRoute.connectionName || resolvedRoute.provider,
+        });
+
+        // 3. Telemetry log for /admin/usage
+        await logUpstreamRequest({
+          connectionId: resolvedRoute.connectionId,
+          provider: resolvedRoute.provider,
+          model: `${requestedModel} -> ${resolvedRoute.provider}/${resolvedRoute.upstreamModel || candidateModel}`,
+          clientApiKeyId: apiKeyId,
+          clientUserId: (auth.apiKey as any)?.userId,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          tokensSavedRtk: 0,
+          latencyMs,
+          statusCode: 200,
+          isFailover: idx > 0,
+          failoverReason: idx > 0 ? lastErrorMessage : null,
+        });
+
+        return NextResponse.json(cxResult);
       }
 
       if (!resolvedRoute.baseUrl) {
