@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateApiKey } from "@/lib/auth";
 import { logRequest } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { resolveUpstreamConnection } from "@/lib/router";
+import { resolveUpstreamConnection, logUpstreamRequest } from "@/lib/router";
 import { isComboModel, findCombo, resolveComboCandidates, markComboModelCooldown } from "@/lib/combo-router";
 import { checkTierModelAccess } from "@/lib/credits";
+import { adminLogger } from "@/lib/admin-logger";
 
 interface ImageGenerationBody {
   prompt: string;
@@ -79,6 +80,16 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
 
   const apiKeyId = auth.apiKey.id;
   const userTier = (auth.apiKey as any)?.user?.subscriptionTier || "FREE";
+
+  adminLogger.clientRequest({
+    account: (auth.apiKey as any)?.user?.name || (auth.apiKey as any)?.user?.email || "User",
+    role: clientUserRole,
+    balance: `${clientUserCredit} CR`,
+    tier: userTier,
+    subPath: reqPath,
+    model: requestedModel,
+    stream: false,
+  });
 
   // 3. Subscription Tier Model Whitelist Check
   const tierAccess = await checkTierModelAccess(userTier, requestedModel);
@@ -161,11 +172,23 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
 
   for (let idx = 0; idx < candidates.length; idx++) {
     const candidateModel = candidates[idx];
+    const upstreamStartTime = Date.now();
     try {
       const resolvedRoute = await resolveUpstreamConnection({ model: candidateModel });
       if (!resolvedRoute || !resolvedRoute.baseUrl || !resolvedRoute.apiKey) {
         continue;
       }
+
+      adminLogger.post({
+        model: requestedModel,
+        upstreamModel: resolvedRoute.upstreamModel || candidateModel,
+        fromFormat: "IMAGE",
+        toFormat: "IMAGE",
+        stream: false,
+        msgCount: 1,
+        toolCount: 0,
+        account: resolvedRoute.connectionName || resolvedRoute.provider,
+      });
 
       const upstreamUrl = `${resolvedRoute.baseUrl.replace(/\/$/, "")}/images/generations`;
       const candidatePayload = {
@@ -183,10 +206,12 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
         signal: AbortSignal.timeout(90000),
       });
 
+      const latencyMs = Date.now() - upstreamStartTime;
+
       if (upstreamRes.ok) {
         const data = await upstreamRes.json();
 
-        // Real-time token / credit deduction log
+        // 1. Real-time token / credit deduction log
         logRequest({
           apiKeyId,
           path: reqPath,
@@ -198,6 +223,33 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
           creditsCost: creditsCostPerImage,
           durationMs: Date.now() - startTime,
+        });
+
+        // 2. Real-time live log for /admin/logs
+        adminLogger.done({
+          durationMs: latencyMs,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          model: requestedModel,
+          upstreamModel: resolvedRoute.upstreamModel || candidateModel,
+          account: resolvedRoute.connectionName || resolvedRoute.provider,
+        });
+
+        // 3. Telemetry log for /admin/usage
+        await logUpstreamRequest({
+          connectionId: resolvedRoute.connectionId,
+          provider: resolvedRoute.provider,
+          model: `${requestedModel} -> ${resolvedRoute.provider}/${resolvedRoute.upstreamModel || candidateModel}`,
+          clientApiKeyId: apiKeyId,
+          clientUserId: (auth.apiKey as any)?.userId,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          tokensSavedRtk: 0,
+          latencyMs,
+          statusCode: 200,
+          isFailover: idx > 0,
+          failoverReason: idx > 0 ? lastErrorMessage : null,
         });
 
         return NextResponse.json(data);
@@ -212,14 +264,47 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
         lastErrorMessage = (await upstreamRes.text().catch(() => "")) || `Upstream returned HTTP ${upstreamRes.status}`;
       }
 
+      adminLogger.fallback({
+        fromModel: candidateModel,
+        reason: lastErrorMessage,
+        account: resolvedRoute.connectionName || resolvedRoute.provider,
+        rawError: lastErrorBody,
+      });
+
+      await logUpstreamRequest({
+        connectionId: resolvedRoute.connectionId,
+        provider: resolvedRoute.provider,
+        model: `${requestedModel} -> ${resolvedRoute.provider}/${resolvedRoute.upstreamModel || candidateModel}`,
+        clientApiKeyId: apiKeyId,
+        clientUserId: (auth.apiKey as any)?.userId,
+        promptTokens: Math.ceil(prompt.length / 4) || 20,
+        completionTokens: 0,
+        totalTokens: Math.ceil(prompt.length / 4) || 20,
+        tokensSavedRtk: 0,
+        latencyMs,
+        statusCode: upstreamRes.status,
+        isFailover: true,
+        failoverReason: lastErrorMessage,
+      });
+
       markComboModelCooldown(candidateModel, 60);
     } catch (err: any) {
       lastErrorMessage = err?.message || "Connection timeout to image upstream.";
+      adminLogger.error({
+        message: `[ImageGen] Upstream connection error: ${lastErrorMessage}`,
+        model: requestedModel,
+        upstreamModel: candidateModel,
+      });
       markComboModelCooldown(candidateModel, 60);
     }
   }
 
   // All candidates failed — return authoritative error to client (NO SILENT FALLBACK)
+  adminLogger.error({
+    message: `[ImageGen] All candidates failed for model '${requestedModel}': ${lastErrorMessage}`,
+    model: requestedModel,
+  });
+
   logRequest({
     apiKeyId,
     path: reqPath,
