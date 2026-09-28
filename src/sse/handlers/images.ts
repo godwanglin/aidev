@@ -6,6 +6,7 @@ import { resolveUpstreamConnection, logUpstreamRequest } from "@/lib/router";
 import { isComboModel, findCombo, resolveComboCandidates, markComboModelCooldown } from "@/lib/combo-router";
 import { checkTierModelAccess } from "@/lib/credits";
 import { adminLogger } from "@/lib/admin-logger";
+import { isAntigravityProvider, dispatchAntigravityImage } from "@/lib/adapters/antigravity";
 
 interface ImageGenerationBody {
   prompt: string;
@@ -175,7 +176,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
     const upstreamStartTime = Date.now();
     try {
       const resolvedRoute = await resolveUpstreamConnection({ model: candidateModel });
-      if (!resolvedRoute || !resolvedRoute.baseUrl || !resolvedRoute.apiKey) {
+      if (!resolvedRoute || !resolvedRoute.apiKey) {
         continue;
       }
 
@@ -189,6 +190,68 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
         toolCount: 0,
         account: resolvedRoute.connectionName || resolvedRoute.provider,
       });
+
+      // Native Antigravity Image Generation (No external gateway needed)
+      if (isAntigravityProvider(resolvedRoute.provider)) {
+        const agResult = await dispatchAntigravityImage({
+          model: resolvedRoute.upstreamModel || candidateModel,
+          prompt,
+          accessToken: resolvedRoute.apiKey,
+          connectionId: resolvedRoute.connectionId,
+          size: body.size,
+          quality: body.quality,
+          n: body.n,
+        });
+
+        const latencyMs = Date.now() - upstreamStartTime;
+
+        // 1. Real-time token / credit deduction log
+        logRequest({
+          apiKeyId,
+          path: reqPath,
+          method: "POST",
+          statusCode: 200,
+          model: requestedModel,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          creditsCost: creditsCostPerImage,
+          durationMs: latencyMs,
+        });
+
+        // 2. Admin Live Logger
+        adminLogger.done({
+          model: requestedModel,
+          upstreamModel: resolvedRoute.upstreamModel || candidateModel,
+          durationMs: latencyMs,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          account: resolvedRoute.connectionName || resolvedRoute.provider,
+        });
+
+        // 3. Telemetry log for /admin/usage
+        await logUpstreamRequest({
+          connectionId: resolvedRoute.connectionId,
+          provider: resolvedRoute.provider,
+          model: `${requestedModel} -> ${resolvedRoute.provider}/${resolvedRoute.upstreamModel || candidateModel}`,
+          clientApiKeyId: apiKeyId,
+          clientUserId: (auth.apiKey as any)?.userId,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          tokensSavedRtk: 0,
+          latencyMs,
+          statusCode: 200,
+          isFailover: idx > 0,
+          failoverReason: idx > 0 ? lastErrorMessage : null,
+        });
+
+        return NextResponse.json(agResult);
+      }
+
+      if (!resolvedRoute.baseUrl) {
+        continue;
+      }
 
       const upstreamUrl = `${resolvedRoute.baseUrl.replace(/\/$/, "")}/images/generations`;
       const candidatePayload = {

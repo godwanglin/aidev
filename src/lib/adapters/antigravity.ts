@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401 } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
@@ -1056,4 +1057,159 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function uuidFromSeed(seed: string): string {
+  const bytes = crypto.createHash("sha256").update(String(seed || "antigravity")).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export interface AntigravityImageParams {
+  model: string;
+  prompt: string;
+  accessToken: string;
+  connectionId?: string;
+  size?: string;
+  quality?: string;
+  n?: number;
+}
+
+export async function dispatchAntigravityImage(params: AntigravityImageParams): Promise<{ created: number; data: { b64_json: string }[] }> {
+  let currentToken = params.accessToken;
+  const projectId = await getEffectiveProjectId(currentToken);
+
+  // Aspect ratio calculation from size or model suffix
+  let aspectRatio = "1:1";
+  if (params.size && typeof params.size === "string") {
+    const parts = params.size.toLowerCase().split("x");
+    if (parts.length === 2) {
+      const w = parseInt(parts[0], 10);
+      const h = parseInt(parts[1], 10);
+      if (w > 0 && h > 0) {
+        const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+        const d = gcd(w, h);
+        const rw = w / d;
+        const rh = h / d;
+        if (rw <= 16 && rh <= 16) {
+          aspectRatio = `${rw}:${rh}`;
+        }
+      }
+    }
+  }
+
+  // Model cleanup: e.g. "ag/gemini-3.1-flash-image" -> "gemini-3.1-flash-image"
+  let wireModel = params.model.replace(/^ag\//i, "").trim();
+  if (!wireModel || !/image|imagen/i.test(wireModel)) {
+    wireModel = "gemini-3.1-flash-image";
+  }
+
+  const sessionId = `session_${Date.now()}`;
+  const conversationId = uuidFromSeed(`antigravity:conversation:${sessionId}`);
+  const trajectoryId = uuidFromSeed(`antigravity:trajectory:${sessionId}:${wireModel}:image_gen`);
+  const requestId = `agent/${conversationId}/${Date.now()}/${trajectoryId}/1`;
+
+  const envelope = {
+    project: projectId,
+    model: wireModel,
+    userAgent: "antigravity",
+    requestType: "image_gen",
+    requestId,
+    request: {
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: params.prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 1.0,
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 8192,
+        imageConfig: { aspectRatio },
+      },
+      sessionId,
+    },
+  };
+
+  const endpoints = [ANTIGRAVITY_ENDPOINT_DAILY, ANTIGRAVITY_ENDPOINT_PROD];
+  let lastResponse: Response | null = null;
+  let lastError = "";
+
+  for (const endpoint of endpoints) {
+    const url = `${endpoint}/v1internal:streamGenerateContent?alt=sse`;
+    try {
+      let res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "User-Agent": "antigravity/ide/1.109.0 darwin/arm64",
+          Authorization: `Bearer ${currentToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(envelope),
+      });
+
+      if (res.status === 401 && params.connectionId) {
+        try {
+          currentToken = await refreshConnectionOn401(params.connectionId);
+          res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "User-Agent": "antigravity/ide/1.109.0 darwin/arm64",
+              Authorization: `Bearer ${currentToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(envelope),
+          });
+        } catch {}
+      }
+
+      if (res.ok) {
+        lastResponse = res;
+        break;
+      } else {
+        const errText = await res.text().catch(() => "");
+        lastError = `Upstream ${endpoint} returned HTTP ${res.status}: ${errText.slice(0, 500)}`;
+        if (res.status === 429) continue;
+        break;
+      }
+    } catch (err: any) {
+      lastError = err.message;
+    }
+  }
+
+  if (!lastResponse || !lastResponse.ok) {
+    throw new Error(lastError || "Failed to generate image via Antigravity upstream.");
+  }
+
+  const sseText = await lastResponse.text();
+  const lines = sseText.split("\n");
+  const images: { b64_json: string }[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("data: ")) {
+      const jsonStr = line.slice(6).trim();
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const parts = parsed?.response?.candidates?.[0]?.content?.parts || parsed?.candidates?.[0]?.content?.parts || [];
+        for (const p of parts) {
+          if (p.inlineData?.data) {
+            images.push({ b64_json: p.inlineData.data });
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (images.length === 0) {
+    throw new Error("Antigravity response did not contain generated image data.");
+  }
+
+  return {
+    created: Math.floor(Date.now() / 1000),
+    data: images,
+  };
 }
