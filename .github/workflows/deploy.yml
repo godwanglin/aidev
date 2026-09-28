@@ -41,12 +41,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
     steps:
       - name: Trigger Remote VPS Deployment
         uses: appleboy/ssh-action@v1.2.0
-        if: "${{ env.VPS_HOST != '' }}"
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+        if: env.VPS_HOST != ''
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER || 'root' }}
