@@ -124,7 +124,8 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       originator: "codex_cli_rs",
       "Content-Type": "application/json",
       Accept: "text/event-stream",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "User-Agent": "codex_cli_rs/0.155.0",
+      version: "0.155.0",
     };
     if (accountId) {
       headers["ChatGPT-Account-Id"] = accountId;

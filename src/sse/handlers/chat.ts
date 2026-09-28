@@ -447,6 +447,50 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
     }
 
+    // Direct Native 1b: OpenAI Codex for standard Chat Completions
+    if (subPath !== "responses" && isCodexProvider(activeProvider, resolvedRoute?.authType) && targetKey) {
+      try {
+        const response = await dispatchCodexChat({
+          rawBody: candidateChatBody || "{}",
+          parsedBody: parsedCandidateJson,
+          accessToken: targetKey,
+          connectionId: activeConnectionId || "",
+          model: candidateModel || "gpt-5.5",
+          clientRequestedModel,
+          upstreamLogModel,
+          clientApiKeyId: apiKeyId,
+          clientUserId,
+          reqPath,
+          clientWantsStream,
+        });
+
+        if ((response.status === 429 || response.status >= 500) && !isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `Codex returned HTTP ${response.status}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+
+        return response;
+      } catch (err: any) {
+        if (!isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `Codex exception: ${err.message}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+        throw err;
+      }
+    }
+
     // Direct Native 2: Anthropic Messages API
     if (subPath === "messages" && (activeProvider === "ANTHROPIC" || activeProvider === "CLAUDE_CODE") && targetKey) {
       try {
