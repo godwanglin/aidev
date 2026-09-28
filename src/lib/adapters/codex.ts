@@ -56,6 +56,31 @@ function resolveCodexModel(rawModel: string): string {
 }
 
 /**
+ * Normalizes OpenAI Chat Completions tools into Codex Responses API tools format.
+ */
+function formatCodexTools(tools: any[]): any[] {
+  if (!Array.isArray(tools)) return [];
+  const result: any[] = [];
+  for (const t of tools) {
+    if (!t) continue;
+    if (t.type === "function" || !t.type) {
+      const fn = t.function || t;
+      const name = fn.name || t.name;
+      if (!name) continue;
+      result.push({
+        type: "function",
+        name,
+        description: fn.description || t.description || "",
+        ...(fn.parameters || t.parameters ? { parameters: fn.parameters || t.parameters } : {}),
+      });
+    } else if (t.type === "custom") {
+      result.push(t);
+    }
+  }
+  return result;
+}
+
+/**
  * Converts OpenAI Chat messages into instructions and input array for Codex Responses API.
  */
 function formatCodexPayload(parsedBody: any, targetModel: string) {
@@ -63,7 +88,7 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
   
   let instructions: string | undefined = undefined;
   const instructionParts: string[] = [];
-  const input: Array<{ role: string; content: string }> = [];
+  const input: Array<any> = [];
 
   for (const m of messages) {
     let content = "";
@@ -79,9 +104,44 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
       if (content.trim()) {
         instructionParts.push(content.trim());
       }
+    } else if (m.role === "tool") {
+      const callId = m.tool_call_id || m.id || `call_${Date.now()}`;
+      input.push({
+        type: "function_call_output",
+        call_id: callId,
+        output: content || "",
+      });
+    } else if (m.role === "assistant") {
+      if (content.trim()) {
+        input.push({
+          role: "assistant",
+          content,
+        });
+      }
+      if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        for (const tc of m.tool_calls) {
+          const callId = tc.id || `call_${Date.now()}`;
+          const fnName = tc.function?.name || tc.name || "";
+          let args = tc.function?.arguments || tc.arguments || "{}";
+          if (typeof args !== "string") {
+            try { args = JSON.stringify(args); } catch { args = "{}"; }
+          }
+          input.push({
+            type: "function_call",
+            call_id: callId,
+            name: fnName,
+            arguments: args,
+          });
+        }
+      } else if (!content.trim()) {
+        input.push({
+          role: "assistant",
+          content: "",
+        });
+      }
     } else {
       input.push({
-        role: m.role === "assistant" ? "assistant" : "user",
+        role: "user",
         content: content || "",
       });
     }
@@ -96,12 +156,26 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
     input.push({ role: "user", content: "Hello" });
   }
 
+  const codexTools = formatCodexTools(parsedBody.tools);
+
+  let toolChoice = parsedBody.tool_choice;
+  if (toolChoice && typeof toolChoice === "object") {
+    if (toolChoice.type === "function" && toolChoice.function?.name) {
+      toolChoice = {
+        type: "function",
+        name: toolChoice.function.name,
+      };
+    }
+  }
+
   return {
     model: targetModel,
     stream: true,
     store: false,
     ...(instructions ? { instructions } : {}),
     input,
+    ...(codexTools.length > 0 ? { tools: codexTools } : {}),
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
   };
 }
 
@@ -200,6 +274,8 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
     let completionTokens = 0;
     let totalTokens = 0;
     let accumulatedText = "";
+    const activeToolCalls = new Map<string, { index: number; id: string; name: string; arguments: string }>();
+    let nextToolIndex = 0;
 
     let buffer = "";
 
@@ -216,6 +292,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
           try {
             const data = JSON.parse(trimmed.slice(6));
 
+            // 1. Text delta
             if (data.type === "response.output_text.delta" && typeof data.delta === "string") {
               accumulatedText += data.delta;
               const chunkPayload = {
@@ -234,6 +311,119 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
               controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
             }
 
+            // 2. Tool call added (start of function call)
+            if (data.type === "response.output_item.added" && data.item?.type === "function_call") {
+              const itemId = data.item.id;
+              const callId = data.item.call_id || itemId;
+              const name = data.item.name || "";
+              const tIndex = nextToolIndex++;
+              activeToolCalls.set(itemId, { index: tIndex, id: callId, name, arguments: "" });
+
+              const chunkPayload = {
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model: params.model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: tIndex,
+                          id: callId,
+                          type: "function",
+                          function: {
+                            name,
+                            arguments: "",
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: null,
+                  },
+                ],
+              };
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+            }
+
+            // 3. Function call argument delta
+            if (data.type === "response.function_call_arguments.delta" && typeof data.delta === "string") {
+              const itemId = data.item_id;
+              let toolEntry = activeToolCalls.get(itemId);
+              if (!toolEntry) {
+                const tIndex = nextToolIndex++;
+                toolEntry = { index: tIndex, id: itemId || `call_${Date.now()}`, name: "", arguments: "" };
+                activeToolCalls.set(itemId, toolEntry);
+              }
+              toolEntry.arguments += data.delta;
+
+              const chunkPayload = {
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model: params.model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: toolEntry.index,
+                          function: {
+                            arguments: data.delta,
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: null,
+                  },
+                ],
+              };
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+            }
+
+            // 4. Function call completed
+            if (data.type === "response.output_item.done" && data.item?.type === "function_call") {
+              const itemId = data.item.id;
+              let toolEntry = activeToolCalls.get(itemId);
+              if (!toolEntry) {
+                const tIndex = nextToolIndex++;
+                const callId = data.item.call_id || itemId;
+                const name = data.item.name || "";
+                const args = data.item.arguments || "";
+                toolEntry = { index: tIndex, id: callId, name, arguments: args };
+                activeToolCalls.set(itemId, toolEntry);
+
+                const chunkPayload = {
+                  id: completionId,
+                  object: "chat.completion.chunk",
+                  created,
+                  model: params.model,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {
+                        tool_calls: [
+                          {
+                            index: tIndex,
+                            id: callId,
+                            type: "function",
+                            function: {
+                              name,
+                              arguments: args,
+                            },
+                          },
+                        ],
+                      },
+                      finish_reason: null,
+                    },
+                  ],
+                };
+                controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+              }
+            }
+
             if (data.type === "response.completed" && data.response?.usage) {
               promptTokens = data.response.usage.input_tokens || promptTokens;
               completionTokens = data.response.usage.output_tokens || completionTokens;
@@ -243,7 +433,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
         }
       },
       flush(controller) {
-        // Send final chunk with finish_reason: "stop" and [DONE]
+        const hasToolCalls = activeToolCalls.size > 0;
         const finalChunk = {
           id: completionId,
           object: "chat.completion.chunk",
@@ -253,7 +443,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
             {
               index: 0,
               delta: {},
-              finish_reason: "stop",
+              finish_reason: hasToolCalls ? "tool_calls" : "stop",
             },
           ],
         };
@@ -295,6 +485,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
+  const toolCallsMap = new Map<string, { id: string; name: string; arguments: string }>();
 
   for (const line of rawText.split("\n")) {
     const trimmed = line.trim();
@@ -309,6 +500,44 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
         if (!accumulatedContent) accumulatedContent = data.text;
       }
 
+      if (data.type === "response.output_item.added" && data.item?.type === "function_call") {
+        const id = data.item.id;
+        toolCallsMap.set(id, {
+          id: data.item.call_id || id,
+          name: data.item.name || "",
+          arguments: "",
+        });
+      }
+
+      if (data.type === "response.function_call_arguments.delta" && typeof data.delta === "string") {
+        const id = data.item_id;
+        const entry = toolCallsMap.get(id);
+        if (entry) {
+          entry.arguments += data.delta;
+        } else {
+          toolCallsMap.set(id, {
+            id,
+            name: "",
+            arguments: data.delta,
+          });
+        }
+      }
+
+      if (data.type === "response.output_item.done" && data.item?.type === "function_call") {
+        const id = data.item.id;
+        const entry = toolCallsMap.get(id);
+        if (entry) {
+          if (data.item.name) entry.name = data.item.name;
+          if (data.item.arguments) entry.arguments = data.item.arguments;
+        } else {
+          toolCallsMap.set(id, {
+            id: data.item.call_id || id,
+            name: data.item.name || "",
+            arguments: data.item.arguments || "",
+          });
+        }
+      }
+
       if (data.type === "response.completed" && data.response?.usage) {
         promptTokens = data.response.usage.input_tokens || promptTokens;
         completionTokens = data.response.usage.output_tokens || completionTokens;
@@ -316,6 +545,15 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       }
     } catch {}
   }
+
+  const finalToolCalls = Array.from(toolCallsMap.values()).map((tc) => ({
+    id: tc.id,
+    type: "function" as const,
+    function: {
+      name: tc.name,
+      arguments: tc.arguments,
+    },
+  }));
 
   logUpstreamRequest({
     connectionId: params.connectionId,
@@ -342,9 +580,10 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
           index: 0,
           message: {
             role: "assistant",
-            content: accumulatedContent,
+            content: accumulatedContent || (finalToolCalls.length > 0 ? null : ""),
+            ...(finalToolCalls.length > 0 ? { tool_calls: finalToolCalls } : {}),
           },
-          finish_reason: "stop",
+          finish_reason: finalToolCalls.length > 0 ? "tool_calls" : "stop",
         },
       ],
       usage: {
