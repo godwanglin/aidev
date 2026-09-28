@@ -163,6 +163,7 @@ model AiModel {
   contextWindow  String   @default("128k")
   isActive       Boolean  @default(true)
   isPublic       Boolean  @default(true)
+  type           String   @default("chat") // "chat" | "image" | "embedding"
   createdAt      DateTime @default(now())
 }
 
@@ -264,10 +265,12 @@ model ComboModel {
   comboId         String           @unique // e.g. "combo/free-coding", "combo:general"
   name            String           // e.g. "Auto-Rotate Free Coding Stack"
   description     String?          @db.Text
+  type            String           @default("chat") // "chat" | "image" | "embedding"
   strategy        String           @default("FALLBACK") // "FALLBACK" | "ROUND_ROBIN"
   cooldownSeconds Int              @default(60)
   rateInPer1k     Int              @default(25)  // Credits per 1,000 prompt tokens
   rateOutPer1k    Int              @default(100) // Credits per 1,000 completion tokens
+  costPerImage    Int              @default(500) // Credits per image generation
   isActive        Boolean          @default(true)
   isPublic        Boolean          @default(true)
   createdAt       DateTime         @default(now())
@@ -275,6 +278,7 @@ model ComboModel {
   items           ComboModelItem[]
 
   @@index([isActive, isPublic])
+  @@index([type])
 }
 
 model ComboModelItem {

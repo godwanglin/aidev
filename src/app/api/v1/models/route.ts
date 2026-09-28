@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { handleModelsList } from "@/sse/handlers/models";
 
-export async function GET() {
-  return handleModelsList();
+export async function GET(request: NextRequest) {
+  return handleModelsList(request);
 }
 
 export async function OPTIONS() {

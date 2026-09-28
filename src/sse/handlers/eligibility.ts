@@ -94,6 +94,8 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
     name: string;
     display_name: string;
     owned_by: string;
+    type?: string;
+    cost_per_image?: number;
     eligible: boolean;
     minTier: string;
     minTierName: string;
@@ -168,6 +170,8 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
       name: c.name,
       display_name: c.name,
       owned_by: ownedBy,
+      type: c.type || "chat",
+      cost_per_image: c.type === "image" ? c.costPerImage : undefined,
       eligible: isEligible,
       minTier: minTierId,
       minTierName,

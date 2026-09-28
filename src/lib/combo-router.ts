@@ -10,6 +10,8 @@ export interface CachedCombo {
   cooldownSeconds: number;
   isActive: boolean;
   isPublic: boolean;
+  type?: string;
+  costPerImage?: number;
   items: {
     id: string;
     modelId: string;

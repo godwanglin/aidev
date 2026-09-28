@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateApiKey } from "@/lib/auth";
 import { logRequest } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 import { resolveUpstreamConnection } from "@/lib/router";
+import { isComboModel, findCombo, resolveComboCandidates, markComboModelCooldown } from "@/lib/combo-router";
+import { checkTierModelAccess } from "@/lib/credits";
 
 interface ImageGenerationBody {
   prompt: string;
@@ -14,18 +17,8 @@ interface ImageGenerationBody {
 }
 
 /**
- * Parses width and height integers from size string (e.g. "1024x1024")
- */
-function parseDimensions(sizeStr?: string): { width: number; height: number } {
-  if (!sizeStr) return { width: 1024, height: 1024 };
-  const parts = sizeStr.toLowerCase().split("x");
-  const width = parseInt(parts[0], 10) || 1024;
-  const height = parseInt(parts[1], 10) || width;
-  return { width, height };
-}
-
-/**
- * Handler for POST /v1/images/generations (OpenAI-compatible Image Generation API)
+ * Handler for POST /v1/images/generations (Strict OpenAI-compatible Image Generation API)
+ * Enforces isPublic validation, tier checking, real-time credit deduction, and combo routing without silent fallback.
  */
 export async function handleImagesGenerations(req: NextRequest): Promise<NextResponse> {
   const startTime = Date.now();
@@ -38,6 +31,22 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
     return NextResponse.json(
       { error: { message: auth.error, type: "auth_error", code: status } },
       { status }
+    );
+  }
+
+  // 2. Strict credit balance check (reject 402 if <= 0, exempt ADMIN)
+  const clientUserRole = (auth.apiKey as any)?.user?.role || "USER";
+  const clientUserCredit = Number((auth.apiKey as any)?.user?.creditBalance ?? 0);
+  if (clientUserRole !== "ADMIN" && clientUserCredit <= 0) {
+    return NextResponse.json(
+      {
+        error: {
+          message: "Saldo credit Anda telah habis (0 CR). Silakan top up saldo atau perbarui paket langganan Anda.",
+          type: "insufficient_credits",
+          code: 402,
+        },
+      },
+      { status: 402 }
     );
   }
 
@@ -60,131 +69,178 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
     );
   }
 
-  const model = body.model || "dall-e-3";
-  const responseFormat = body.response_format || "b64_json";
-  const { width, height } = parseDimensions(body.size);
-  const apiKeyId = auth.apiKey.id;
-
-  // 2. Try Upstream Connection if available (e.g. direct OpenAI DALL-E)
-  try {
-    const resolvedRoute = await resolveUpstreamConnection({ model });
-    if (resolvedRoute && resolvedRoute.baseUrl && resolvedRoute.apiKey) {
-      if (resolvedRoute.provider === "OPENAI" || resolvedRoute.provider === "OPENROUTER") {
-        const upstreamUrl = `${resolvedRoute.baseUrl.replace(/\/$/, "")}/images/generations`;
-        const upstreamRes = await fetch(upstreamUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${resolvedRoute.apiKey}`,
-          },
-          body: rawBody,
-        });
-
-        if (upstreamRes.ok) {
-          const data = await upstreamRes.json();
-          logRequest({
-            apiKeyId,
-            path: reqPath,
-            method: "POST",
-            statusCode: 200,
-            model,
-            promptTokens: Math.ceil(prompt.length / 4) || 20,
-            completionTokens: 0,
-            totalTokens: Math.ceil(prompt.length / 4) || 20,
-            durationMs: Date.now() - startTime,
-          });
-          return NextResponse.json(data);
-        }
-      }
-    }
-  } catch (upstreamErr) {
-    // Upstream failed or unconfigured, proceed to high-fidelity engine fallback
+  const requestedModel = (body.model || "").trim();
+  if (!requestedModel) {
+    return NextResponse.json(
+      { error: { message: "The 'model' field is required.", type: "invalid_request_error", code: 400 } },
+      { status: 400 }
+    );
   }
 
-  // 3. Resilient High-Fidelity Engine Fallback (Flux / High-Res Synthesis)
-  try {
-    const encodedPrompt = encodeURIComponent(prompt);
-    const candidateUrls = [
-      `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true`,
-      `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=turbo&nologo=true`,
-      `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=flux&nologo=true`,
-    ];
+  const apiKeyId = auth.apiKey.id;
+  const userTier = (auth.apiKey as any)?.user?.subscriptionTier || "FREE";
 
-    let imageBuffer: Buffer | null = null;
-    let finalImageUrl: string | null = null;
-
-    for (const url of candidateUrls) {
-      try {
-        const res = await fetch(url, {
-          signal: AbortSignal.timeout(18000),
-          headers: {
-            "User-Agent": "AidevGateway/1.1 (Universal-AI-Engine)",
-            Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-          },
-        });
-
-        if (res.ok) {
-          const arrBuf = await res.arrayBuffer();
-          if (arrBuf.byteLength > 1000) {
-            imageBuffer = Buffer.from(arrBuf);
-            finalImageUrl = url;
-            break;
-          }
-        }
-      } catch {}
-    }
-
-    if (!imageBuffer) {
-      return NextResponse.json(
-        {
-          error: {
-            message: "Image generation pipeline was unable to process request at this time. Please retry.",
-            type: "api_error",
-            code: 502,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    // 4. Construct OpenAI-compliant response payload
-    const responseItem: { b64_json?: string; url?: string; revised_prompt?: string } = {
-      revised_prompt: prompt,
-    };
-
-    if (responseFormat === "b64_json") {
-      responseItem.b64_json = imageBuffer.toString("base64");
-    } else {
-      // If client explicitly requested URL format, return data URL or direct image URI
-      responseItem.url = finalImageUrl || `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
-    }
-
-    logRequest({
-      apiKeyId,
-      path: reqPath,
-      method: "POST",
-      statusCode: 200,
-      model,
-      promptTokens: Math.ceil(prompt.length / 4) || 20,
-      completionTokens: 0,
-      totalTokens: Math.ceil(prompt.length / 4) || 20,
-      durationMs: Date.now() - startTime,
-    });
-
-    return NextResponse.json({
-      created: Math.floor(Date.now() / 1000),
-      data: [responseItem],
-    });
-  } catch (err: any) {
+  // 3. Subscription Tier Model Whitelist Check
+  const tierAccess = await checkTierModelAccess(userTier, requestedModel);
+  if (!tierAccess.allowed) {
     return NextResponse.json(
       {
         error: {
-          message: err?.message || "Internal server error during image generation",
-          type: "server_error",
-          code: 500,
+          message: tierAccess.reason || `Model '${requestedModel}' tidak tersedia di paket ${userTier}.`,
+          type: "tier_access_denied",
+          code: 403,
         },
       },
-      { status: 500 }
+      { status: 403 }
     );
   }
+
+  // 4. Strict Public Validation: Only isPublic === true allowed (unless ADMIN)
+  const isCombo = await isComboModel(requestedModel);
+  let candidates: string[] = [];
+  let creditsCostPerImage = 500; // Default 500 credits per image generation
+
+  if (isCombo) {
+    const combo = await findCombo(requestedModel);
+    if (!combo || !combo.isActive) {
+      return NextResponse.json(
+        { error: { message: `Model '${requestedModel}' tidak ditemukan atau sedang tidak aktif.`, type: "invalid_request_error", code: 404 } },
+        { status: 404 }
+      );
+    }
+
+    if (!combo.isPublic && clientUserRole !== "ADMIN") {
+      return NextResponse.json(
+        { error: { message: `Model '${requestedModel}' is private and not accessible publicly.`, type: "permission_error", code: 403 } },
+        { status: 403 }
+      );
+    }
+
+    if (combo.costPerImage && combo.costPerImage > 0) {
+      creditsCostPerImage = combo.costPerImage;
+    }
+
+    const comboInfo = await resolveComboCandidates(requestedModel);
+    candidates = comboInfo?.candidates && comboInfo.candidates.length > 0 ? comboInfo.candidates : [];
+  } else {
+    // Check in AiModel table
+    const aiModel = await prisma.aiModel.findFirst({
+      where: { modelId: requestedModel, isActive: true },
+    });
+
+    if (aiModel) {
+      if (!aiModel.isPublic && clientUserRole !== "ADMIN") {
+        return NextResponse.json(
+          { error: { message: `Model '${requestedModel}' is private and not accessible publicly.`, type: "permission_error", code: 403 } },
+          { status: 403 }
+        );
+      }
+      candidates = [aiModel.modelId];
+    } else if (clientUserRole === "ADMIN") {
+      // Allow direct upstream pass for ADMIN
+      candidates = [requestedModel];
+    } else {
+      return NextResponse.json(
+        { error: { message: `Model '${requestedModel}' is not public or not available.`, type: "permission_error", code: 403 } },
+        { status: 403 }
+      );
+    }
+  }
+
+  if (candidates.length === 0) {
+    return NextResponse.json(
+      { error: { message: `No active upstream provider available for model '${requestedModel}'.`, type: "upstream_error", code: 503 } },
+      { status: 503 }
+    );
+  }
+
+  // 5. Upstream Execution with Combo Rotation (NO FALLBACK)
+  let lastErrorStatus = 502;
+  let lastErrorMessage = "Failed to generate image from upstream provider.";
+  let lastErrorBody: any = null;
+
+  for (let idx = 0; idx < candidates.length; idx++) {
+    const candidateModel = candidates[idx];
+    try {
+      const resolvedRoute = await resolveUpstreamConnection({ model: candidateModel });
+      if (!resolvedRoute || !resolvedRoute.baseUrl || !resolvedRoute.apiKey) {
+        continue;
+      }
+
+      const upstreamUrl = `${resolvedRoute.baseUrl.replace(/\/$/, "")}/images/generations`;
+      const candidatePayload = {
+        ...body,
+        model: resolvedRoute.upstreamModel || candidateModel,
+      };
+
+      const upstreamRes = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${resolvedRoute.apiKey}`,
+        },
+        body: JSON.stringify(candidatePayload),
+        signal: AbortSignal.timeout(45000),
+      });
+
+      if (upstreamRes.ok) {
+        const data = await upstreamRes.json();
+
+        // Real-time token / credit deduction log
+        logRequest({
+          apiKeyId,
+          path: reqPath,
+          method: "POST",
+          statusCode: 200,
+          model: requestedModel,
+          promptTokens: Math.ceil(prompt.length / 4) || 20,
+          completionTokens: 1000,
+          totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
+          creditsCost: creditsCostPerImage,
+          durationMs: Date.now() - startTime,
+        });
+
+        return NextResponse.json(data);
+      }
+
+      // If upstream failed, capture error details and mark cooldown
+      lastErrorStatus = upstreamRes.status;
+      try {
+        lastErrorBody = await upstreamRes.json();
+        lastErrorMessage = lastErrorBody?.error?.message || lastErrorBody?.message || `Upstream returned HTTP ${upstreamRes.status}`;
+      } catch {
+        lastErrorMessage = (await upstreamRes.text().catch(() => "")) || `Upstream returned HTTP ${upstreamRes.status}`;
+      }
+
+      markComboModelCooldown(candidateModel, 60);
+    } catch (err: any) {
+      lastErrorMessage = err?.message || "Connection timeout to image upstream.";
+      markComboModelCooldown(candidateModel, 60);
+    }
+  }
+
+  // All candidates failed — return authoritative error to client (NO SILENT FALLBACK)
+  logRequest({
+    apiKeyId,
+    path: reqPath,
+    method: "POST",
+    statusCode: lastErrorStatus >= 400 ? lastErrorStatus : 502,
+    model: requestedModel,
+    promptTokens: Math.ceil(prompt.length / 4) || 20,
+    completionTokens: 0,
+    totalTokens: Math.ceil(prompt.length / 4) || 20,
+    creditsCost: 0,
+    durationMs: Date.now() - startTime,
+  });
+
+  return NextResponse.json(
+    lastErrorBody || {
+      error: {
+        message: lastErrorMessage,
+        type: "upstream_error",
+        code: lastErrorStatus,
+      },
+    },
+    { status: lastErrorStatus >= 400 ? lastErrorStatus : 502 }
+  );
 }

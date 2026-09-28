@@ -16,6 +16,7 @@ export interface RequestLogData {
 export async function logRequest(data: RequestLogData) {
   let cost = data.creditsCost ?? 0;
   const isEmbedding = Boolean(data.path?.includes("embeddings"));
+  const isImage = Boolean(data.path?.includes("images"));
   const hasNoCompletion = !data.completionTokens || data.completionTokens <= 0;
 
   // Strict Rule 1: Error status (HTTP >= 400) NEVER incurs credits cost
@@ -23,12 +24,22 @@ export async function logRequest(data: RequestLogData) {
     cost = 0;
   }
 
-  // Strict Rule 2: Non-embedding requests without generated completion tokens NEVER incur credits cost
-  if (!isEmbedding && hasNoCompletion) {
+  // Strict Rule 2: Non-embedding & non-image requests without generated completion tokens NEVER incur credits cost
+  if (!isEmbedding && !isImage && hasNoCompletion) {
     cost = 0;
   }
 
-  // Only calculate cost if response was successful (2xx/3xx) and generated real output (or is embedding)
+  // Calculate image cost if not explicitly passed
+  if (cost === 0 && isImage && data.statusCode >= 200 && data.statusCode < 400) {
+    try {
+      const combo = data.model ? await prisma.comboModel.findFirst({ where: { comboId: data.model } }) : null;
+      cost = combo?.costPerImage || 500;
+    } catch {
+      cost = 500;
+    }
+  }
+
+  // Only calculate cost if response was successful (2xx/3xx) and generated real output (or is embedding/image)
   if (cost === 0 && data.statusCode >= 200 && data.statusCode < 400 && (isEmbedding || !hasNoCompletion)) {
     if (data.totalTokens && data.totalTokens > 0) {
       try {
@@ -69,7 +80,7 @@ export async function logRequest(data: RequestLogData) {
         data.statusCode >= 200 &&
         data.statusCode < 400 &&
         cost > 0 &&
-        (isEmbedding || (data.completionTokens && data.completionTokens > 0))
+        (isEmbedding || isImage || (data.completionTokens && data.completionTokens > 0))
       ) {
         try {
           const { deductUserCredits } = await import("./credits");

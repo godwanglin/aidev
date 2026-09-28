@@ -4,10 +4,28 @@ import { getModelCapabilities } from "@/lib/model-capabilities";
 
 /**
  * Handler for GET /v1/models (9router pattern)
+ * By default, returns text/chat LLM models.
+ * Excludes image models unless ?type=image or ?type=all is requested.
  */
-export async function handleModelsList(): Promise<NextResponse> {
+export async function handleModelsList(req?: NextRequest): Promise<NextResponse> {
+  const url = req ? new URL(req.url) : null;
+  const requestedType = url?.searchParams.get("type")?.toLowerCase().trim() || null;
+
+  // By default (or ?type=chat), hide image models from general LLM dropdown
+  // If ?type=image, only return image models
+  // If ?type=all, return all models
+  const whereClause: any = { isActive: true, isPublic: true };
+  if (requestedType === "image") {
+    whereClause.type = "image";
+  } else if (requestedType === "all") {
+    // No type filter, return everything
+  } else {
+    // Default: exclude image models so they don't pollute chat dropdown
+    whereClause.type = { not: "image" };
+  }
+
   const dbCombos = await prisma.comboModel.findMany({
-    where: { isActive: true, isPublic: true },
+    where: whereClause,
     include: {
       items: {
         where: { isActive: true },
@@ -24,6 +42,7 @@ export async function handleModelsList(): Promise<NextResponse> {
     if (seenIds.has(c.comboId)) continue;
     seenIds.add(c.comboId);
 
+    const isImageModel = c.type === "image";
     const firstItem = c.items[0]?.modelId || "";
     const firstItemLower = firstItem.toLowerCase();
     const ownedBy = firstItemLower.startsWith("cx/") || c.comboId.includes("gpt")
@@ -39,13 +58,26 @@ export async function handleModelsList(): Promise<NextResponse> {
       : "system";
 
     const effectiveModelId = (c.comboId.toLowerCase().includes("v4") ? c.comboId : firstItem) || c.comboId;
-    const caps = getModelCapabilities(effectiveModelId, ownedBy);
+    const caps = isImageModel
+      ? {
+          context_length: 0,
+          max_completion_tokens: 0,
+          capabilities: {
+            chat: false,
+            image_generation: true,
+            vision: false,
+            tools: false,
+          },
+        }
+      : getModelCapabilities(effectiveModelId, ownedBy);
 
     entries.push({
       id: c.comboId,
       name: c.name,
       display_name: c.name,
       object: "model",
+      type: c.type || "chat",
+      cost_per_image: isImageModel ? c.costPerImage : undefined,
       created: Math.floor(new Date(c.createdAt).getTime() / 1000),
       owned_by: ownedBy,
       permission: [],
@@ -74,12 +106,26 @@ export async function handleModelDetail(modelId: string): Promise<NextResponse> 
   });
 
   if (dbModel) {
-    const caps = getModelCapabilities(dbModel.modelId, dbModel.provider);
+    const isImageModel = dbModel.type === "image";
+    const caps = isImageModel
+      ? {
+          context_length: 0,
+          max_completion_tokens: 0,
+          capabilities: {
+            chat: false,
+            image_generation: true,
+            vision: false,
+            tools: false,
+          },
+        }
+      : getModelCapabilities(dbModel.modelId, dbModel.provider);
+
     return NextResponse.json({
       id: dbModel.modelId,
       name: dbModel.name,
       display_name: dbModel.name,
       object: "model",
+      type: dbModel.type || "chat",
       created: Math.floor(new Date(dbModel.createdAt).getTime() / 1000),
       owned_by: dbModel.provider.toLowerCase(),
       permission: [],
@@ -97,6 +143,7 @@ export async function handleModelDetail(modelId: string): Promise<NextResponse> 
   });
 
   if (dbCombo) {
+    const isImageModel = dbCombo.type === "image";
     const firstItem = dbCombo.items[0]?.modelId || "";
     const firstItemLower = firstItem.toLowerCase();
     const ownedBy = firstItemLower.startsWith("cx/") || dbCombo.comboId.includes("gpt")
@@ -111,12 +158,26 @@ export async function handleModelDetail(modelId: string): Promise<NextResponse> 
       ? "openrouter"
       : "system";
     const effectiveModelId = (dbCombo.comboId.toLowerCase().includes("v4") ? dbCombo.comboId : firstItem) || dbCombo.comboId;
-    const caps = getModelCapabilities(effectiveModelId, ownedBy);
+    const caps = isImageModel
+      ? {
+          context_length: 0,
+          max_completion_tokens: 0,
+          capabilities: {
+            chat: false,
+            image_generation: true,
+            vision: false,
+            tools: false,
+          },
+        }
+      : getModelCapabilities(effectiveModelId, ownedBy);
+
     return NextResponse.json({
       id: dbCombo.comboId,
       name: dbCombo.name,
       display_name: dbCombo.name,
       object: "model",
+      type: dbCombo.type || "chat",
+      cost_per_image: isImageModel ? dbCombo.costPerImage : undefined,
       created: Math.floor(new Date(dbCombo.createdAt).getTime() / 1000),
       owned_by: dbCombo.comboId,
       permission: [],
@@ -133,6 +194,7 @@ export async function handleModelDetail(modelId: string): Promise<NextResponse> 
   return NextResponse.json({
     id: decodedModelId,
     object: "model",
+    type: "chat",
     created: Math.floor(Date.now() / 1000),
     owned_by: caps.owned_by,
     permission: [],
