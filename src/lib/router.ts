@@ -92,27 +92,31 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     ]
   };
 
-  if (targetProvider) {
-    const isCustom = targetProvider.startsWith('CUSTOM_');
-    const customSlug = isCustom ? targetProvider.replace(/^CUSTOM_/, '') : '';
-    whereClause.provider = {
-      in: [
-        targetProvider,
-        targetProvider.toUpperCase(),
-        ...(isCustom ? [customSlug, customSlug.toLowerCase(), 'CUSTOM'] : []),
-        ...(targetProvider === 'OPENAI' || targetProvider === 'OPENAI_CODEX' || targetProvider === 'CODEX' ? ['OPENAI_CODEX', 'OPENAI', 'CODEX'] : []),
-        ...(targetProvider === 'CHATGPT_WEB' || targetProvider === 'CHATGPT' || targetProvider === 'GPTWEB' ? ['CHATGPT_WEB', 'CHATGPT', 'GPTWEB'] : []),
-        ...(targetProvider === 'GOOGLE' || targetProvider === 'GEMINI' || targetProvider === 'GEMINI_CLI' ? ['GEMINI', 'GOOGLE', 'GEMINI_CLI'] : []),
-        ...(targetProvider === 'ANTIGRAVITY' ? ['ANTIGRAVITY'] : []),
-        ...(targetProvider === 'DEEPSEEK' ? ['DEEPSEEK'] : []),
-        ...(targetProvider === 'ALIBABA' || targetProvider === 'QWEN' ? ['ALIBABA', 'QWEN', 'DASHSCOPE'] : []),
-        ...(targetProvider === 'OLLAMA_CLOUD' || targetProvider === 'OLLAMA' ? ['OLLAMA_CLOUD', 'OLLAMA'] : []),
-        ...(targetProvider === 'GROQ' ? ['GROQ'] : []),
-        ...(targetProvider === 'MISTRAL' ? ['MISTRAL'] : []),
-        ...(targetProvider === 'TOGETHER' ? ['TOGETHER'] : []),
-      ]
-    };
+  if (!targetProvider) {
+    // Never silently route unknown models to an arbitrary provider connection!
+    // Multi-model fallbacks are strictly reserved for explicit Combo Models.
+    return null;
   }
+
+  const isCustom = targetProvider.startsWith('CUSTOM_');
+  const customSlug = isCustom ? targetProvider.replace(/^CUSTOM_/, '') : '';
+  whereClause.provider = {
+    in: [
+      targetProvider,
+      targetProvider.toUpperCase(),
+      ...(isCustom ? [customSlug, customSlug.toLowerCase(), 'CUSTOM'] : []),
+      ...(targetProvider === 'OPENAI' || targetProvider === 'OPENAI_CODEX' || targetProvider === 'CODEX' ? ['OPENAI_CODEX', 'OPENAI', 'CODEX'] : []),
+      ...(targetProvider === 'CHATGPT_WEB' || targetProvider === 'CHATGPT' || targetProvider === 'GPTWEB' ? ['CHATGPT_WEB', 'CHATGPT', 'GPTWEB'] : []),
+      ...(targetProvider === 'GOOGLE' || targetProvider === 'GEMINI' || targetProvider === 'GEMINI_CLI' ? ['GEMINI', 'GOOGLE', 'GEMINI_CLI'] : []),
+      ...(targetProvider === 'ANTIGRAVITY' ? ['ANTIGRAVITY'] : []),
+      ...(targetProvider === 'DEEPSEEK' ? ['DEEPSEEK'] : []),
+      ...(targetProvider === 'ALIBABA' || targetProvider === 'QWEN' ? ['ALIBABA', 'QWEN', 'DASHSCOPE'] : []),
+      ...(targetProvider === 'OLLAMA_CLOUD' || targetProvider === 'OLLAMA' ? ['OLLAMA_CLOUD', 'OLLAMA'] : []),
+      ...(targetProvider === 'GROQ' ? ['GROQ'] : []),
+      ...(targetProvider === 'MISTRAL' ? ['MISTRAL'] : []),
+      ...(targetProvider === 'TOGETHER' ? ['TOGETHER'] : []),
+    ]
+  };
 
   const connections = await prisma.providerConnection.findMany({
     where: whereClause,

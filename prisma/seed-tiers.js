@@ -18,7 +18,6 @@ async function seed() {
       description: "Paket awal gratis untuk mencoba coding dan eksplorasi ringan.",
       allowedModelIds: JSON.stringify([
         "deepseek-v4-pro",
-        "ag/gemini-3.8-flash-high",
         "ag/gemini-2.5-flash",
         "gem/gemini-2.5-flash",
         "gem/gemini-2.5-flash-lite",
@@ -43,7 +42,6 @@ async function seed() {
       allowedModelIds: JSON.stringify([
         "deepseek-v4-pro",
         "gpt-5.5",
-        "ag/gemini-3.8-flash-high",
         "ag/gemini-2.5-flash",
         "gem/gemini-2.5-flash",
         "gem/gemini-2.5-flash-lite",
@@ -69,7 +67,6 @@ async function seed() {
       allowedModelIds: JSON.stringify([
         "deepseek-v4-pro",
         "gpt-5.5",
-        "ag/gemini-3.8-flash-high",
         "ag/gemini-2.5-flash",
         "gem/gemini-2.5-flash",
         "gem/gemini-2.5-pro",

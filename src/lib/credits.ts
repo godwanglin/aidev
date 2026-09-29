@@ -149,9 +149,20 @@ export async function checkTierModelAccess(
     return { allowed: true };
   }
 
-  const isModelMatch = allowedList.some((allowed) => {
-    return targetModel === allowed || targetModel.includes(allowed) || allowed.includes(targetModel);
-  });
+  function cleanModel(m: string): string {
+    const s = (m || "").toLowerCase().trim();
+    return s.includes("/") ? s.split("/").slice(1).join("/") : s;
+  }
+
+  function matchesExactModel(allowed: string, target: string): boolean {
+    if (allowed === "*") return true;
+    const a = allowed.toLowerCase().trim();
+    const t = target.toLowerCase().trim();
+    if (a === t) return true;
+    return cleanModel(a) === cleanModel(t);
+  }
+
+  const isModelMatch = allowedList.some((allowed) => matchesExactModel(allowed, targetModel));
 
   if (isModelMatch) {
     return { allowed: true };
@@ -161,7 +172,7 @@ export async function checkTierModelAccess(
   const unlockingTier = allTiers.find((t) => {
     try {
       const list = JSON.parse(t.allowedModelIds || "[]").map((m: string) => m.toLowerCase());
-      return list.includes("*") || list.some((allowed: string) => targetModel.includes(allowed) || allowed.includes(targetModel));
+      return list.includes("*") || list.some((allowed: string) => matchesExactModel(allowed, targetModel));
     } catch {
       return false;
     }
