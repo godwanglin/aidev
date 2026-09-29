@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { formatUsd, usdToIdr, idrToUsd, getTierLevel } from "@/lib/billing-config";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import CustomDropdown from "@/components/CustomDropdown";
+import { Modal } from "@/components/Modal";
+import { Pagination } from "@/components/Pagination";
 import {
   Crown,
   Coins,
@@ -17,64 +20,48 @@ import {
   AlertCircle,
   RefreshCw,
   QrCode,
-  CreditCard,
+  Wallet,
   ChevronLeft,
   ChevronRight,
   Gauge,
   KeyRound,
   Rocket,
   Flame,
+  Lock,
 } from "lucide-react";
 
-// Ketengan Packages: 1 IDR = 10 Credits base ratio with bonus credits on higher amounts
+// Paket Top-Up Saldo USD Ketengan (Dihitung dinamis via idrToUsd)
 const KETENGAN_PACKAGES = [
-  {
-    credits: 150000,
-    price: 15000,
-    label: "150k Credits",
-    priceLabel: "Rp 15.000",
-    tag: "Starter",
-    desc: "150.000 Saldo Credits",
-  },
-  {
-    credits: 500000,
-    price: 50000,
-    label: "500k Credits",
-    priceLabel: "Rp 50.000",
-    tag: "Popular",
-    desc: "500.000 Saldo Credits",
-  },
-  {
-    credits: 1050000,
-    price: 100000,
-    label: "1.05M Credits",
-    priceLabel: "Rp 100.000",
-    tag: "Bonus +50k CR",
-    desc: "1.050.000 Saldo Credits",
-  },
-  {
-    credits: 2750000,
-    price: 250000,
-    label: "2.75M Credits",
-    priceLabel: "Rp 250.000",
-    tag: "Power User (+250k CR)",
-    desc: "2.750.000 Saldo Credits",
-  },
-];
+  { price: 15000, tag: "Starter", bonusPct: 0 },
+  { price: 50000, tag: "Popular", bonusPct: 0 },
+  { price: 100000, tag: "Bonus +5%", bonusPct: 5 },
+  { price: 250000, tag: "Power User (+10%)", bonusPct: 10 },
+].map((p) => {
+  const baseUsd = idrToUsd(p.price);
+  const totalUsd = Number((baseUsd * (1 + p.bonusPct / 100)).toFixed(2));
+  return {
+    balanceUsd: totalUsd,
+    price: p.price,
+    label: `$${totalUsd}`,
+    priceLabel: `Rp ${p.price.toLocaleString("id-ID")}`,
+    tag: p.tag,
+    desc: `Saldo $${totalUsd}${p.bonusPct > 0 ? ` (Bonus ${p.bonusPct}%)` : ""}`,
+  };
+});
 
 const DEFAULT_TIERS = [
   {
     id: "FREE",
-    name: "Free",
+    name: "Free Tier",
     priceIdr: 0,
-    monthlyCredits: 20000,
+    monthlyBalanceUsd: 1,
     rpmLimit: 15,
     maxKeys: 2,
     routingPriority: "REGULAR",
     bonusPercentage: 0,
     description: "Cocok untuk eksplorasi dan integrasi awal proyek prototype.",
     features: [
-      "20.000 Welcome Credits gratis",
+      "Saldo awal $1.00 gratis",
       "Batas 15 Request Per Menit (RPM)",
       "Maksimal 2 API Keys",
       "Jalur Regular Routing",
@@ -84,60 +71,60 @@ const DEFAULT_TIERS = [
   },
   {
     id: "PLUS",
-    name: "Plus",
+    name: "Plus Developer",
     priceIdr: 49000,
-    monthlyCredits: 650000,
+    monthlyBalanceUsd: 3.0625,
     rpmLimit: 30,
     maxKeys: 5,
     routingPriority: "FAST_LANE",
     bonusPercentage: 0,
     description: "Pilihan hemat untuk developer mandiri & testing produksi ringan.",
     features: [
-      "650.000 Credits per bulan (Rasio 1:13.26)",
+      "Saldo $3.06 per bulan",
       "Batas 30 Request Per Menit (RPM)",
       "Maksimal 5 API Keys",
       "Jalur Fast Lane Priority",
-      "Akses model GPT-5.2 Core & Claude 3.5",
+      "Akses model coding standar",
       "Dukungan teknis prioritas",
     ],
   },
   {
     id: "PRO",
-    name: "Pro",
+    name: "Pro Developer",
     priceIdr: 99000,
-    monthlyCredits: 1200000,
+    monthlyBalanceUsd: 6.1875,
     rpmLimit: 60,
     maxKeys: 10,
     routingPriority: "FAST_LANE",
     bonusPercentage: 30,
     description: "Paket paling populer untuk tim kecil & automasi skala menengah.",
     features: [
-      "1.200.000 Credits per bulan (Rasio 1:12.12)",
+      "Saldo $6.19 per bulan",
       "Batas 60 Request Per Menit (RPM)",
       "Maksimal 10 API Keys",
       "Jalur Fast Lane Priority",
       "Akses model Pro (GPT-5.5, Claude Sonnet)",
-      "1x Emergency Rescue Bonus +30% (+360k CR)",
+      "1x Emergency Rescue Bonus +30% (+$1.86)",
       "Support prioritas 24/7",
     ],
   },
   {
     id: "ULTRA",
-    name: "Ultra",
+    name: "Ultra Power / Team",
     priceIdr: 249000,
-    monthlyCredits: 3500000,
+    monthlyBalanceUsd: 15.5625,
     rpmLimit: 120,
     maxKeys: 999,
     routingPriority: "DEDICATED",
     bonusPercentage: 50,
     description: "Performa tertinggi untuk workload produksi skala enterprise.",
     features: [
-      "3.500.000 Credits per bulan (Rasio 1:14.05)",
+      "Saldo $15.56 per bulan",
       "Batas 120 Request Per Menit (RPM)",
       "Unlimited API Keys",
       "Dedicated Lane + Zero Cooldown",
       "Akses penuh seluruh model Flagship",
-      "1x Emergency Rescue Bonus +50% (+1.75M CR)",
+      "1x Emergency Rescue Bonus +50% (+$7.78)",
       "Direct SLA & Dedicated Support",
     ],
   },
@@ -146,15 +133,16 @@ const DEFAULT_TIERS = [
 export default function BillingPage() {
   const [data, setData] = useState<{
     balanceTokens: number;
-    creditBalance: number;
+    balanceUsd: number;
     subscriptionTier: string;
     subscriptionExpiresAt: string | null;
-    monthlyCreditsAllocated: number;
-    monthlyCreditsRemaining: number;
+    monthlyBalanceAllocatedUsd: number;
+    monthlyBalanceRemainingUsd: number;
     bonusRescueClaimed: boolean;
     usagePct: number;
     canClaimRescueBonus: boolean;
     tiers: any[];
+    topupPackages?: any[];
     totalConsumedTokens: number;
     userDiscount?: { discountPct: number; reason: string | null };
     activeOrder: any;
@@ -162,15 +150,16 @@ export default function BillingPage() {
     pagination: any;
   }>({
     balanceTokens: 0,
-    creditBalance: 0,
+    balanceUsd: 0,
     subscriptionTier: "FREE",
     subscriptionExpiresAt: null,
-    monthlyCreditsAllocated: 20000,
-    monthlyCreditsRemaining: 20000,
+    monthlyBalanceAllocatedUsd: 0,
+    monthlyBalanceRemainingUsd: 0,
     bonusRescueClaimed: false,
     usagePct: 0,
     canClaimRescueBonus: false,
     tiers: [],
+    topupPackages: [],
     totalConsumedTokens: 0,
     userDiscount: { discountPct: 0, reason: null },
     activeOrder: null,
@@ -197,6 +186,7 @@ export default function BillingPage() {
   const [payMethod, setPayMethod] = useState<"QRIS" | "VA">("QRIS");
   const [selectedBank, setSelectedBank] = useState<"bca" | "bni" | "bri" | "echannel">("bca");
   const [activeInvoice, setActiveInvoice] = useState<any>(null);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [invoiceStatusMsg, setInvoiceStatusMsg] = useState<{
     type: "pending" | "success" | "error";
@@ -209,7 +199,7 @@ export default function BillingPage() {
     try {
       const res = await fetch(`/api/billing?page=${targetPage}&limit=${pageSize}`);
       const json = await res.json();
-      if (json.creditBalance !== undefined || json.balanceTokens !== undefined) {
+      if (json.balanceUsd !== undefined || json.balanceTokens !== undefined) {
         setData(json);
         if (json.activeOrder && !activeInvoice) {
           setActiveInvoice(json.activeOrder);
@@ -235,7 +225,7 @@ export default function BillingPage() {
       if (json.success) {
         setBonusNotification({
           type: "success",
-          text: json.message || `Berhasil mengklaim +${Number(json.bonusCredits).toLocaleString()} Credits!`,
+          text: json.message || `Berhasil mengklaim +$${Number(json.bonusBalanceUsd || 0).toFixed(2)}!`,
         });
         await fetchBilling(page);
       } else {
@@ -253,15 +243,56 @@ export default function BillingPage() {
     setClaimingBonus(false);
   }
 
+  const activePackages = useMemo(() => {
+    if (data.topupPackages && data.topupPackages.length > 0) {
+      return data.topupPackages.map((p: any) => {
+        const totalUsd = Number(
+          p.balanceUsd ||
+            (idrToUsd(p.priceIdr) * (1 + (p.bonusPercentage || 0) / 100)).toFixed(2)
+        );
+        return {
+          id: p.id,
+          name: p.name,
+          price: p.priceIdr,
+          balanceUsd: totalUsd,
+          label: `$${totalUsd}`,
+          priceLabel: `Rp ${Number(p.priceIdr).toLocaleString("id-ID")}`,
+          tag: p.tag || p.name,
+          desc: `Saldo $${totalUsd}${
+            p.bonusPercentage > 0 ? ` (Bonus ${p.bonusPercentage}%)` : ""
+          }`,
+        };
+      });
+    }
+    return KETENGAN_PACKAGES;
+  }, [data.topupPackages]);
+
+  const effectiveKetengan = selectedKetengan || activePackages[1] || activePackages[0];
+
   function handleOpenSubscriptionCheckout(tier: any) {
+    const targetTierKey = tier.id.toUpperCase();
+    const currentTierName = (data.subscriptionTier || "FREE").toUpperCase();
+    const isSubscriptionActive = currentTierName !== "FREE" && Boolean(
+      data.subscriptionExpiresAt && new Date(data.subscriptionExpiresAt).getTime() > Date.now()
+    );
+    const currentTierLevel = getTierLevel(currentTierName);
+    const targetTierLevel = getTierLevel(targetTierKey);
+
+    if (isSubscriptionActive && targetTierLevel < currentTierLevel) {
+      alert(`Proteksi Downgrade: Anda sedang aktif di paket ${currentTierName}. Tidak dapat downgrade ke paket ${targetTierKey}.`);
+      return;
+    }
+
+    setInvoiceError(null);
     setSelectedTier(tier);
     setCheckoutType("SUBSCRIPTION");
     setActiveInvoice(null);
     setShowModal(true);
   }
 
-  function handleOpenKetenganCheckout(pkg = KETENGAN_PACKAGES[1]) {
-    setSelectedKetengan(pkg);
+  function handleOpenKetenganCheckout(pkg?: any) {
+    setInvoiceError(null);
+    setSelectedKetengan(pkg || activePackages[1] || activePackages[0]);
     setCheckoutType("TOPUP");
     setActiveInvoice(null);
     setShowModal(true);
@@ -270,6 +301,7 @@ export default function BillingPage() {
   async function handleCreateInvoice(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setInvoiceError(null);
     try {
       const payload: any = {
         orderType: checkoutType,
@@ -280,7 +312,7 @@ export default function BillingPage() {
       if (checkoutType === "SUBSCRIPTION") {
         payload.tier = selectedTier?.id || "PLUS";
       } else {
-        payload.creditAmount = selectedKetengan?.credits || 500000;
+        payload.priceIdr = effectiveKetengan?.price || 50000;
       }
 
       const res = await fetch("/api/billing", {
@@ -291,8 +323,12 @@ export default function BillingPage() {
       const json = await res.json();
       if (json.success && json.order) {
         setActiveInvoice(json.order);
+      } else if (json.error) {
+        setInvoiceError(json.error);
       }
-    } catch {}
+    } catch {
+      setInvoiceError("Terjadi kesalahan jaringan saat membuat tagihan pembayaran.");
+    }
     setSubmitting(false);
   }
 
@@ -340,6 +376,13 @@ export default function BillingPage() {
   }
 
   const currentTier = (data.subscriptionTier || "FREE").toUpperCase();
+  const isSubscriptionActive =
+    currentTier !== "FREE" &&
+    Boolean(
+      data.subscriptionExpiresAt &&
+        new Date(data.subscriptionExpiresAt).getTime() > Date.now()
+    );
+  const currentTierLevel = getTierLevel(currentTier);
   const tiersToRender = data.tiers && data.tiers.length > 0 ? data.tiers : DEFAULT_TIERS;
   const currentDiscountPct = data.userDiscount?.discountPct || 0;
 
@@ -350,7 +393,7 @@ export default function BillingPage() {
     <DashboardShell>
       <div className="content">
         <PageHead
-          title="Subscription & Credit Billing"
+          title="Subscription & Saldo"
         >
           <button
             className="control btn-inline"
@@ -365,7 +408,7 @@ export default function BillingPage() {
             onClick={() => handleOpenKetenganCheckout()}
           >
             <Coins size={13} strokeWidth={2} />
-            <span>Beli Credits Ketengan</span>
+            <span>Top-Up Saldo</span>
           </button>
         </PageHead>
 
@@ -407,7 +450,7 @@ export default function BillingPage() {
                   Penggunaan kuota bulanan Anda saat ini telah mencapai <strong>{data.usagePct}%</strong> (&ge; 95%).
                   Klaim kuota darurat tambahan sebesar{" "}
                   <strong>
-                    {currentTier === "ULTRA" ? "+1.750.000 Credits" : "+360.000 Credits"}
+                    {currentTier === "ULTRA" ? "+$7.78 (+50%)" : "+$1.86 (+30%)"}
                   </strong>{" "}
                   secara instan ke akun Anda tanpa biaya tambahan (1x per periode langganan).
                 </p>
@@ -456,8 +499,8 @@ export default function BillingPage() {
               <div className="space-y-1.5 mt-auto">
                 <div className="quota-stat-row">
                   <span className="quota-stat-label">Kuota Bulanan</span>
-                  <span className="quota-stat-value">
-                    {formatNum(Math.max(0, data.monthlyCreditsAllocated - data.monthlyCreditsRemaining))} / {formatNum(data.monthlyCreditsAllocated)} CR
+                  <span className="quota-stat-value font-mono">
+                    ${Number(Math.max(0, data.monthlyBalanceAllocatedUsd - data.monthlyBalanceRemainingUsd)).toFixed(2)} / ${Number(data.monthlyBalanceAllocatedUsd).toFixed(2)}
                   </span>
                 </div>
 
@@ -484,22 +527,21 @@ export default function BillingPage() {
             </div>
           </article>
 
-          {/* Card 2: Total Credit Balance */}
+          {/* Card 2: Total Saldo */}
           <article className="summary-card">
             <div className="summary-card-header">
-              <span className="summary-card-label">Total Credit Balance</span>
+              <span className="summary-card-label">Total Saldo</span>
             </div>
 
             <div className="summary-card-body">
               <div>
-                <div className="balance-main-row">
+                <div className="balance-main-row flex items-baseline gap-2">
                   <Coins size={22} className="text-amber-500 shrink-0 self-center" />
-                  <span className="balance-val">{formatNum(data.creditBalance)}</span>
-                  <span className="balance-unit">CR</span>
+                  <span className="balance-val font-mono">${Number(data.balanceUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
 
                 <div className="balance-info-sub">
-                  Saldo kredit aktif fleksibel siap pakai untuk semua model AI tanpa masa kedaluwarsa.
+                  Saldo fleksibel siap pakai untuk semua model AI tanpa masa kedaluwarsa.
                 </div>
               </div>
 
@@ -510,7 +552,7 @@ export default function BillingPage() {
                   onClick={() => handleOpenKetenganCheckout()}
                 >
                   <Coins size={13} />
-                  <span>Top-Up Kredit Ketengan</span>
+                  <span>Top-Up Saldo</span>
                   <ArrowRight size={12} className="ml-auto" />
                 </button>
               </div>
@@ -570,7 +612,7 @@ export default function BillingPage() {
                 <span>Pilihan Paket Langganan (Monthly Subscriptions)</span>
               </h2>
               <p className="text-xs text-muted mt-0.5">
-                Dapatkan rasio kredit hemat (1 IDR &asymp; 13+ Credits), akses model eksklusif, limit RPM lebih tinggi, dan fast-lane routing.
+                Pilih paket langganan bulanan untuk kuota saldo hemat, limit RPM tinggi, dedicated priority, dan akses model flagship.
               </p>
             </div>
           </div>
@@ -581,12 +623,21 @@ export default function BillingPage() {
               const isCurrent = currentTier === tierKey;
               const isFeatured = tierKey === "PRO";
               const defaultTierObj = DEFAULT_TIERS.find((d) => d.id === tierKey);
-              const features = tier.features || defaultTierObj?.features || [];
+              const features =
+                Array.isArray(tier.features) && tier.features.length > 0
+                  ? tier.features
+                  : defaultTierObj?.features || [];
+
+              const tierLevel = getTierLevel(tierKey);
+              const isTierDowngrade = isSubscriptionActive && tierLevel < currentTierLevel;
+              const canRenew = isCurrent && isSubscriptionActive && tier.priceIdr > 0;
 
               return (
                 <div
                   key={tier.id}
-                  className={`tier-card ${isCurrent ? "current" : ""} ${isFeatured ? "featured" : ""}`}
+                  className={`tier-card ${isCurrent ? "current" : ""} ${isFeatured ? "featured" : ""} ${
+                    isTierDowngrade ? "opacity-60 bg-stone-50/50 dark:bg-stone-900/30 border-stone-200 dark:border-stone-800" : ""
+                  }`}
                 >
                   {isFeatured && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">
@@ -599,11 +650,16 @@ export default function BillingPage() {
                       <Crown size={10} />
                       <span>{tier.name || tierKey}</span>
                     </span>
-                    {isCurrent && (
+                    {isCurrent ? (
                       <span className="tier-current-pill">
                         PAKET AKTIF
                       </span>
-                    )}
+                    ) : isTierDowngrade ? (
+                      <span className="text-[10px] font-semibold text-stone-500 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded-full flex items-center gap-1 border border-stone-200 dark:border-stone-700">
+                        <Lock size={9} />
+                        <span>TERKUNCI</span>
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="tier-price-val">
@@ -611,16 +667,17 @@ export default function BillingPage() {
                     {tier.priceIdr > 0 && <span className="tier-price-period"> / bulan</span>}
                   </div>
 
-                  <div className="tier-credits-alloc">
-                    <span className="tier-credits-label">Alokasi Kredit Bulanan</span>
-                    <div className="tier-credits-val-wrap">
-                      <span className="tier-credits-val">+{formatNum(tier.monthlyCredits)}</span>
-                      <span className="tier-credits-unit">CR</span>
+                  <div className="tier-balance-alloc">
+                    <span className="tier-balance-label">Alokasi Saldo Bulanan</span>
+                    <div className="tier-balance-val-wrap">
+                      <span className="tier-balance-val">
+                        +${Number(tier.monthlyBalanceUsd || 0).toFixed(2)}
+                      </span>
                     </div>
-                    <span className="tier-credits-sub">
+                    <span className="tier-balance-sub">
                       {tier.priceIdr > 0
-                        ? `Rasio hemat 1:${(tier.monthlyCredits / tier.priceIdr).toFixed(1)} IDR to Credits`
-                        : "Bonus awal pendaftaran"}
+                        ? `Rp ${tier.priceIdr.toLocaleString("id-ID")} = $${Number(tier.monthlyBalanceUsd || 0).toFixed(2)}`
+                        : "Bonus kuota gratis per bulan"}
                     </span>
                   </div>
 
@@ -635,13 +692,34 @@ export default function BillingPage() {
 
                   <div className="mt-auto pt-2">
                     {isCurrent ? (
+                      canRenew ? (
+                        <button
+                          type="button"
+                          className="control w-full btn-inline justify-center text-xs font-semibold hover:border-blue-500/50 transition-colors"
+                          onClick={() => handleOpenSubscriptionCheckout(tier)}
+                        >
+                          <RefreshCw size={12} className="text-blue" />
+                          <span>Perpanjang (+30 Hari)</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="control w-full btn-inline justify-center opacity-75 cursor-default text-xs font-semibold"
+                          disabled
+                        >
+                          <CheckCircle2 size={13} className="text-emerald-600" />
+                          <span>Paket Anda Saat Ini</span>
+                        </button>
+                      )
+                    ) : isTierDowngrade ? (
                       <button
                         type="button"
-                        className="control w-full btn-inline justify-center opacity-75 cursor-default text-xs font-semibold"
+                        className="control w-full btn-inline justify-center opacity-50 cursor-not-allowed text-xs font-semibold text-muted bg-stone-100 dark:bg-stone-800 border-dashed"
                         disabled
+                        title={`Downgrade terkunci selama paket ${currentTier} Anda masih aktif`}
                       >
-                        <CheckCircle2 size={13} className="text-emerald-600" />
-                        <span>Paket Anda Saat Ini</span>
+                        <Lock size={12} className="text-muted" />
+                        <span>Tier di Bawah {currentTier}</span>
                       </button>
                     ) : (
                       <button
@@ -674,7 +752,7 @@ export default function BillingPage() {
                 <tr>
                   <th>Waktu</th>
                   <th>Deskripsi Transaksi</th>
-                  <th>Kredit Didapatkan</th>
+                  <th>Saldo Masuk</th>
                   <th>Total Bayar</th>
                   <th>Metode Pembayaran</th>
                   <th>Status</th>
@@ -701,14 +779,16 @@ export default function BillingPage() {
                       </td>
                       <td className="cell-strong text-xs font-semibold">{t.description}</td>
                       <td className="mono text-emerald-600 font-semibold text-xs whitespace-nowrap">
-                        +{formatNum(t.amount / 10)} CR
+                        +${Number(t.balanceAmountUsd || 0).toFixed(2)}
                       </td>
-                      <td className="mono text-xs font-semibold">Rp {t.priceIdr.toLocaleString("id-ID")}</td>
+                      <td className="mono text-xs font-semibold">Rp {Number(t.priceIdr || 0).toLocaleString("id-ID")}</td>
                       <td>
                         <span className="env env-production text-xs">{t.method}</span>
                       </td>
                       <td>
-                        <span className="badge-status online text-[11px]">Success</span>
+                        <span className={`badge-status ${t.status === "PAID" ? "online" : "warning"} text-[11px]`}>
+                          {t.status === "PAID" ? "Success" : t.status || "Success"}
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -717,87 +797,46 @@ export default function BillingPage() {
             </table>
           </div>
 
-          <div className="table-footer">
-            <div className="table-footer-left">
-              <span className="table-footer-text">
-                Menampilkan {data.pagination?.totalCount === 0 ? 0 : (page - 1) * pageSize + 1} hingga{" "}
-                {Math.min(page * pageSize, data.pagination?.totalCount || 0)} dari {data.pagination?.totalCount || 0} transaksi
-              </span>
-              <div className="per-page-wrap flex items-center gap-2">
-                <span className="text-muted text-xs">Per halaman:</span>
-                <CustomDropdown
-                  size="sm"
-                  value={String(pageSize)}
-                  onChange={(val) => {
-                    setPageSize(Number(val));
-                    setPage(1);
-                  }}
-                  options={[
-                    { value: "5", label: "5" },
-                    { value: "10", label: "10" },
-                    { value: "20", label: "20" },
-                  ]}
-                  minWidth={72}
-                  align="right"
-                />
-              </div>
-            </div>
-
-            <div className="pager">
-              <button
-                className="pager-btn"
-                disabled={!data.pagination?.hasPrevPage}
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-              >
-                <ChevronLeft size={11} />
-                <span>Prev</span>
-              </button>
-              <span className="pager-info">
-                {page} / {data.pagination?.totalPages || 1}
-              </span>
-              <button
-                className="pager-btn"
-                disabled={!data.pagination?.hasNextPage}
-                onClick={() => setPage((p) => Math.min(p + 1, data.pagination?.totalPages || 1))}
-              >
-                <span>Next</span>
-                <ChevronRight size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={data.pagination?.totalPages || 1}
+            totalCount={data.pagination?.totalCount || 0}
+            pageSize={pageSize}
+            pageSizeOptions={[5, 10, 20]}
+            itemName="transaksi"
+            onPageChange={(p) => setPage(p)}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setPage(1);
+            }}
+          />
         </article>
 
         {/* Modal Checkout Direct QRIS & VA */}
-        {showModal && (
-          <div className="modal-overlay">
-            <div className="modal-card" style={{ width: "520px", maxWidth: "95vw" }}>
-              <div className="modal-header">
-                <div className="modal-title-wrap">
-                  {activeInvoice ? (
-                    <QrCode size={16} className="text-blue shrink-0" />
-                  ) : checkoutType === "SUBSCRIPTION" ? (
-                    <Crown size={16} className="text-amber-500 shrink-0" />
-                  ) : (
-                    <Coins size={16} className="text-amber-500 shrink-0" />
-                  )}
-                  <h3 className="modal-title-text">
-                    {activeInvoice
-                      ? "Pembayaran Instan (QRIS / Virtual Account)"
-                      : checkoutType === "SUBSCRIPTION"
-                      ? `Langganan Paket ${selectedTier?.name || selectedTier?.id}`
-                      : "Top-Up Saldo Credits Ketengan"}
-                  </h3>
-                </div>
-                <button
-                  className="btn-close"
-                  onClick={() => {
-                    setShowModal(false);
-                    setActiveInvoice(null);
-                  }}
-                >
-                  &#x2715;
-                </button>
-              </div>
+        <Modal
+          isOpen={showModal}
+          onClose={() => {
+            setShowModal(false);
+            setActiveInvoice(null);
+          }}
+          title={
+            activeInvoice
+              ? "Pembayaran Instan (QRIS / Virtual Account)"
+              : checkoutType === "SUBSCRIPTION"
+              ? `Langganan Paket ${selectedTier?.name || selectedTier?.id}`
+              : "Top-Up Saldo"
+          }
+          icon={
+            activeInvoice ? (
+              <QrCode size={16} className="text-blue shrink-0" />
+            ) : checkoutType === "SUBSCRIPTION" ? (
+              <Crown size={16} className="text-amber-500 shrink-0" />
+            ) : (
+              <Coins size={16} className="text-amber-500 shrink-0" />
+            )
+          }
+          maxWidth="520px"
+        >
 
               {!activeInvoice ? (
                 /* Step 1: Package Selection & Payment Method */
@@ -807,12 +846,12 @@ export default function BillingPage() {
                     <div className="form-group mb-3">
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-xs font-semibold text-ink">
-                          1. Pilih Paket Kredit Ketengan:
+                          1. Pilih Paket Saldo:
                         </label>
                       </div>
                       <div className="ketengan-modal-grid">
-                        {KETENGAN_PACKAGES.map((pkg) => {
-                          const isSelected = selectedKetengan?.credits === pkg.credits;
+                        {activePackages.map((pkg: any) => {
+                          const isSelected = effectiveKetengan?.price === pkg.price;
                           const discountedPriceNum =
                             currentDiscountPct > 0
                               ? Math.round(pkg.price * (1 - currentDiscountPct / 100))
@@ -820,7 +859,7 @@ export default function BillingPage() {
 
                           return (
                             <div
-                              key={pkg.credits}
+                              key={pkg.id || pkg.price}
                               className={`ketengan-modal-card ${isSelected ? "selected" : ""}`}
                               onClick={() => setSelectedKetengan(pkg)}
                             >
@@ -846,30 +885,43 @@ export default function BillingPage() {
                     </div>
                   ) : (
                     /* SUBSCRIPTION: Tier Summary Card */
-                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg mb-3">
-                      <div className="text-[11px] text-muted font-semibold uppercase tracking-wider">
-                        Paket Langganan Dipilih:
+                    <div className="p-3.5 rounded-lg mb-3" style={{ background: "var(--bg)", border: "1px solid var(--line)" }}>
+                      <div className="text-[11px] text-muted font-semibold uppercase tracking-wider flex items-center justify-between">
+                        <span>Paket Langganan Dipilih:</span>
+                        {selectedTier?.id?.toUpperCase() === currentTier && isSubscriptionActive && (
+                          <span className="text-[10px] text-blue font-bold px-2 py-0.5 rounded bg-blue/10">
+                            PERPANJANGAN (+30 HARI)
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center justify-between mt-1">
                         <strong className="text-base font-bold text-ink">
-                          Paket {selectedTier?.name || selectedTier?.id} (30 Hari)
+                          Paket {selectedTier?.name || selectedTier?.id}
                         </strong>
                         <strong className="text-base font-mono text-blue font-bold">
                           Rp {Number(selectedTier?.priceIdr || 0).toLocaleString("id-ID")}
                         </strong>
                       </div>
                       <div className="text-xs text-muted mt-1.5 flex items-center justify-between">
-                        <span>Alokasi Kredit Bulanan:</span>
+                        <span>Alokasi Saldo Bulanan:</span>
                         <span className="font-mono text-emerald-600 font-bold">
-                          +{formatNum(selectedTier?.monthlyCredits)} CR
+                          +${Number(selectedTier?.monthlyBalanceUsd || 0).toFixed(2)}
                         </span>
                       </div>
                     </div>
                   )}
 
+                  {invoiceError && (
+                    <div className="text-xs bg-rose-50 text-rose-800 border border-rose-200 p-2.5 rounded-lg mb-3 font-medium flex items-center gap-1.5 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/80">
+                      <AlertCircle size={14} className="text-rose-600 shrink-0" />
+                      <span>{invoiceError}</span>
+                    </div>
+                  )}
+
                   {currentDiscountPct > 0 && checkoutType === "TOPUP" && (
-                    <div className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 p-2 rounded mb-3 font-medium">
-                      ✓ {data.userDiscount?.reason} ({currentDiscountPct}% promo diskon otomatis diterapkan saat checkout)
+                    <div className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 p-2.5 rounded-lg mb-3 font-medium flex items-center gap-1.5 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/80">
+                      <Sparkles size={14} className="text-emerald-600 shrink-0" />
+                      <span>{data.userDiscount?.reason || "VIP Reward"} ({currentDiscountPct}% promo diskon otomatis diterapkan saat checkout)</span>
                     </div>
                   )}
 
@@ -891,7 +943,7 @@ export default function BillingPage() {
                         className={`pay-method-btn ${payMethod === "VA" ? "active" : ""}`}
                         onClick={() => setPayMethod("VA")}
                       >
-                        <CreditCard size={14} />
+                        <Wallet size={14} />
                         <span>Direct Virtual Account</span>
                       </button>
                     </div>
@@ -945,7 +997,7 @@ export default function BillingPage() {
                       <span className="text-[11px] text-muted block mt-0.5">
                         {activeInvoice.orderType === "SUBSCRIPTION"
                           ? `Paket Langganan ${activeInvoice.tierTarget || "PRO"}`
-                          : `Top-Up Ketengan +${formatNum(activeInvoice.creditAmount)} CR`}
+                          : `Top-Up Saldo +$${Number(activeInvoice.balanceAmountUsd || 0).toFixed(2)}`}
                       </span>
                     </div>
                     <div className="text-right">
@@ -973,7 +1025,7 @@ export default function BillingPage() {
                       <span className="text-xs text-muted font-semibold block">
                         Nomor Virtual Account ({selectedBank.toUpperCase()}):
                       </span>
-                      <div className="copy-box mt-1.5 flex items-center justify-between p-2 bg-white border border-slate-200 rounded">
+                      <div className="copy-box mt-1.5 flex items-center justify-between p-2 rounded" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
                         <code className="text-sm font-bold mono text-blue">{activeInvoice.vaNumber}</code>
                         <button
                           type="button"
@@ -1006,7 +1058,7 @@ export default function BillingPage() {
                       <AlertCircle size={13} className="text-amber-500" />
                       <span>Verifikasi Pembayaran</span>
                     </div>
-                    Setelah melakukan pembayaran melalui QRIS atau Virtual Account, sistem payment gateway atau Admin akan memverifikasi transaksi. Saldo kredit dan paket otomatis aktif setelah pesanan terverifikasi.
+                    Setelah melakukan pembayaran melalui QRIS atau Virtual Account, sistem payment gateway atau Admin akan memverifikasi transaksi. Saldo dan paket otomatis aktif setelah pesanan terverifikasi.
                   </div>
 
                   {invoiceStatusMsg && (
@@ -1018,22 +1070,22 @@ export default function BillingPage() {
                         fontSize: "12px",
                         background:
                           invoiceStatusMsg.type === "success"
-                            ? "#ecfdf5"
+                            ? "var(--emerald-soft)"
                             : invoiceStatusMsg.type === "pending"
-                            ? "#fef3c7"
-                            : "#fef2f2",
+                            ? "var(--amber-soft)"
+                            : "var(--red-soft)",
                         border:
                           invoiceStatusMsg.type === "success"
-                            ? "1px solid #a7f3d0"
+                            ? "1px solid var(--emerald-border)"
                             : invoiceStatusMsg.type === "pending"
-                            ? "1px solid #fde68a"
-                            : "1px solid #fecaca",
+                            ? "1px solid var(--amber-border)"
+                            : "1px solid var(--red-border)",
                         color:
                           invoiceStatusMsg.type === "success"
-                            ? "#065f46"
+                            ? "var(--emerald)"
                             : invoiceStatusMsg.type === "pending"
-                            ? "#92400e"
-                            : "#991b1b",
+                            ? "var(--amber)"
+                            : "var(--red)",
                         display: "flex",
                         alignItems: "flex-start",
                         gap: "8px",
@@ -1076,9 +1128,7 @@ export default function BillingPage() {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        )}
+        </Modal>
       </div>
     </DashboardShell>
   );

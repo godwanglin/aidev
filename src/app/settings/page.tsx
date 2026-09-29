@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import {
@@ -13,6 +14,9 @@ import {
   CheckCircle2,
   Lock,
   AlertCircle,
+  Coins,
+  Crown,
+  ArrowRight,
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -185,31 +189,53 @@ export default function SettingsPage() {
 
             {/* Account Quota Overview */}
             <article className="panel">
-              <div className="panel-title">
+              <div className="panel-title flex items-center justify-between">
                 <h2>
                   <KeyRound size={14} className="text-blue shrink-0" />
-                  <span>Personal Usage & Keys Overview</span>
+                  <span>Personal Usage & Balance Overview</span>
                 </h2>
+                <span className="text-[11px] font-semibold text-blue bg-blue/10 px-2.5 py-0.5 rounded-full border border-blue/20 flex items-center gap-1">
+                  <Crown size={11} />
+                  <span>{data?.user?.subscriptionTier || "FREE"} PLAN</span>
+                </span>
               </div>
               <div className="settings-body">
                 <div className="setting-row">
                   <div>
-                    <strong>My Active API Keys</strong>
-                    <p>API keys generated and scoped to your account.</p>
+                    <strong>Total Saldo Dompet (USD)</strong>
+                    <p>Saldo fleksibel siap pakai untuk inferensi model AI tanpa masa kedaluwarsa.</p>
                   </div>
-                  <span className="mono font-semibold">
-                    {data?.user?.totalKeys} Keys
+                  <span className="mono font-bold text-base text-emerald-600 dark:text-emerald-400">
+                    ${Number(data?.user?.balanceUsd || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                   </span>
                 </div>
 
                 <div className="setting-row">
                   <div>
-                    <strong>Available Token Balance</strong>
-                    <p>Personal token credits ready for AI inference.</p>
+                    <strong>Kuota Bulanan Paket</strong>
+                    <p>Alokasi kuota bulanan berjalan dari paket langganan aktif Anda.</p>
                   </div>
-                  <span className="mono text-blue font-semibold">
-                    {data?.user?.tokenBalance?.toLocaleString()} Tokens
+                  <span className="mono font-semibold text-ink">
+                    ${Number(Math.max(0, (data?.user?.monthlyBalanceAllocatedUsd || 0) - (data?.user?.monthlyBalanceRemainingUsd || 0))).toFixed(2)} / ${Number(data?.user?.monthlyBalanceAllocatedUsd || 0).toFixed(2)} USD
                   </span>
+                </div>
+
+                <div className="setting-row">
+                  <div>
+                    <strong>My Active API Keys</strong>
+                    <p>Jumlah API key aktif yang terhubung dan dikelola di akun Anda.</p>
+                  </div>
+                  <span className="mono font-semibold text-ink">
+                    {data?.user?.totalKeys ?? 0} Keys
+                  </span>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <Link href="/billing" className="control btn-inline text-xs font-semibold hover:border-blue-500/50">
+                    <Coins size={13} className="text-amber-500" />
+                    <span>Kelola Saldo & Paket Langganan</span>
+                    <ArrowRight size={12} />
+                  </Link>
                 </div>
               </div>
             </article>

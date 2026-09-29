@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/lib/session";
 import { runAllOAuthTokenRefreshes } from "@/lib/oauth/refresh-manager";
 
 async function verifyAuth(req: NextRequest) {
-  // 1. Check Bearer token against CRON_SECRET if configured
+  // 1. Check Bearer token against USDON_SECRET if configured
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {

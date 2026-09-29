@@ -148,3 +148,5 @@ export default function CustomDropdown({
     </div>
   );
 }
+
+export { CustomDropdown };

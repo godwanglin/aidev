@@ -65,7 +65,7 @@ export async function sendMoneyInAlert(data: {
   type: "TOPUP" | "SUBSCRIPTION";
   tierOrPackName: string;
   amountIdr: number;
-  creditAmount: number;
+  balanceAmountUsd: number;
   orderId: string;
   method?: string;
 }) {
@@ -80,7 +80,7 @@ export async function sendMoneyInAlert(data: {
       { name: "Tipe Pembayaran", value: data.type === "SUBSCRIPTION" ? "🌟 Subscription" : "🪙 Top-up Ketengan", inline: true },
       { name: "Paket / Tier", value: `**${data.tierOrPackName}**`, inline: true },
       { name: "Nominal Masuk", value: `**Rp ${data.amountIdr.toLocaleString("id-ID")}**`, inline: true },
-      { name: "Credits Masuk", value: `+${data.creditAmount.toLocaleString("id-ID")} CR`, inline: true },
+      { name: "Saldo Masuk", value: `+$${Number(data.balanceAmountUsd || 0).toFixed(2)}`, inline: true },
       { name: "Metode", value: data.method || "QRIS", inline: true },
       { name: "Order ID", value: `\`${data.orderId}\``, inline: true },
     ],
@@ -136,7 +136,7 @@ export async function sendSupportTicketAlert(data: {
   if (!setting?.discordWebhookUrl || !setting.discordAlertSupportTicket) return false;
 
   const embed: DiscordEmbed = {
-    title: "🎫 Tiket Bantuan Baru Masuk",
+    title: "🎟️ Tiket Bantuan Baru Masuk",
     description: `User **${data.userEmail}** mengirimkan tiket bantuan baru.`,
     color: 0xf59e0b, // Amber / Yellow
     fields: [
@@ -156,7 +156,7 @@ export async function sendSupportTicketAlert(data: {
  */
 export async function sendLowBalanceAlert(data: {
   userEmail: string;
-  remainingCredits: number;
+  remainingUsd: number;
   tier: string;
 }) {
   const setting = await getDiscordSettings();
@@ -168,7 +168,7 @@ export async function sendLowBalanceAlert(data: {
     color: 0x3b82f6, // Blue
     fields: [
       { name: "Tier Akun", value: data.tier, inline: true },
-      { name: "Sisa Saldo", value: `**${data.remainingCredits.toLocaleString("id-ID")} CR**`, inline: true },
+      { name: "Sisa Saldo", value: "**$" + data.remainingUsd.toFixed(2) + "**", inline: true },
     ],
     footer: { text: "AI Gateway Usage Monitor" },
     timestamp: new Date().toISOString(),

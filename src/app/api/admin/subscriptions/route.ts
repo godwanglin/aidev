@@ -22,9 +22,12 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized. Admin only." }, { status: 403 });
     }
 
-    const [tiers, models, combos, settings, connections] = await Promise.all([
+    const [tiers, topupPackages, models, combos, settings, connections] = await Promise.all([
       prisma.subscriptionTierConfig.findMany({
         orderBy: { priceIdr: "asc" },
+      }),
+      prisma.topupPackage.findMany({
+        orderBy: { sortOrder: "asc" },
       }),
       prisma.aiModel.findMany({
         where: { isActive: true },
@@ -67,9 +70,10 @@ export async function GET() {
         name: c.name,
         provider: "COMBO",
         contextWindow,
-        isCombo: true,
-        rateInPer1k: c.rateInPer1k ?? 25,
-        rateOutPer1k: c.rateOutPer1k ?? 100,
+        rateInUsdPer1m: c.rateInUsdPer1m ? Number(c.rateInUsdPer1m) : (c.rateInUsdPer1k ? Number(c.rateInUsdPer1k) * 1000 : 0.15),
+        rateOutUsdPer1m: c.rateOutUsdPer1m ? Number(c.rateOutUsdPer1m) : (c.rateOutUsdPer1k ? Number(c.rateOutUsdPer1k) * 1000 : 0.60),
+        rateInUsdPer1k: c.rateInUsdPer1k ? Number(c.rateInUsdPer1k) : 0.00015,
+        rateOutUsdPer1k: c.rateOutUsdPer1k ? Number(c.rateOutUsdPer1k) : 0.0006,
       };
     });
 
@@ -80,8 +84,10 @@ export async function GET() {
       provider: m.provider,
       contextWindow: m.contextWindow,
       isCombo: false,
-      rateInPer1k: 25,
-      rateOutPer1k: 100,
+      rateInUsdPer1m: 0.15,
+      rateOutUsdPer1m: 0.60,
+      rateInUsdPer1k: 0.00015,
+      rateOutUsdPer1k: 0.0006,
     }));
 
     return NextResponse.json({
@@ -90,15 +96,27 @@ export async function GET() {
         id: t.id,
         name: t.name,
         priceIdr: t.priceIdr,
-        monthlyCredits: Number(t.monthlyCredits),
+        monthlyBalanceUsd: Number(t.monthlyBalanceUsd),
         rpmLimit: t.rpmLimit,
         maxKeys: t.maxKeys,
         routingPriority: t.routingPriority,
         bonusPercentage: t.bonusPercentage,
         badgeColor: t.badgeColor,
         description: t.description,
+        features: t.features ? JSON.parse(t.features) : [],
         allowedModelIds: JSON.parse(t.allowedModelIds || "[]"),
         isActive: t.isActive,
+      })),
+      topupPackages: topupPackages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        priceIdr: p.priceIdr,
+        balanceUsd: Number(p.balanceUsd || 1),
+        bonusPercentage: p.bonusPercentage,
+        tag: p.tag,
+        badgeColor: p.badgeColor || "blue",
+        sortOrder: p.sortOrder,
+        isActive: p.isActive,
       })),
       models: [...comboModelsMapped, ...rawModelsMapped],
       settings: {
@@ -147,9 +165,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Update Tier Parameters (Pricing, Credits, Limits)
+    // 2. Update Tier Parameters (Pricing, USD, Limits, Features, Active)
     if (body.action === "update_tier_config") {
-      const { tierId, priceIdr, monthlyCredits, rpmLimit, maxKeys, bonusPercentage } = body;
+      const {
+        tierId,
+        name,
+        priceIdr,
+        monthlyBalanceUsd,
+        rpmLimit,
+        maxKeys,
+        routingPriority,
+        bonusPercentage,
+        badgeColor,
+        description,
+        features,
+        isActive,
+      } = body;
+
       if (!tierId) {
         return NextResponse.json({ error: "tierId is required" }, { status: 400 });
       }
@@ -157,21 +189,177 @@ export async function POST(req: NextRequest) {
       await prisma.subscriptionTierConfig.update({
         where: { id: tierId },
         data: {
-          priceIdr: Number(priceIdr),
-          monthlyCredits: BigInt(monthlyCredits),
-          rpmLimit: Number(rpmLimit),
-          maxKeys: Number(maxKeys),
-          bonusPercentage: Number(bonusPercentage),
+          ...(name !== undefined && { name: String(name) }),
+          ...(priceIdr !== undefined && { priceIdr: Number(priceIdr) }),
+          ...(monthlyBalanceUsd !== undefined && { monthlyBalanceUsd: Number(monthlyBalanceUsd) }),
+          ...(rpmLimit !== undefined && { rpmLimit: Number(rpmLimit) }),
+          ...(maxKeys !== undefined && { maxKeys: Number(maxKeys) }),
+          ...(routingPriority !== undefined && { routingPriority: String(routingPriority) }),
+          ...(bonusPercentage !== undefined && { bonusPercentage: Number(bonusPercentage) }),
+          ...(badgeColor !== undefined && { badgeColor: String(badgeColor) }),
+          ...(description !== undefined && { description: String(description) }),
+          ...(features !== undefined && {
+            features: Array.isArray(features) ? JSON.stringify(features) : String(features),
+          }),
+          ...(isActive !== undefined && { isActive: Boolean(isActive) }),
         },
       });
 
       return NextResponse.json({
         success: true,
-        message: `Tier ${tierId} configuration saved successfully.`,
+        message: `Tier ${tierId} berhasil diperbarui.`,
       });
     }
 
-    // 3. Update Discord Settings
+    // 3. Create New Tier
+    if (body.action === "create_tier") {
+      const {
+        id,
+        name,
+        priceIdr,
+        monthlyBalanceUsd,
+        rpmLimit,
+        maxKeys,
+        routingPriority,
+        bonusPercentage,
+        badgeColor,
+        description,
+        features,
+        allowedModelIds,
+        isActive,
+      } = body;
+
+      const cleanId = String(id || "").trim().toUpperCase();
+      if (!cleanId) {
+        return NextResponse.json({ error: "ID Tier wajib diisi (misal VIP, ENTERPRISE)" }, { status: 400 });
+      }
+
+      const existing = await prisma.subscriptionTierConfig.findUnique({
+        where: { id: cleanId },
+      });
+      if (existing) {
+        return NextResponse.json({ error: `Tier dengan ID ${cleanId} sudah ada` }, { status: 400 });
+      }
+
+      await prisma.subscriptionTierConfig.create({
+        data: {
+          id: cleanId,
+          name: String(name || cleanId),
+          priceIdr: Number(priceIdr || 0),
+          monthlyBalanceUsd: Number(monthlyBalanceUsd || 1),
+          rpmLimit: Number(rpmLimit || 15),
+          maxKeys: Number(maxKeys || 2),
+          routingPriority: String(routingPriority || "REGULAR"),
+          bonusPercentage: Number(bonusPercentage || 0),
+          badgeColor: String(badgeColor || "blue"),
+          description: String(description || ""),
+          features: Array.isArray(features) ? JSON.stringify(features) : "[]",
+          allowedModelIds: Array.isArray(allowedModelIds) ? JSON.stringify(allowedModelIds) : "[]",
+          isActive: isActive !== undefined ? Boolean(isActive) : true,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Tier baru ${cleanId} berhasil dibuat.`,
+      });
+    }
+
+    // 4. Delete Tier
+    if (body.action === "delete_tier") {
+      const { tierId } = body;
+      if (!tierId) {
+        return NextResponse.json({ error: "tierId is required" }, { status: 400 });
+      }
+      if (["FREE", "PLUS", "PRO", "ULTRA"].includes(tierId.toUpperCase())) {
+        return NextResponse.json({ error: "Tier sistem inti tidak boleh dihapus, silakan nonaktifkan saja." }, { status: 400 });
+      }
+
+      await prisma.subscriptionTierConfig.delete({
+        where: { id: tierId },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Tier ${tierId} berhasil dihapus.`,
+      });
+    }
+
+    // 5. Create Top-Up Package (Ketengan)
+    if (body.action === "create_topup_package") {
+      const { name, priceIdr, balanceUsd, bonusPercentage, tag, badgeColor, sortOrder, isActive } = body;
+
+      if (!name || !priceIdr) {
+        return NextResponse.json({ error: "Nama dan Harga paket wajib diisi" }, { status: 400 });
+      }
+
+      const created = await prisma.topupPackage.create({
+        data: {
+          name: String(name).trim(),
+          priceIdr: Number(priceIdr),
+          balanceUsd: Number(balanceUsd || 1),
+          bonusPercentage: Number(bonusPercentage || 0),
+          tag: tag ? String(tag).trim() : null,
+          badgeColor: String(badgeColor || "blue"),
+          sortOrder: Number(sortOrder || 0),
+          isActive: isActive !== undefined ? Boolean(isActive) : true,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Paket ketengan ${created.name} berhasil dibuat.`,
+        package: created,
+      });
+    }
+
+    // 6. Update Top-Up Package (Ketengan)
+    if (body.action === "update_topup_package") {
+      const { id, name, priceIdr, balanceUsd, bonusPercentage, tag, badgeColor, sortOrder, isActive } = body;
+
+      if (!id) {
+        return NextResponse.json({ error: "ID paket wajib diisi" }, { status: 400 });
+      }
+
+      const updated = await prisma.topupPackage.update({
+        where: { id },
+        data: {
+          ...(name !== undefined && { name: String(name).trim() }),
+          ...(priceIdr !== undefined && { priceIdr: Number(priceIdr) }),
+          ...(balanceUsd !== undefined && { balanceUsd: Number(balanceUsd) }),
+          ...(bonusPercentage !== undefined && { bonusPercentage: Number(bonusPercentage) }),
+          ...(tag !== undefined && { tag: tag ? String(tag).trim() : null }),
+          ...(badgeColor !== undefined && { badgeColor: String(badgeColor) }),
+          ...(sortOrder !== undefined && { sortOrder: Number(sortOrder) }),
+          ...(isActive !== undefined && { isActive: Boolean(isActive) }),
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Paket ketengan ${updated.name} berhasil diperbarui.`,
+        package: updated,
+      });
+    }
+
+    // 7. Delete Top-Up Package (Ketengan)
+    if (body.action === "delete_topup_package") {
+      const { id } = body;
+      if (!id) {
+        return NextResponse.json({ error: "ID paket wajib diisi" }, { status: 400 });
+      }
+
+      await prisma.topupPackage.delete({
+        where: { id },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: "Paket ketengan berhasil dihapus.",
+      });
+    }
+
+    // 8. Update Discord Settings
     if (body.action === "update_discord_settings") {
       const {
         discordWebhookUrl,
@@ -209,7 +397,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 4. Test Discord Webhook
+    // 9. Test Discord Webhook
     if (body.action === "test_discord_webhook") {
       const url = body.webhookUrl;
       const { sendDiscordPayload } = await import("@/lib/discord");

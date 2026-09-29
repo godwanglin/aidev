@@ -22,6 +22,9 @@ import {
   Eye,
   EyeOff,
   Network,
+  Boxes,
+  PieChart,
+  ArrowRight,
 } from "lucide-react";
 
 function getProviderSlug(providerKey: string): string {
@@ -62,6 +65,31 @@ export interface AccountQuotaCardData {
   quotas: QuotaBucketItem[];
 }
 
+export interface AggregatedBucketItem {
+  id: string;
+  name: string;
+  accountCount: number;
+  sumFraction: number;
+  avgPercentage: number;
+  earliestResetTime?: string;
+  earliestResetHuman?: string;
+  status: "HEALTHY" | "LOW" | "EMPTY";
+}
+
+export interface AggregatedProviderCardData {
+  provider: string;
+  providerSlug: string;
+  displayName: string;
+  totalAccounts: number;
+  activeAccounts: number;
+  healthyAccounts: number;
+  lowAccounts: number;
+  exhaustedAccounts: number;
+  poolStatus: "NORMAL" | "LOW_QUOTA" | "EXHAUSTED";
+  accounts: AccountQuotaCardData[];
+  buckets: AggregatedBucketItem[];
+}
+
 export default function AdminQuotaTrackerPage() {
   const [accounts, setAccounts] = useState<AccountQuotaCardData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +98,7 @@ export default function AdminQuotaTrackerPage() {
   const [providerFilter, setProviderFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"expiring" | "least" | "most" | "name">("expiring");
+  const [viewMode, setViewMode] = useState<"account" | "provider">("account");
 
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -378,6 +407,146 @@ export default function AdminQuotaTrackerPage() {
     return { total, active, healthyCount, lowOrEmptyCount };
   }, [accounts]);
 
+  // Aggregated Provider Quota Data
+  const aggregatedProviders = useMemo(() => {
+    const groups = new Map<string, AccountQuotaCardData[]>();
+    for (const acc of filteredAccounts) {
+      const list = groups.get(acc.provider) || [];
+      list.push(acc);
+      groups.set(acc.provider, list);
+    }
+
+    const result: AggregatedProviderCardData[] = Array.from(groups.entries()).map(([provider, accs]) => {
+      const totalAccounts = accs.length;
+      const activeAccounts = accs.filter((a) => a.isActive).length;
+      const healthyAccounts = accs.filter((a) => a.syncStatus === "NORMAL").length;
+      const lowAccounts = accs.filter((a) => a.syncStatus === "LOW_QUOTA").length;
+      const exhaustedAccounts = accs.filter((a) => a.syncStatus === "EXHAUSTED").length;
+
+      const bucketGroups = new Map<
+        string,
+        {
+          name: string;
+          items: QuotaBucketItem[];
+        }
+      >();
+
+      for (const acc of accs) {
+        for (const q of acc.quotas) {
+          const key = q.name.trim();
+          if (!bucketGroups.has(key)) {
+            bucketGroups.set(key, { name: q.name, items: [] });
+          }
+          bucketGroups.get(key)!.items.push(q);
+        }
+      }
+
+      const buckets = Array.from(bucketGroups.entries()).map(([key, group]) => {
+        const count = group.items.length;
+        const sumFraction = group.items.reduce(
+          (sum, item) =>
+            sum +
+            (typeof item.remainingFraction === "number"
+              ? item.remainingFraction
+              : (item.percentage || 0) / 100),
+          0
+        );
+        const avgPercentage = count > 0 ? Math.round((sumFraction / count) * 100) : 0;
+
+        let earliestResetTime: string | undefined;
+        let earliestResetHuman: string | undefined;
+        let minTime = Infinity;
+
+        for (const item of group.items) {
+          if (item.resetTime) {
+            const time = new Date(item.resetTime).getTime();
+            if (!isNaN(time) && time < minTime) {
+              minTime = time;
+              earliestResetTime = item.resetTime;
+              earliestResetHuman = item.resetHuman;
+            }
+          }
+        }
+
+        return {
+          id: key,
+          name: group.name,
+          accountCount: count,
+          sumFraction,
+          avgPercentage,
+          earliestResetTime,
+          earliestResetHuman,
+          status:
+            avgPercentage > 40
+              ? ("HEALTHY" as const)
+              : avgPercentage > 15
+              ? ("LOW" as const)
+              : ("EMPTY" as const),
+        };
+      });
+
+      // Sort buckets consistently (Gemini Weekly, Gemini 5h, Claude/GPT Weekly, Claude/GPT 5h, etc.)
+      buckets.sort((a, b) => {
+        const order: Record<string, number> = {
+          "Gemini (Weekly)": 1,
+          "Gemini (5 Hours)": 2,
+          "Claude & GPT (Weekly)": 3,
+          "Claude & GPT (5 Hours)": 4,
+        };
+        const ordA = order[a.name] ?? 99;
+        const ordB = order[b.name] ?? 99;
+        if (ordA !== ordB) return ordA - ordB;
+        return a.name.localeCompare(b.name);
+      });
+
+      const poolStatus: "NORMAL" | "LOW_QUOTA" | "EXHAUSTED" =
+        exhaustedAccounts === totalAccounts && totalAccounts > 0
+          ? "EXHAUSTED"
+          : lowAccounts > 0 || (buckets.some((b) => b.status === "EMPTY") && buckets.length > 0)
+          ? "LOW_QUOTA"
+          : "NORMAL";
+
+      return {
+        provider,
+        providerSlug: getProviderSlug(provider),
+        displayName: formatProviderName(provider),
+        totalAccounts,
+        activeAccounts,
+        healthyAccounts,
+        lowAccounts,
+        exhaustedAccounts,
+        poolStatus,
+        accounts: accs,
+        buckets,
+      };
+    });
+
+    // Sort providers based on current sortBy
+    if (sortBy === "name") {
+      result.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    } else if (sortBy === "least") {
+      result.sort((a, b) => {
+        const minA = a.buckets.length > 0 ? Math.min(...a.buckets.map((b) => b.avgPercentage)) : 0;
+        const minB = b.buckets.length > 0 ? Math.min(...b.buckets.map((b) => b.avgPercentage)) : 0;
+        return minA - minB;
+      });
+    } else if (sortBy === "most") {
+      result.sort((a, b) => {
+        const maxA = a.buckets.length > 0 ? Math.max(...a.buckets.map((b) => b.avgPercentage)) : 0;
+        const maxB = b.buckets.length > 0 ? Math.max(...b.buckets.map((b) => b.avgPercentage)) : 0;
+        return maxB - maxA;
+      });
+    } else if (sortBy === "expiring") {
+      result.sort((a, b) => {
+        const timeA = a.buckets.find((b) => b.earliestResetTime)?.earliestResetTime || "9999-12-31T23:59:59Z";
+        const timeB = b.buckets.find((b) => b.earliestResetTime)?.earliestResetTime || "9999-12-31T23:59:59Z";
+        return new Date(timeA).getTime() - new Date(timeB).getTime();
+      });
+    }
+
+    return result;
+  }, [filteredAccounts, sortBy]);
+
   function getBarColor(pct: number) {
     if (pct > 40) return "#10b981"; // green
     if (pct > 15) return "#f59e0b"; // amber
@@ -397,7 +566,29 @@ export default function AdminQuotaTrackerPage() {
           title="Quota Tracker"
           subtitle="Pantau sisa kuota API per akun & provider secara real-time, jadwal reset, dan kontrol otomatisasi."
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* View Switcher: Per Akun vs Akumulasi Provider */}
+            <div className="segmented">
+              <button
+                type="button"
+                className={`seg-btn ${viewMode === "account" ? "active" : ""}`}
+                onClick={() => setViewMode("account")}
+                title="Tampilkan kartu kuota masing-masing akun"
+              >
+                <Layers size={13} />
+                <span>Per Akun</span>
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${viewMode === "provider" ? "active" : ""}`}
+                onClick={() => setViewMode("provider")}
+                title="Tampilkan akumulasi kuota gabungan per provider"
+              >
+                <Boxes size={13} />
+                <span>Akumulasi Provider</span>
+              </button>
+            </div>
+
             <button
               className="control btn-icon-only"
               onClick={() => fetchQuotas(true, false)}
@@ -437,26 +628,40 @@ export default function AdminQuotaTrackerPage() {
           <div className="quota-stat-pill">
             <Layers size={13} className="text-blue" />
             <span>
-              Total Akun: <strong>{metrics.total}</strong>
+              {viewMode === "provider" ? "Total Provider: " : "Total Akun: "}
+              <strong>{viewMode === "provider" ? aggregatedProviders.length : metrics.total}</strong>
             </span>
           </div>
           <div className="quota-stat-pill">
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
             <span>
-              Aktif: <strong>{metrics.active}</strong>
+              {viewMode === "provider" ? "Total Akun: " : "Aktif: "}
+              <strong>{viewMode === "provider" ? `${metrics.active}/${metrics.total} Aktif` : metrics.active}</strong>
             </span>
           </div>
           <div className="quota-stat-pill">
             <CheckCircle2 size={13} className="text-green" />
             <span>
-              Kuota Sehat (&gt;25%): <strong>{metrics.healthyCount}</strong>
+              {viewMode === "provider" ? "Pool Normal: " : "Kuota Sehat (>25%): "}
+              <strong>
+                {viewMode === "provider"
+                  ? aggregatedProviders.filter((p) => p.poolStatus === "NORMAL").length
+                  : metrics.healthyCount}
+              </strong>
             </span>
           </div>
-          {metrics.lowOrEmptyCount > 0 && (
+          {(viewMode === "provider"
+            ? aggregatedProviders.filter((p) => p.poolStatus !== "NORMAL").length
+            : metrics.lowOrEmptyCount) > 0 && (
             <div className="quota-stat-pill">
               <AlertTriangle size={13} className="text-amber" />
               <span>
-                Menipis / Habis: <strong>{metrics.lowOrEmptyCount}</strong>
+                {viewMode === "provider" ? "Pool Menipis / Habis: " : "Menipis / Habis: "}
+                <strong>
+                  {viewMode === "provider"
+                    ? aggregatedProviders.filter((p) => p.poolStatus !== "NORMAL").length
+                    : metrics.lowOrEmptyCount}
+                </strong>
               </span>
             </div>
           )}
@@ -585,11 +790,13 @@ export default function AdminQuotaTrackerPage() {
             <RefreshCw size={20} className="animate-spin text-blue mx-auto mb-2" />
             <p className="text-xs font-medium">Memuat data kuota upstream...</p>
           </div>
-        ) : filteredAccounts.length === 0 ? (
+        ) : (viewMode === "account" ? filteredAccounts.length === 0 : aggregatedProviders.length === 0) ? (
           /* Empty State */
           <div className="panel p-8 text-center text-muted">
             <Gauge size={28} className="mx-auto mb-2 text-muted-light" />
-            <strong className="block text-ink text-sm mb-1">Tidak ada akun ditemukan</strong>
+            <strong className="block text-ink text-sm mb-1">
+              Tidak ada {viewMode === "provider" ? "provider" : "akun"} ditemukan
+            </strong>
             <p className="text-xs text-muted mb-3">
               {searchQuery || providerFilter !== "ALL"
                 ? "Coba sesuaikan kata kunci pencarian atau filter provider."
@@ -599,7 +806,8 @@ export default function AdminQuotaTrackerPage() {
         ) : (
           /* 2-Column Cards Grid */
           <div className="quota-cards-grid">
-            {filteredAccounts.map((card) => {
+            {viewMode === "account" ? (
+              filteredAccounts.map((card) => {
               const isToggling = togglingIds.has(card.id);
               const providerSlug = card.provider.toLowerCase();
 
@@ -866,7 +1074,216 @@ export default function AdminQuotaTrackerPage() {
                   </div>
                 </article>
               );
-            })}
+            })
+          ) : (
+            aggregatedProviders.map((pCard) => {
+              const isAnySyncing = pCard.accounts.some((a) => loadingQuotaIds.has(a.id));
+
+              return (
+                <article
+                  key={pCard.provider}
+                  className={`quota-card ${pCard.activeAccounts === 0 ? "is-inactive" : ""}`}
+                >
+                  {/* Provider Card Header */}
+                  <div className="quota-card-header">
+                    <div className="quota-card-account-info">
+                      <ProviderAvatar
+                        slugOrId={pCard.providerSlug}
+                        name={pCard.displayName}
+                        size={32}
+                        imgSize={20}
+                      />
+                      <div className="quota-card-account-text">
+                        <div className="flex items-center gap-1.5">
+                          <strong className="quota-account-name text-sm">
+                            {pCard.displayName}
+                          </strong>
+                          <span className="text-[11px] text-muted font-normal">
+                            ({pCard.totalAccounts} Akun)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted">
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="w-1.5 h-1.5 rounded-full inline-block"
+                              style={{
+                                backgroundColor:
+                                  pCard.activeAccounts === pCard.totalAccounts
+                                    ? "#10b981"
+                                    : pCard.activeAccounts > 0
+                                    ? "#f59e0b"
+                                    : "#ef4444",
+                              }}
+                            />
+                            <span>
+                              {pCard.activeAccounts} dari {pCard.totalAccounts} Akun Aktif
+                            </span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Header Controls */}
+                    <div className="quota-card-controls">
+                      {/* Pool Status Pill */}
+                      {pCard.poolStatus === "NORMAL" ? (
+                        <span className="text-[10.5px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/40">
+                          Pool Sehat
+                        </span>
+                      ) : pCard.poolStatus === "LOW_QUOTA" ? (
+                        <span className="text-[10.5px] px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/40">
+                          Pool Menipis
+                        </span>
+                      ) : (
+                        <span className="text-[10.5px] px-2 py-0.5 rounded-full font-semibold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800/40">
+                          Pool Habis
+                        </span>
+                      )}
+
+                      {/* Sync all accounts in this provider */}
+                      <button
+                        type="button"
+                        className="control btn-icon-only text-muted hover:text-ink"
+                        style={{ width: "24px", height: "24px", padding: 0 }}
+                        onClick={() => {
+                          pCard.accounts.forEach((a) => fetchSingleAccountQuota(a.id, true));
+                        }}
+                        disabled={isAnySyncing}
+                        title={`Sinkronisasi kuota semua akun ${pCard.displayName}`}
+                      >
+                        <RefreshCw
+                          size={11}
+                          strokeWidth={1.75}
+                          className={isAnySyncing ? "animate-spin text-blue" : ""}
+                        />
+                      </button>
+
+                      {/* Switch to detailed per-account view filtered by this provider */}
+                      <button
+                        type="button"
+                        className="control btn-inline text-xs font-medium py-1 px-2.5 ml-0.5"
+                        onClick={() => {
+                          setProviderFilter(pCard.provider);
+                          setViewMode("account");
+                        }}
+                        title={`Lihat detail kartu masing-masing akun untuk ${pCard.displayName}`}
+                      >
+                        <Layers size={11} className="text-blue" />
+                        <span>Detail Akun</span>
+                        <ArrowRight size={11} className="text-muted" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Provider Card Body: Aggregated Quota Buckets */}
+                  <div className="quota-items-list">
+                    {isAnySyncing && pCard.buckets.length === 0 ? (
+                      <div className="quota-skeleton-wrap">
+                        <div className="quota-skeleton-row">
+                          <div className="quota-skeleton-name quota-skeleton-shimmer" />
+                          <div className="quota-skeleton-badge quota-skeleton-shimmer" />
+                        </div>
+                        <div className="quota-skeleton-bar quota-skeleton-shimmer" />
+                      </div>
+                    ) : pCard.buckets.length === 0 ? (
+                      <p className="text-xs text-muted py-2 italic text-center">
+                        Tidak ada metrik kuota terdeteksi untuk provider ini.
+                      </p>
+                    ) : (
+                      pCard.buckets.map((bucket) => {
+                        const pct = bucket.avgPercentage;
+                        const barColor = getBarColor(pct);
+                        const dotColor = getDotColor(pct);
+                        const pctClass = pct > 40 ? "pct-good" : pct > 15 ? "pct-warn" : "pct-bad";
+
+                        return (
+                          <div key={bucket.id} className="quota-bucket-item">
+                            {/* Top info */}
+                            <div className="quota-bucket-top">
+                              <div className="quota-bucket-name-wrap">
+                                <span
+                                  className="quota-bucket-dot"
+                                  style={{ backgroundColor: dotColor }}
+                                />
+                                <span className="quota-bucket-name font-medium">
+                                  {bucket.name}
+                                </span>
+                                <span className="text-[10.5px] text-muted mono">
+                                  ({bucket.sumFraction.toFixed(1)} / {bucket.accountCount} Akun)
+                                </span>
+                              </div>
+                              <div className="quota-bucket-right">
+                                <span className={`quota-pct-pill mono ${pctClass}`}>
+                                  {pct}%
+                                </span>
+                                {bucket.earliestResetHuman && (
+                                  <span
+                                    className="quota-reset-countdown mono"
+                                    title={`Reset terdekat: ${bucket.earliestResetTime || ""}`}
+                                  >
+                                    <Clock size={10} className="text-muted" />
+                                    <span>{bucket.earliestResetHuman}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="quota-progress-track">
+                              <div
+                                className="quota-progress-fill"
+                                style={{
+                                  width: `${Math.min(Math.max(pct, 0), 100)}%`,
+                                  backgroundColor: barColor,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Provider Card Footer: Account Breakdown Chips */}
+                  <div className="quota-card-footer flex-col items-start gap-1.5">
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-[11px] text-muted font-medium">
+                        Akun Terdaftar ({pCard.totalAccounts}):
+                      </span>
+                      <span className="text-[10.5px] text-muted">
+                        {pCard.buckets.length} Kuota Terakumulasi
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 w-full">
+                      {pCard.accounts.map((acc) => (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          className="quota-account-chip"
+                          title={`${acc.name} (${acc.isActive ? "Aktif" : "Nonaktif"}) - Klik untuk filter ke akun ini`}
+                          onClick={() => {
+                            setSearchQuery(acc.name);
+                            setViewMode("account");
+                          }}
+                        >
+                          <span
+                            className="w-1.5 h-1.5 rounded-full inline-block"
+                            style={{ backgroundColor: acc.isActive ? "#10b981" : "#94a3b8" }}
+                          />
+                          <span className="font-medium">{acc.name}</span>
+                          {acc.quotas.length > 0 && (
+                            <span className="text-[10px] text-muted mono">
+                              ({Math.round(acc.quotas.reduce((s, q) => s + q.percentage, 0) / acc.quotas.length)}%)
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              );
+            })
+          )}
           </div>
         )}
 

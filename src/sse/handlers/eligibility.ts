@@ -40,7 +40,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
   const userRole = user?.role || "USER";
   const isAdmin = userRole === "ADMIN";
   const userTier = (user?.subscriptionTier || "FREE").toUpperCase();
-  const creditBalance = Number(user?.creditBalance ?? 0);
+  const balanceUsd = Number(user?.balanceUsd ?? 0);
 
   // Fetch all active subscription tiers ordered by ascending price
   const tierConfigs = await prisma.subscriptionTierConfig.findMany({
@@ -52,7 +52,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
     id: userTier,
     name: userTier,
     priceIdr: 0,
-    monthlyCredits: BigInt(0),
+    monthlyBalanceUsd: 0,
     rpmLimit: 15,
     maxKeys: 2,
     routingPriority: "REGULAR",
@@ -171,7 +171,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
       display_name: c.name,
       owned_by: ownedBy,
       type: c.type || "chat",
-      cost_per_image: c.type === "image" ? c.costPerImage : undefined,
+      cost_per_image: c.type === "image" ? Number(c.imageCostUsd) : undefined,
       eligible: isEligible,
       minTier: minTierId,
       minTierName,
@@ -187,7 +187,7 @@ export async function handleEligibility(req: NextRequest): Promise<NextResponse>
       email: user?.email,
       role: userRole,
       subscriptionTier: userTier,
-      creditBalance,
+      balanceUsd,
     },
     tier: {
       id: currentTierConfig.id,

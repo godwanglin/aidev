@@ -1,5 +1,6 @@
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { Pagination } from "@/components/Pagination";
 import {
   Plus,
   Search,
@@ -86,15 +87,14 @@ export default function ProjectsPage() {
               </tbody>
             </table>
           </div>
-          <div className="table-footer">
-            <span className="table-footer-text">Showing 1 to 8 of 12 projects</span>
-            <div className="pager">
-              <button className="pager-btn" disabled>Previous</button>
-              <button className="pager-btn active">1</button>
-              <button className="pager-btn">2</button>
-              <button className="pager-btn">Next</button>
-            </div>
-          </div>
+          <Pagination
+            page={1}
+            totalPages={2}
+            totalCount={12}
+            pageSize={8}
+            itemName="projects"
+            onPageChange={() => {}}
+          />
         </article>
       </div>
     </DashboardShell>

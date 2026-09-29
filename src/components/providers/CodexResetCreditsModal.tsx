@@ -171,7 +171,7 @@ export default function CodexResetCreditsModal({
                             {credit.status || "unknown"}
                           </span>
                         </td>
-                        <td style={{ color: "#64748b" }}>
+                        <td style={{ color: "var(--muted)" }}>
                           {formatCreditDate(credit.grantedAt)}
                         </td>
                         <td>

@@ -77,12 +77,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "An account with this email already exists" }, { status: 400 });
     }
 
+    const freeTier = await prisma.subscriptionTierConfig.findUnique({ where: { id: "FREE" } }).catch(() => null);
+    const freeQuota = freeTier ? Number(freeTier.monthlyBalanceUsd) : 5;
+
     const user = await prisma.user.create({
       data: {
         email: normalizedEmail,
         passwordHash: hashPassword(password),
         name: name || normalizedEmail.split("@")[0],
         tokenBalance: BigInt(10000000), // 10M token starter package
+        balanceUsd: freeQuota,
+        monthlyBalanceAllocatedUsd: freeQuota,
+        monthlyBalanceRemainingUsd: freeQuota,
       },
     });
 

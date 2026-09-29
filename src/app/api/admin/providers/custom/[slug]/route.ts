@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { decryptCredential, maskApiKey } from "@/lib/crypto";
-import {
-  getCustomProviderBySlug,
-  saveCustomProvider,
-  deleteCustomProvider,
-} from "@/lib/custom-providers";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -14,154 +7,159 @@ async function verifyAdmin() {
   return user;
 }
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
-) {
+export async function POST(req: NextRequest) {
   const admin = await verifyAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { slug } = await params;
-    const provider = await getCustomProviderBySlug(slug);
+    const body = await req.json();
+    const { baseUrl, apiKey, modelId, apiType = "Chat Completions" } = body;
 
-    if (!provider) {
-      return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
+    if (!baseUrl || !baseUrl.trim()) {
+      return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
     }
 
-    const providerKey = `CUSTOM_${provider.slug.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
-    const connections = await prisma.providerConnection.findMany({
-      where: {
-        OR: [
-          { provider: providerKey },
-          { provider: provider.slug.toUpperCase() },
-          { name: provider.name },
-        ],
-      },
-      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
-    });
+    const cleanBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+    const startTime = performance.now();
 
-    const maskedConnections = connections.map((c) => {
-      let maskedKey = "";
-      if (c.apiKeyEncrypted) {
-        try {
-          const decrypted = decryptCredential(c.apiKeyEncrypted);
-          maskedKey = maskApiKey(decrypted);
-        } catch {
-          maskedKey = "sk-****";
+    // 1. If modelId provided, perform a minimal chat completion / messages test
+    if (modelId && modelId.trim()) {
+      const isAnthropic = apiType === "Anthropic Messages" || cleanBaseUrl.includes("anthropic");
+      const url = isAnthropic
+        ? (cleanBaseUrl.endsWith("/messages") ? cleanBaseUrl : `${cleanBaseUrl}/messages`)
+        : (cleanBaseUrl.endsWith("/chat/completions") ? cleanBaseUrl : `${cleanBaseUrl}/chat/completions`);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (apiKey && apiKey.trim()) {
+        if (isAnthropic) {
+          headers["x-api-key"] = apiKey.trim();
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers["Authorization"] = `Bearer ${apiKey.trim()}`;
         }
       }
-      return {
-        ...c,
-        maskedApiKey: maskedKey,
-      };
-    });
 
-    return NextResponse.json({
-      success: true,
-      provider,
-      connections: maskedConnections,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to fetch custom provider" }, { status: 500 });
-  }
-}
+      const payload = isAnthropic
+        ? {
+            model: modelId.trim(),
+            max_tokens: 1,
+            messages: [{ role: "user", content: "ping" }],
+          }
+        : {
+            model: modelId.trim(),
+            max_tokens: 1,
+            messages: [{ role: "user", content: "ping" }],
+          };
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
-) {
-  const admin = await verifyAdmin();
-  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  try {
-    const { slug } = await params;
-    const existing = await getCustomProviderBySlug(slug);
+      try {
+        const upstreamRes = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-    if (!existing) {
-      return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
+        const latencyMs = Math.round(performance.now() - startTime);
+
+        if (upstreamRes.ok) {
+          return NextResponse.json({
+            success: true,
+            latencyMs,
+            status: "HEALTHY",
+            message: `Upstream responding OK (${latencyMs}ms)`,
+          });
+        }
+
+        const errText = await upstreamRes.text().catch(() => "");
+        return NextResponse.json({
+          success: false,
+          latencyMs,
+          statusCode: upstreamRes.status,
+          error: `[${upstreamRes.status}]: ${errText.slice(0, 200) || upstreamRes.statusText}`,
+        });
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        return NextResponse.json({
+          success: false,
+          error: err.name === "AbortError" ? "Request timed out (10s)" : err.message,
+        });
+      }
     }
 
-    const body = await req.json();
-    const { name, prefix, apiType, baseUrl } = body;
+    // 2. No modelId provided: attempt GET /models or HEAD
+    const modelsUrl = cleanBaseUrl.endsWith("/models") ? cleanBaseUrl : `${cleanBaseUrl}/models`;
+    const headers: Record<string, string> = {};
+    if (apiKey && apiKey.trim()) {
+      headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+    }
 
-    const updated = await saveCustomProvider({
-      ...existing,
-      name: name ? name.trim() : existing.name,
-      prefix: prefix ? prefix.trim().toLowerCase().replace(/\/+$/, "") : existing.prefix,
-      apiType: apiType || existing.apiType,
-      compatibility:
-        apiType === "Anthropic Messages"
-          ? "ANTHROPIC"
-          : apiType === "Chat Completions"
-          ? "OPENAI"
-          : existing.compatibility,
-      baseUrl: baseUrl ? baseUrl.trim() : existing.baseUrl,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    // Update existing connections' baseUrl & compatibility
-    const providerKey = `CUSTOM_${existing.slug.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
-    if (baseUrl) {
-      await prisma.providerConnection.updateMany({
-        where: { provider: providerKey },
-        data: {
-          baseUrl: updated.baseUrl,
-          compatibility: updated.compatibility,
-        },
+    try {
+      const upstreamRes = await fetch(modelsUrl, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const latencyMs = Math.round(performance.now() - startTime);
+
+      if (upstreamRes.ok) {
+        return NextResponse.json({
+          success: true,
+          latencyMs,
+          status: "HEALTHY",
+          message: `Endpoint valid & reachable (${latencyMs}ms)`,
+        });
+      }
+
+      if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+        return NextResponse.json({
+          success: false,
+          latencyMs,
+          statusCode: upstreamRes.status,
+          error: `[${upstreamRes.status}]: Authentication failed (Invalid API Key)`,
+        });
+      }
+
+      // If 404 or other non-auth error on /models, test base URL directly
+      const pingRes = await fetch(cleanBaseUrl, {
+        method: "GET",
+        headers,
+      }).catch(() => null);
+
+      if (pingRes && pingRes.status < 500) {
+        return NextResponse.json({
+          success: true,
+          latencyMs,
+          status: "REACHABLE",
+          message: `Server reachable (${latencyMs}ms)`,
+        });
+      }
+
+      return NextResponse.json({
+        success: false,
+        latencyMs,
+        statusCode: upstreamRes.status,
+        error: `Upstream returned status ${upstreamRes.status}: ${upstreamRes.statusText}`,
+      });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      return NextResponse.json({
+        success: false,
+        error: err.name === "AbortError" ? "Request timed out (8s)" : `Cannot connect: ${err.message}`,
       });
     }
-
-    return NextResponse.json({
-      success: true,
-      provider: updated,
-    });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to update custom provider" }, { status: 500 });
-  }
-}
-
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
-) {
-  const admin = await verifyAdmin();
-  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  try {
-    const { slug } = await params;
-    const existing = await getCustomProviderBySlug(slug);
-
-    if (!existing) {
-      return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
-    }
-
-    const providerKey = `CUSTOM_${existing.slug.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
-
-    // 1. Delete all connections for this custom provider
-    await prisma.providerConnection.deleteMany({
-      where: {
-        OR: [
-          { provider: providerKey },
-          { provider: existing.slug.toUpperCase() },
-        ],
-      },
-    });
-
-    // 2. Delete custom models associated with this provider
-    await prisma.aiModel.deleteMany({
-      where: {
-        provider: providerKey,
-      },
-    });
-
-    // 3. Remove custom provider from registry
-    await deleteCustomProvider(slug);
-
-    return NextResponse.json({
-      success: true,
-      message: `Custom provider "${existing.name}" and all associated connections removed.`,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to delete custom provider" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to check provider" }, { status: 500 });
   }
 }

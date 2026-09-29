@@ -95,9 +95,9 @@ export default function WebCookieModal({
             <span
               className="oauth-tag-badge"
               style={{
-                background: "#fffbeb",
-                color: "#b45309",
-                borderColor: "#fde68a",
+                background: "var(--amber-soft)",
+                color: "var(--amber)",
+                borderColor: "var(--amber-border)",
                 fontWeight: 600,
               }}
             >
@@ -194,7 +194,7 @@ export default function WebCookieModal({
             {parseFeedback && (
               <div className="cookie-feedback-bar">
                 <div className="cookie-feedback-left">
-                  <Cookie size={14} style={{ color: "#10a37f" }} />
+                  <Cookie size={14} style={{ color: "var(--emerald)" }} />
                   <span>
                     Format: <strong style={{ textTransform: "uppercase" }}>{parseFeedback.format}</strong>{" "}
                     ({parseFeedback.cookieCount} cookie ditemukan)
@@ -202,12 +202,12 @@ export default function WebCookieModal({
                 </div>
                 <div>
                   {parseFeedback.sessionToken ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#059669", fontWeight: 600 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "var(--emerald)", fontWeight: 600 }}>
                       <CheckCircle2 size={13} />
                       <span>Session Token Terdeteksi</span>
                     </span>
                   ) : (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#d97706", fontWeight: 600 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "var(--amber)", fontWeight: 600 }}>
                       <AlertCircle size={13} />
                       <span>Belum ada Session Token</span>
                     </span>
@@ -219,7 +219,7 @@ export default function WebCookieModal({
             {/* Helper Tips Box */}
             <div className="cookie-guide-box">
               <div className="cookie-guide-title">
-                <Sparkles size={12} style={{ color: "#d97706" }} />
+                <Sparkles size={12} style={{ color: "var(--amber)" }} />
                 <span>Cara Mendapatkan Cookie Akun Web:</span>
               </div>
               <div>
@@ -279,7 +279,7 @@ export default function WebCookieModal({
                       width: "12px",
                       height: "12px",
                       border: "2px solid rgba(255,255,255,0.3)",
-                      borderTopColor: "#fff",
+                      borderTopColor: "currentColor",
                       borderRadius: "50%",
                       animation: "spin 0.8s linear infinite",
                     }}

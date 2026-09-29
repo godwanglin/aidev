@@ -15,6 +15,7 @@ import {
   Coins,
 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
+import { Pagination } from "@/components/Pagination";
 import {
   ProviderAvatar,
   getProviderDisplayName,
@@ -28,8 +29,10 @@ interface ModelItem {
   provider: string;
   contextWindow: string;
   isActive: boolean;
-  rateInPer1k?: number;
-  rateOutPer1k?: number;
+  rateInUsdPer1k?: number;
+  rateOutUsdPer1k?: number;
+  rateInUsdPer1m?: number;
+  rateOutUsdPer1m?: number;
 }
 
 export default function ModelsPage() {
@@ -125,7 +128,7 @@ export default function ModelsPage() {
                     size={16}
                     imgSize={12}
                     className="shrink-0 rounded"
-                    style={{ background: "#f1f5f9", borderColor: "#e2e8f0" }}
+                    style={{ background: "var(--bg)", borderColor: "var(--line)" }}
                   />
                 ),
               };
@@ -144,7 +147,7 @@ export default function ModelsPage() {
                   <th>Model ID</th>
                   <th>Display Name</th>
                   <th>Provider</th>
-                  <th>Credit Cost Rate</th>
+                  <th>Cost Rate ($ / 1M tokens)</th>
                   <th>Context Window</th>
                   <th>Status</th>
                 </tr>
@@ -199,11 +202,11 @@ export default function ModelsPage() {
                               gap: "6px",
                               padding: "2px 8px",
                               borderRadius: "6px",
-                              background: "#f8fafc",
-                              border: "1px solid #e2e8f0",
+                              background: "var(--surface-hover)",
+                              border: "1px solid var(--line)",
                               fontSize: "11px",
                               fontWeight: 600,
-                              color: "#334155",
+                              color: "var(--ink)",
                             }}
                           >
                             <ProviderAvatar
@@ -218,15 +221,21 @@ export default function ModelsPage() {
                         </td>
                         <td>
                           <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#1e293b" }}>
+                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--ink)" }}>
                               <Coins size={12} className="text-amber-500 shrink-0" />
-                              <span>{m.rateInPer1k ?? 25} In / {m.rateOutPer1k ?? 100} Out</span>
+                              <span>
+                                ${(m.rateInUsdPer1m !== undefined && m.rateInUsdPer1m !== null
+                                  ? Number(m.rateInUsdPer1m)
+                                  : m.rateInUsdPer1k ? Number(m.rateInUsdPer1k) * 1000 : 0.15)} In / ${(m.rateOutUsdPer1m !== undefined && m.rateOutUsdPer1m !== null
+                                  ? Number(m.rateOutUsdPer1m)
+                                  : m.rateOutUsdPer1k ? Number(m.rateOutUsdPer1k) * 1000 : 0.60)} Out
+                              </span>
                             </div>
-                            <span className="text-[10.5px] text-muted">CR / 1k tokens</span>
+                            <span className="text-[10.5px] text-muted">$ / 1M tokens</span>
                           </div>
                         </td>
                         <td>
-                          <span className="mono text-xs font-medium" style={{ color: "#475569" }}>
+                          <span className="mono text-xs font-medium" style={{ color: "var(--muted)" }}>
                             {m.contextWindow || "128k"}
                           </span>
                         </td>
@@ -243,58 +252,19 @@ export default function ModelsPage() {
             </table>
           </div>
 
-          <div className="table-footer">
-            <div className="table-footer-left">
-              <span className="table-footer-text">
-                Showing {filteredModels.length === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
-                {Math.min(page * pageSize, filteredModels.length)} of {filteredModels.length} models
-              </span>
-              <div className="per-page-wrap flex items-center gap-2">
-                <span className="text-muted text-xs">Per page:</span>
-                <CustomDropdown
-                  size="sm"
-                  direction="up"
-                  value={String(pageSize)}
-                  onChange={(val) => {
-                    setPageSize(Number(val));
-                    setPage(1);
-                  }}
-                  options={[
-                    { value: "5", label: "5" },
-                    { value: "10", label: "10" },
-                    { value: "20", label: "20" },
-                    { value: "50", label: "50" },
-                  ]}
-                  minWidth={65}
-                  width={65}
-                />
-              </div>
-            </div>
-
-            <div className="pager">
-              <button
-                className="pager-btn"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                title="Previous Page"
-              >
-                <ChevronLeft size={11} />
-                <span>Prev</span>
-              </button>
-              <span className="pager-info">
-                {page}/{totalPages}
-              </span>
-              <button
-                className="pager-btn"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                title="Next Page"
-              >
-                <span>Next</span>
-                <ChevronRight size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalCount={filteredModels.length}
+            pageSize={pageSize}
+            pageSizeOptions={[5, 10, 20, 50]}
+            itemName="models"
+            onPageChange={(p) => setPage(p)}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setPage(1);
+            }}
+          />
         </article>
       </div>
     </DashboardShell>

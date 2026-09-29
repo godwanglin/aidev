@@ -283,7 +283,7 @@ export default function CustomProviderModal({
           </div>
 
           {/* Test Connection Check Section */}
-          <div className="p-3 rounded-lg bg-[#f8fafc] border border-[var(--border)] mb-4 flex items-center justify-between gap-3">
+          <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] mb-4 flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={handleCheck}

@@ -109,7 +109,7 @@ export OPENAI_BASE_URL="http://localhost:3000/v1"
 export OPENAI_API_KEY="sk-int-your-internal-api-key"
 
 # 2. Jalankan OpenCode langsung dengan model yang diinginkan
-opencode run "Buatkan CRUD REST API di Go dengan Gin dan PostgreSQL"
+opencode run "Buatkan USDUD REST API di Go dengan Gin dan PostgreSQL"
 
 # Atau buka mode interaktif TUI
 opencode --model aidev_gateway/deepseek-reasoner`;
@@ -269,7 +269,7 @@ run();`;
                   onClick={() => handleCopy("http://localhost:3000/v1", "base_url")}
                   className="docs-url-copy-btn"
                 >
-                  {copiedSection === "base_url" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                  {copiedSection === "base_url" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                   <span>{copiedSection === "base_url" ? "Disalin!" : "Salin URL"}</span>
                 </button>
               </div>
@@ -301,7 +301,7 @@ run();`;
         <div className="docs-cards-grid">
           <div className="doc-feature-card">
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Cpu size={16} color="#2563eb" style={{ flexShrink: 0 }} />
+              <Cpu size={16} color="var(--blue)" style={{ flexShrink: 0 }} />
               <strong style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink)" }}>100% OpenAI Drop-In</strong>
             </div>
             <p style={{ fontSize: "12px", color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>
@@ -311,7 +311,7 @@ run();`;
 
           <div className="doc-feature-card">
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Flame size={16} color="#d97706" style={{ flexShrink: 0 }} />
+              <Flame size={16} color="var(--amber)" style={{ flexShrink: 0 }} />
               <strong style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink)" }}>DeepSeek R1 Thinking Engine</strong>
             </div>
             <p style={{ fontSize: "12px", color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>
@@ -321,7 +321,7 @@ run();`;
 
           <div className="doc-feature-card">
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <ShieldCheck size={16} color="#059669" style={{ flexShrink: 0 }} />
+              <ShieldCheck size={16} color="var(--emerald)" style={{ flexShrink: 0 }} />
               <strong style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink)" }}>Per-Key Rate Limits & Fallback</strong>
             </div>
             <p style={{ fontSize: "12px", color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>
@@ -336,7 +336,7 @@ run();`;
             onClick={() => setActiveTab("opencode")}
             className={`docs-tab-btn ${activeTab === "opencode" ? "active" : ""}`}
           >
-            <Bot size={15} color={activeTab === "opencode" ? "#2563eb" : "#64748b"} />
+            <Bot size={15} color={activeTab === "opencode" ? "var(--blue)" : "var(--muted)"} />
             <span>OpenCode & Aidev CLI</span>
             <span className="docs-tab-tag cyan">Prioritas</span>
           </button>
@@ -345,7 +345,7 @@ run();`;
             onClick={() => setActiveTab("codex")}
             className={`docs-tab-btn ${activeTab === "codex" ? "active" : ""}`}
           >
-            <Laptop size={15} color={activeTab === "codex" ? "#2563eb" : "#64748b"} />
+            <Laptop size={15} color={activeTab === "codex" ? "var(--blue)" : "var(--muted)"} />
             <span>Codex Desktop</span>
             <span className="docs-tab-tag emerald">Reasoning</span>
           </button>
@@ -354,7 +354,7 @@ run();`;
             onClick={() => setActiveTab("other-agents")}
             className={`docs-tab-btn ${activeTab === "other-agents" ? "active" : ""}`}
           >
-            <Layers size={15} color={activeTab === "other-agents" ? "#2563eb" : "#64748b"} />
+            <Layers size={15} color={activeTab === "other-agents" ? "var(--blue)" : "var(--muted)"} />
             <span>Agent Lain (Claude, Cursor, Cline)</span>
           </button>
 
@@ -362,7 +362,7 @@ run();`;
             onClick={() => setActiveTab("sdks")}
             className={`docs-tab-btn ${activeTab === "sdks" ? "active" : ""}`}
           >
-            <Code2 size={15} color={activeTab === "sdks" ? "#2563eb" : "#64748b"} />
+            <Code2 size={15} color={activeTab === "sdks" ? "var(--blue)" : "var(--muted)"} />
             <span>Official SDKs (Python, TS, cURL)</span>
           </button>
 
@@ -370,7 +370,7 @@ run();`;
             onClick={() => setActiveTab("api")}
             className={`docs-tab-btn ${activeTab === "api" ? "active" : ""}`}
           >
-            <Server size={15} color={activeTab === "api" ? "#2563eb" : "#64748b"} />
+            <Server size={15} color={activeTab === "api" ? "var(--blue)" : "var(--muted)"} />
             <span>API Reference</span>
           </button>
         </div>
@@ -398,7 +398,7 @@ run();`;
                     <span className="code-dot green" />
                   </div>
                   <span className="code-window-title">
-                    <FileJson size={13} color="#0891b2" />
+                    <FileJson size={13} color="var(--cyan)" />
                     <span>Metode 1: opencode.json (Project-Level atau Global Config)</span>
                   </span>
                 </div>
@@ -406,7 +406,7 @@ run();`;
                   className="btn-copy"
                   onClick={() => handleCopy(openCodeJsonSnippet, "opencode_json")}
                 >
-                  {copiedSection === "opencode_json" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                  {copiedSection === "opencode_json" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                   <span>{copiedSection === "opencode_json" ? "Copied!" : "Copy JSON"}</span>
                 </button>
               </div>
@@ -433,7 +433,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Terminal size={13} color="#7c3aed" />
+                      <Terminal size={13} color="var(--purple)" />
                       <span>Metode 2A: Linux & macOS (Bash / Zsh)</span>
                     </span>
                   </div>
@@ -441,7 +441,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(openCodeBashSnippet, "opencode_bash")}
                   >
-                    {copiedSection === "opencode_bash" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "opencode_bash" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "opencode_bash" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -459,7 +459,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Terminal size={13} color="#2563eb" />
+                      <Terminal size={13} color="var(--blue)" />
                       <span>Metode 2B: Windows (PowerShell) & Aidev CLI</span>
                     </span>
                   </div>
@@ -467,7 +467,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(openCodePowershellSnippet, "opencode_ps")}
                   >
-                    {copiedSection === "opencode_ps" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "opencode_ps" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "opencode_ps" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -480,7 +480,7 @@ run();`;
             {/* Quick Tips Box */}
             <div className="docs-tips-card">
               <div className="docs-tips-header">
-                <Sparkles size={15} color="#d97706" />
+                <Sparkles size={15} color="var(--amber)" />
                 <span>Tips Praktis OpenCode dengan AI Gateway</span>
               </div>
               <ul className="docs-tips-list">
@@ -520,7 +520,7 @@ run();`;
                     <span className="code-dot green" />
                   </div>
                   <span className="code-window-title">
-                    <Settings size={13} color="#059669" />
+                    <Settings size={13} color="var(--emerald)" />
                     <span>Codex Desktop Configuration (config.json)</span>
                   </span>
                 </div>
@@ -528,7 +528,7 @@ run();`;
                   className="btn-copy"
                   onClick={() => handleCopy(codexConfigSnippet, "codex_config")}
                 >
-                  {copiedSection === "codex_config" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                  {copiedSection === "codex_config" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                   <span>{copiedSection === "codex_config" ? "Copied!" : "Copy"}</span>
                 </button>
               </div>
@@ -540,7 +540,7 @@ run();`;
             <div className="docs-grid-2">
               <div className="docs-info-card">
                 <div className="docs-info-card-title">
-                  <CheckCircle2 size={15} color="#059669" />
+                  <CheckCircle2 size={15} color="var(--emerald)" />
                   <span>Accordion Thought Process</span>
                 </div>
                 <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
@@ -550,7 +550,7 @@ run();`;
 
               <div className="docs-info-card">
                 <div className="docs-info-card-title">
-                  <CheckCircle2 size={15} color="#059669" />
+                  <CheckCircle2 size={15} color="var(--emerald)" />
                   <span>Retensi Riwayat Pemikiran (History)</span>
                 </div>
                 <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
@@ -575,7 +575,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Terminal size={13} color="#d97706" />
+                      <Terminal size={13} color="var(--amber)" />
                       <span>Claude Code CLI Integration</span>
                     </span>
                   </div>
@@ -583,7 +583,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(claudeCodeSnippet, "claude_code")}
                   >
-                    {copiedSection === "claude_code" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "claude_code" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "claude_code" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -602,7 +602,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Laptop size={13} color="#2563eb" />
+                      <Laptop size={13} color="var(--blue)" />
                       <span>Cursor IDE Setup Guide</span>
                     </span>
                   </div>
@@ -610,7 +610,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(cursorSnippet, "cursor")}
                   >
-                    {copiedSection === "cursor" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "cursor" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "cursor" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -630,7 +630,7 @@ run();`;
                     <span className="code-dot green" />
                   </div>
                   <span className="code-window-title">
-                    <FileJson size={13} color="#6366f1" />
+                    <FileJson size={13} color="var(--purple)" />
                     <span>Cline & Roo-Code VS Code Extension (settings.json)</span>
                   </span>
                 </div>
@@ -638,7 +638,7 @@ run();`;
                   className="btn-copy"
                   onClick={() => handleCopy(clineSnippet, "cline")}
                 >
-                  {copiedSection === "cline" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                  {copiedSection === "cline" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                   <span>{copiedSection === "cline" ? "Copied!" : "Copy"}</span>
                 </button>
               </div>
@@ -663,7 +663,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Code2 size={13} color="#2563eb" />
+                      <Code2 size={13} color="var(--blue)" />
                       <span>Python Official OpenAI SDK (main.py)</span>
                     </span>
                   </div>
@@ -671,7 +671,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(pythonSnippet, "python")}
                   >
-                    {copiedSection === "python" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "python" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "python" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -690,7 +690,7 @@ run();`;
                       <span className="code-dot green" />
                     </div>
                     <span className="code-window-title">
-                      <Code2 size={13} color="#059669" />
+                      <Code2 size={13} color="var(--emerald)" />
                       <span>Node.js / TypeScript Streaming SSE (stream.ts)</span>
                     </span>
                   </div>
@@ -698,7 +698,7 @@ run();`;
                     className="btn-copy"
                     onClick={() => handleCopy(nodeSnippet, "node")}
                   >
-                    {copiedSection === "node" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                    {copiedSection === "node" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                     <span>{copiedSection === "node" ? "Copied!" : "Copy"}</span>
                   </button>
                 </div>
@@ -718,7 +718,7 @@ run();`;
                     <span className="code-dot green" />
                   </div>
                   <span className="code-window-title">
-                    <Terminal size={13} color="#7c3aed" />
+                    <Terminal size={13} color="var(--purple)" />
                     <span>Raw cURL / REST API</span>
                   </span>
                 </div>
@@ -726,7 +726,7 @@ run();`;
                   className="btn-copy"
                   onClick={() => handleCopy(curlChatSnippet, "curl_chat")}
                 >
-                  {copiedSection === "curl_chat" ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+                  {copiedSection === "curl_chat" ? <Check size={12} color="var(--emerald)" /> : <Copy size={12} />}
                   <span>{copiedSection === "curl_chat" ? "Copied!" : "Copy"}</span>
                 </button>
               </div>
@@ -743,7 +743,7 @@ run();`;
             {/* Endpoints Table */}
             <div className="docs-table-card">
               <div className="docs-table-card-header">
-                <Server size={16} color="#2563eb" />
+                <Server size={16} color="var(--blue)" />
                 <span>Daftar Endpoint REST API Gateway</span>
               </div>
               <div>
@@ -813,7 +813,7 @@ run();`;
             <div className="docs-grid-2">
               <div className="docs-info-card">
                 <div className="docs-info-card-title">
-                  <Key size={15} color="#2563eb" />
+                  <Key size={15} color="var(--blue)" />
                   <span>Headers & Autentikasi</span>
                 </div>
                 <div className="docs-info-item">
@@ -832,23 +832,23 @@ run();`;
 
               <div className="docs-info-card">
                 <div className="docs-info-card-title">
-                  <ShieldCheck size={15} color="#059669" />
+                  <ShieldCheck size={15} color="var(--emerald)" />
                   <span>Status Codes & Error Handling</span>
                 </div>
                 <div className="docs-info-item">
-                  <div className="docs-info-item-label" style={{ color: "#059669" }}>200 OK</div>
+                  <div className="docs-info-item-label" style={{ color: "var(--emerald)" }}>200 OK</div>
                   <p className="docs-info-item-desc">Permintaan sukses dieksekusi atau stream terhubung.</p>
                 </div>
                 <div className="docs-info-item">
-                  <div className="docs-info-item-label" style={{ color: "#dc2626" }}>401 Unauthorized</div>
+                  <div className="docs-info-item-label" style={{ color: "var(--red)" }}>401 Unauthorized</div>
                   <p className="docs-info-item-desc">API Key tidak valid atau telah dinonaktifkan.</p>
                 </div>
                 <div className="docs-info-item">
-                  <div className="docs-info-item-label" style={{ color: "#d97706" }}>429 Rate Limit</div>
+                  <div className="docs-info-item-label" style={{ color: "var(--amber)" }}>429 Rate Limit</div>
                   <p className="docs-info-item-desc">Batas rate limit tercapai. Gateway otomatis mencoba failover ke upstream cadangan terlebih dahulu.</p>
                 </div>
                 <div className="docs-info-item">
-                  <div className="docs-info-item-label" style={{ color: "#7c3aed" }}>502 Bad Gateway</div>
+                  <div className="docs-info-item-label" style={{ color: "var(--purple)" }}>502 Bad Gateway</div>
                   <p className="docs-info-item-desc">Seluruh kandidat model upstream mengalami downtime.</p>
                 </div>
               </div>

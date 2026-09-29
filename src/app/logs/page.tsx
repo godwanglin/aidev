@@ -5,6 +5,7 @@ import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import Status from "@/components/Status";
 import CustomDropdown from "@/components/CustomDropdown";
+import { Pagination } from "@/components/Pagination";
 import {
   Search,
   Filter,
@@ -256,10 +257,10 @@ export default function LogsPage() {
                   <th>
                     <div className="flex items-center gap-1.5">
                       <Coins size={12} className="text-amber-500 shrink-0" />
-                      <span>Credit</span>
+                      <span>Cost</span>
                     </div>
                     <div className="text-[10px] text-muted font-normal lowercase tracking-normal">
-                      in / out / total ≈ cr
+                      in / out / total &asymp; $
                     </div>
                   </th>
                   <th>Latency</th>
@@ -283,23 +284,23 @@ export default function LogsPage() {
                         {row.totalTokens !== null ? (
                           <div
                             className="inline-flex items-center gap-1.5 whitespace-nowrap"
-                            title={`Input: ${(row.promptTokens || 0).toLocaleString()} · Output: ${(row.completionTokens || 0).toLocaleString()} · Total: ${(row.totalTokens || 0).toLocaleString()} tokens → Digunakan: ${(row.creditsCost ?? 0).toLocaleString()} CR`}
+                            title={`Input: ${(row.promptTokens || 0).toLocaleString()} • Output: ${(row.completionTokens || 0).toLocaleString()} • Total: ${(row.totalTokens || 0).toLocaleString()} tokens → Digunakan: $${Number(row.costUsd ?? 0).toFixed(6)}`}
                           >
-                            <span className="text-slate-600 font-medium">
+                            <span className="text-ink font-medium">
                               {(row.promptTokens || 0).toLocaleString()}/{(row.completionTokens || 0).toLocaleString()}/{(row.totalTokens || 0).toLocaleString()}
                             </span>
-                            <span className="text-muted" style={{ margin: "0 1px" }}>≈</span>
+                            <span className="text-muted" style={{ margin: "0 1px" }}>&asymp;</span>
                             <span
                               className="inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded shadow-xs"
                               style={{
-                                background: "#fffbeb",
-                                color: "#b45309",
-                                border: "1px solid #fef3c7",
+                                background: "var(--amber-soft)",
+                                color: "var(--amber)",
+                                border: "1px solid var(--amber-border)",
                                 fontSize: "11px",
                               }}
                             >
                               <Coins size={11} className="text-amber-500 shrink-0" />
-                              <span>{(row.creditsCost ?? 0).toLocaleString()} CR</span>
+                              <span>${Number(row.costUsd ?? 0).toFixed(Number(row.costUsd ?? 0) < 0.001 ? 6 : 4)}</span>
                             </span>
                           </div>
                         ) : (
@@ -314,55 +315,16 @@ export default function LogsPage() {
             </table>
           </div>
           
-          {/* Server-Side Pagination Footer */}
-          <div className="table-footer">
-            <div className="table-footer-left">
-              <span className="table-footer-text">
-                Showing {pagination.totalCount === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
-                {Math.min(page * pageSize, pagination.totalCount)} of {pagination.totalCount.toLocaleString()} logs
-              </span>
-              <div className="per-page-wrap flex items-center gap-2">
-                <span className="text-muted text-xs">Per page:</span>
-                <CustomDropdown
-                  size="sm"
-                  value={String(pageSize)}
-                  onChange={(val) => setPageSize(Number(val))}
-                  options={[
-                    { value: "10", label: "10" },
-                    { value: "15", label: "15" },
-                    { value: "25", label: "25" },
-                    { value: "50", label: "50" },
-                  ]}
-                  minWidth={72}
-                  align="right"
-                />
-              </div>
-            </div>
-
-            <div className="pager">
-              <button
-                className="pager-btn"
-                disabled={!pagination.hasPrevPage}
-                onClick={() => handlePageChange(page - 1)}
-                title="Previous Page"
-              >
-                <ChevronLeft size={11} />
-                <span>Prev</span>
-              </button>
-              <span className="pager-info">
-                {page}/{pagination.totalPages}
-              </span>
-              <button
-                className="pager-btn"
-                disabled={!pagination.hasNextPage}
-                onClick={() => handlePageChange(page + 1)}
-                title="Next Page"
-              >
-                <span>Next</span>
-                <ChevronRight size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={pagination.totalPages}
+            totalCount={pagination.totalCount}
+            pageSize={pageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+            itemName="logs"
+            onPageChange={(p) => handlePageChange(p)}
+            onPageSizeChange={(sz) => setPageSize(sz)}
+          />
         </article>
       </div>
     </DashboardShell>

@@ -30,16 +30,17 @@ import {
   CreditCard,
   Layers,
 } from "lucide-react";
+import { IDR_PER_USD } from "@/lib/billing-config";
 
 interface UserItem {
   id: string;
   email: string;
   name: string;
   role: string;
-  creditBalance: number;
-  purchasedCredits: number;
-  monthlyCreditsAllocated: number;
-  monthlyCreditsRemaining: number;
+  balanceUsd: number;
+  purchasedBalanceUsd: number;
+  monthlyBalanceAllocatedUsd: number;
+  monthlyBalanceRemainingUsd: number;
   tokenBalance: number;
   subscriptionTier: string;
   subscriptionStartedAt: string | null;
@@ -55,7 +56,7 @@ interface TierConfigItem {
   id: string;
   name: string;
   priceIdr: number;
-  monthlyCredits: number;
+  monthlyBalanceUsd: number;
   rpmLimit: number;
   maxKeys: number;
   routingPriority: string;
@@ -66,7 +67,7 @@ interface TierConfigItem {
 interface UserStats {
   totalUsers: number;
   activeSubscribers: number;
-  totalCreditsInCirculation: number;
+  totalBalanceUsdInCirculation: number;
   totalAdmins: number;
 }
 
@@ -76,7 +77,7 @@ export default function AdminUsersPage() {
   const [stats, setStats] = useState<UserStats>({
     totalUsers: 0,
     activeSubscribers: 0,
-    totalCreditsInCirculation: 0,
+    totalBalanceUsdInCirculation: 0,
     totalAdmins: 0,
   });
 
@@ -100,7 +101,7 @@ export default function AdminUsersPage() {
   // Modal 1: Ubah Tier
   const [tierModalUser, setTierModalUser] = useState<UserItem | null>(null);
   const [selectedTierId, setSelectedTierId] = useState("FREE");
-  const [autoAddCredits, setAutoAddCredits] = useState(true);
+  const [autoAddBalance, setAutoAddUSD] = useState(true);
   const [isUpdatingTier, setIsUpdatingTier] = useState(false);
 
   // Modal 2: Injeksi Kredit
@@ -108,7 +109,7 @@ export default function AdminUsersPage() {
   const [injectAmount, setInjectAmount] = useState<string>("50000");
   const [injectType, setInjectType] = useState<"PERMANENT" | "MONTHLY">("PERMANENT");
   const [injectReason, setInjectReason] = useState("");
-  const [isInjectingCredits, setIsInjectingCredits] = useState(false);
+  const [isInjectingBalance, setIsInjectingUSD] = useState(false);
 
   // Modal 3: Role Change Confirm
   const [roleModalUser, setRoleModalUser] = useState<UserItem | null>(null);
@@ -175,7 +176,7 @@ export default function AdminUsersPage() {
   function openChangeTierModal(u: UserItem) {
     setTierModalUser(u);
     setSelectedTierId(u.subscriptionTier || "FREE");
-    setAutoAddCredits(true);
+    setAutoAddUSD(true);
   }
 
   // Submit Ubah Tier
@@ -194,7 +195,7 @@ export default function AdminUsersPage() {
           userId: tierModalUser.id,
           action: "CHANGE_TIER",
           tierId: selectedTierId,
-          addCredits: autoAddCredits,
+          addBalance: autoAddBalance,
         }),
       });
 
@@ -215,7 +216,7 @@ export default function AdminUsersPage() {
   }
 
   // Action: Open Injeksi Kredit Modal
-  function openInjectCreditsModal(u: UserItem) {
+  function openInjectBalanceModal(u: UserItem) {
     setInjectModalUser(u);
     setInjectAmount("50000");
     setInjectType("PERMANENT");
@@ -223,7 +224,7 @@ export default function AdminUsersPage() {
   }
 
   // Submit Injeksi Kredit
-  async function handleSubmitInjectCredits(e: React.FormEvent) {
+  async function handleSubmitInjectBalance(e: React.FormEvent) {
     e.preventDefault();
     if (!injectModalUser) return;
 
@@ -233,7 +234,7 @@ export default function AdminUsersPage() {
       return;
     }
 
-    setIsInjectingCredits(true);
+    setIsInjectingUSD(true);
     setErrorMsg("");
 
     try {
@@ -242,9 +243,9 @@ export default function AdminUsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: injectModalUser.id,
-          action: "INJECT_CREDITS",
+          action: "INJECT_BALANCE",
           amount: numAmount,
-          creditType: injectType,
+          balanceType: injectType,
           reason: injectReason.trim(),
         }),
       });
@@ -252,7 +253,7 @@ export default function AdminUsersPage() {
       const data = await res.json();
 
       if (data.success) {
-        showSuccess(data.message || `Berhasil menginjeksikan +${numAmount.toLocaleString()} CR`);
+        showSuccess(data.message || `Berhasil menginjeksikan +$${numAmount.toFixed(2)}`);
         setInjectModalUser(null);
         fetchUsers(true);
       } else {
@@ -261,7 +262,7 @@ export default function AdminUsersPage() {
     } catch (err: any) {
       setErrorMsg(err.message || "Gagal mengirim permintaan injeksi kredit");
     } finally {
-      setIsInjectingCredits(false);
+      setIsInjectingUSD(false);
     }
   }
 
@@ -377,17 +378,17 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          {/* Card 3: Total Credits in Circulation */}
+          {/* Card 3: Total USD in Circulation */}
           <div className="card" style={{ padding: "14px 16px" }}>
             <div className="flex items-center justify-between text-muted" style={{ marginBottom: "6px" }}>
               <span className="stat-title" style={{ fontSize: "12px", fontWeight: 500 }}>Total Kredit Beredar</span>
               <Coins size={16} style={{ color: "var(--green)" }} className="shrink-0" />
             </div>
             <div className="stat-value" style={{ fontSize: "22px", fontWeight: 700, color: "var(--green)" }}>
-              {(stats.totalCreditsInCirculation / 1_000_000).toFixed(2)}M CR
+              ${(stats.totalBalanceUsdInCirculation / 1_000_000).toFixed(2)}M
             </div>
             <div className="stat-sub" style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
-              {stats.totalCreditsInCirculation.toLocaleString("id-ID")} CR di dompet user
+              ${Number(stats.totalBalanceUsdInCirculation || 0).toFixed(2)} di dompet user
             </div>
           </div>
 
@@ -525,7 +526,7 @@ export default function AdminUsersPage() {
               }}
               options={[
                 { value: "createdAt", label: "Waktu Daftar", icon: <Clock size={13} className="text-muted" /> },
-                { value: "creditBalance", label: "Saldo Terbanyak", icon: <Coins size={13} className="text-green" /> },
+                { value: "balanceUsd", label: "Saldo Terbanyak", icon: <Coins size={13} className="text-green" /> },
                 { value: "name", label: "Nama Alfabetis", icon: <ArrowUpDown size={13} className="text-muted" /> },
                 { value: "email", label: "Email Alfabetis", icon: <ArrowUpDown size={13} className="text-muted" /> },
               ]}
@@ -866,7 +867,7 @@ export default function AdminUsersPage() {
                               }}
                             >
                               <Coins size={13} className="text-green" />
-                              <span>{u.creditBalance.toLocaleString("id-ID")} CR</span>
+                              <span>${Number(u.balanceUsd || 0).toFixed(2)}</span>
                             </div>
                             <div
                               style={{
@@ -878,11 +879,11 @@ export default function AdminUsersPage() {
                               }}
                             >
                               <span title="Sisa Kuota Bulanan">
-                                Kuota: {u.monthlyCreditsRemaining.toLocaleString("id-ID")}
+                                Kuota: ${Number(u.monthlyBalanceRemainingUsd || 0).toFixed(2)}
                               </span>
-                              <span>•</span>
+                              <span>&bull;</span>
                               <span title="Kredit Permanen Top-Up">
-                                Top-up: {u.purchasedCredits.toLocaleString("id-ID")}
+                                Top-up: ${Number(u.purchasedBalanceUsd || 0).toFixed(2)}
                               </span>
                             </div>
                           </div>
@@ -933,7 +934,7 @@ export default function AdminUsersPage() {
                             <button
                               type="button"
                               className="btn-pill-emerald"
-                              onClick={() => openInjectCreditsModal(u)}
+                              onClick={() => openInjectBalanceModal(u)}
                               title="Injeksikan Saldo Kredit Langsung"
                             >
                               <Plus size={12} strokeWidth={2.5} />
@@ -1062,7 +1063,7 @@ export default function AdminUsersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",
@@ -1174,7 +1175,7 @@ export default function AdminUsersPage() {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: "13px" }}>Free Tier</div>
                         <div style={{ fontSize: "11px", color: "var(--muted)" }}>
-                          20.000 CR kuota awal · 15 RPM · Regular Lane
+                          $1.00 kuota awal &bull; 15 RPM &bull; Regular Lane
                         </div>
                       </div>
                     </div>
@@ -1219,11 +1220,11 @@ export default function AdminUsersPage() {
                               <div className="flex items-center gap-2">
                                 <span style={{ fontWeight: 700, fontSize: "13px" }}>{t.name}</span>
                                 <span className="users-tier-bonus-pill">
-                                  +{t.monthlyCredits.toLocaleString("id-ID")} CR
+                                  +${Number(t.monthlyBalanceUsd || 0).toFixed(2)}
                                 </span>
                               </div>
                               <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
-                                {t.rpmLimit} RPM · {t.routingPriority} Lane · Max {t.maxKeys} Keys
+                                {t.rpmLimit} RPM &bull; {t.routingPriority} Lane &bull; Max {t.maxKeys} Keys
                               </div>
                             </div>
                           </div>
@@ -1235,20 +1236,19 @@ export default function AdminUsersPage() {
                     })}
                 </div>
 
-                {/* Auto Add Credits Option */}
+                {/* Auto Add USD Option */}
                 {selectedTierId !== "FREE" && selectedTierConfig && (
                   <div className="users-modal-auto-box">
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={autoAddCredits}
-                        onChange={(e) => setAutoAddCredits(e.target.checked)}
+                        checked={autoAddBalance}
+                        onChange={(e) => setAutoAddUSD(e.target.checked)}
                         style={{ marginTop: "2px" }}
                       />
                       <div style={{ fontSize: "12px" }}>
                         <strong>
-                          Tambahkan kuota paket (+{selectedTierConfig.monthlyCredits.toLocaleString()}{" "}
-                          CR) otomatis ke saldo akun
+                          Tambahkan kuota paket (+${Number(selectedTierConfig.monthlyBalanceUsd || 0).toFixed(2)}) otomatis ke saldo akun
                         </strong>
                         <p style={{ margin: "2px 0 0 0", fontSize: "11px" }}>
                           Paket akan otomatis aktif 30 hari ke depan dan kredit langsung dapat
@@ -1303,7 +1303,7 @@ export default function AdminUsersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",
@@ -1350,7 +1350,7 @@ export default function AdminUsersPage() {
               </div>
 
               <form
-                onSubmit={handleSubmitInjectCredits}
+                onSubmit={handleSubmitInjectBalance}
                 style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "14px" }}
               >
                 {/* Current Balance */}
@@ -1367,7 +1367,7 @@ export default function AdminUsersPage() {
                 >
                   <span className="text-muted">Saldo Saat Ini:</span>
                   <span style={{ fontWeight: 700, color: "var(--green)" }}>
-                    {injectModalUser.creditBalance.toLocaleString("id-ID")} CR
+                    ${Number(injectModalUser.balanceUsd || 0).toFixed(2)}
                   </span>
                 </div>
 
@@ -1393,7 +1393,7 @@ export default function AdminUsersPage() {
                       boxSizing: "border-box",
                     }}
                   >
-                    {["10000", "50000", "100000", "500000", "1000000"].map((amt) => {
+                    {["1", "5", "10", "25", "100"].map((amt) => {
                       const isSel = injectAmount === amt;
                       return (
                         <button
@@ -1418,7 +1418,7 @@ export default function AdminUsersPage() {
                           }}
                           onClick={() => setInjectAmount(amt)}
                         >
-                          +{parseInt(amt, 10).toLocaleString()} CR
+                          +${parseInt(amt, 10).toLocaleString()}
                         </button>
                       );
                     })}
@@ -1436,7 +1436,7 @@ export default function AdminUsersPage() {
                       display: "block",
                     }}
                   >
-                    Nominal Kredit Kustom (CR):
+                    Nominal Kredit Kustom (USD):
                   </label>
                   <input
                     type="number"
@@ -1459,18 +1459,18 @@ export default function AdminUsersPage() {
                     }}
                   />
                   <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
-                    Nilai Setara: ≈{" "}
+                    Nilai Setara: &asymp;{" "}
                     <strong>
                       Rp{" "}
                       {(
-                        parseInt(injectAmount || "0", 10) / 10
+                        Number(injectAmount || 0) * IDR_PER_USD
                       ).toLocaleString("id-ID")}
                     </strong>{" "}
-                    (Rasio 1 IDR = 10 CR)
+                    (Kurs 1 USD = Rp {IDR_PER_USD.toLocaleString("id-ID")})
                   </div>
                 </div>
 
-                {/* Credit Type Selection */}
+                {/* Balance Type Selection */}
                 <div>
                   <label
                     style={{
@@ -1595,7 +1595,7 @@ export default function AdminUsersPage() {
                     type="button"
                     className="control cursor-pointer"
                     onClick={() => setInjectModalUser(null)}
-                    disabled={isInjectingCredits}
+                    disabled={isInjectingBalance}
                     style={{ height: "36px", padding: "0 18px", borderRadius: "8px", fontWeight: 500 }}
                   >
                     Batal
@@ -1603,11 +1603,11 @@ export default function AdminUsersPage() {
                   <button
                     type="submit"
                     className="primary btn-inline cursor-pointer"
-                    disabled={isInjectingCredits}
+                    disabled={isInjectingBalance}
                     style={{ height: "36px", padding: "0 20px", borderRadius: "8px", fontWeight: 600 }}
                   >
-                    {isInjectingCredits && <RefreshCw size={13} className="animate-spin" />}
-                    <span>{isInjectingCredits ? "Memproses..." : "Injeksikan Kredit Sekarang"}</span>
+                    {isInjectingBalance && <RefreshCw size={13} className="animate-spin" />}
+                    <span>{isInjectingBalance ? "Memproses..." : "Injeksikan Kredit Sekarang"}</span>
                   </button>
                 </div>
               </form>
@@ -1623,7 +1623,7 @@ export default function AdminUsersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",

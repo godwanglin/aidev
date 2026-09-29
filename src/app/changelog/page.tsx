@@ -76,7 +76,7 @@ const changelogs: ChangelogItem[] = [
       {
         category: "New",
         items: [
-          "Admin CRUD Management untuk model AI: Add, Edit, Deactivate, dan Delete model langsung dari web UI.",
+          "Admin USDUD Management untuk model AI: Add, Edit, Deactivate, dan Delete model langsung dari web UI.",
           "Modal popup pembuatan/edit model dengan styling seragam dan responsive.",
           "Tombol inline copy model ID dengan visual feedback checklist 2 detik.",
         ],

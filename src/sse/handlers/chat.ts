@@ -109,14 +109,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
     );
   }
 
-  // 2. Strict credit balance check (reject 402 if <= 0, exempt ADMIN)
+  // 2. Strict USD balance check (reject 402 if <= 0, exempt ADMIN)
   const clientUserRole = (auth.apiKey as any)?.user?.role || "USER";
-  const clientUserCredit = Number((auth.apiKey as any)?.user?.creditBalance ?? 0);
-  if (clientUserRole !== "ADMIN" && clientUserCredit <= 0) {
+  const clientUserBalanceUsd = Number((auth.apiKey as any)?.user?.balanceUsd ?? 0);
+  if (clientUserRole !== "ADMIN" && clientUserBalanceUsd <= 0) {
     return NextResponse.json(
       {
         error: {
-          message: "Saldo credit Anda telah habis (0 CR). Silakan top up saldo atau perbarui paket langganan Anda.",
+          message: "Saldo Anda telah habis (0 USD). Silakan top up saldo atau perbarui paket langganan Anda.",
           type: "auth_error",
           code: 402,
         },
@@ -160,7 +160,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   // 4. Subscription Tier Model Whitelist Check
   const userTier = (auth.apiKey as any)?.user?.subscriptionTier || "FREE";
   if (parsedModel) {
-    const { checkTierModelAccess } = await import("@/lib/credits");
+    const { checkTierModelAccess } = await import("@/lib/billing");
     const tierAccess = await checkTierModelAccess(userTier, parsedModel);
     if (!tierAccess.allowed) {
       return NextResponse.json(
@@ -177,11 +177,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   }
 
   const userEmail = (auth.apiKey as any)?.user?.email || auth.apiKey.name || "client";
-  const formattedBalance = new Intl.NumberFormat("id-ID").format(Math.round(clientUserCredit));
+  const formattedBalance = new Intl.NumberFormat("id-ID").format(Math.round(clientUserBalanceUsd));
   adminLogger.clientRequest({
     account: userEmail,
     role: clientUserRole === "ADMIN" ? "Admin" : clientUserRole,
-    balance: `${formattedBalance} CR`,
+    balance: `${formattedBalance} USD`,
     tier: userTier,
     subPath: reqPath,
     model: parsedModel || undefined,
@@ -689,7 +689,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             promptTokens: estimatedPromptTokens || 15,
             completionTokens: 0,
             totalTokens: estimatedPromptTokens || 15,
-            creditsCost: 0,
+            costUsd: 0,
             durationMs: Date.now() - startTime,
           });
           return finalAgResponse;
@@ -778,7 +778,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             promptTokens: estimatedPromptTokens || 15,
             completionTokens: 0,
             totalTokens: estimatedPromptTokens || 15,
-            creditsCost: 0,
+            costUsd: 0,
             durationMs: Date.now() - startTime,
           });
           return response;
@@ -1107,7 +1107,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 promptTokens: clientPromptTokens,
                 completionTokens: upstreamCompletionTokens,
                 totalTokens: clientTotalTokens,
-                creditsCost: finalStatus >= 400 ? 0 : undefined,
+                costUsd: finalStatus >= 400 ? 0 : undefined,
                 durationMs,
               });
             }
@@ -1273,7 +1273,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         promptTokens: estimatedPromptTokens || 15,
         completionTokens: 0,
         totalTokens: estimatedPromptTokens || 15,
-        creditsCost: 0,
+        costUsd: 0,
         durationMs: Date.now() - startTime,
       });
       console.error(`[Gateway Catch Error] candidate=${candidateModel}:`, err);

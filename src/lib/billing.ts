@@ -2,8 +2,10 @@ import { prisma } from "./prisma";
 import { sendLowBalanceAlert } from "./discord";
 
 interface CachedPricing {
-  rateInPer1k: number;
-  rateOutPer1k: number;
+  rateInUsdPer1m: number;
+  rateOutUsdPer1m: number;
+  rateInUsdPer1k: number;
+  rateOutUsdPer1k: number;
   cachedAt: number;
 }
 
@@ -27,11 +29,21 @@ export function clearPricingCache() {
 /**
  * Gets credit pricing rates for a given model
  */
-export async function getModelCreditRates(modelId: string): Promise<{ rateInPer1k: number; rateOutPer1k: number }> {
+export async function getModelUsdRates(modelId: string): Promise<{
+  rateInUsdPer1m: number;
+  rateOutUsdPer1m: number;
+  rateInUsdPer1k: number;
+  rateOutUsdPer1k: number;
+}> {
   const normModel = (modelId || "").toLowerCase().trim();
   const cached = pricingCache.get(normModel);
   if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
-    return { rateInPer1k: cached.rateInPer1k, rateOutPer1k: cached.rateOutPer1k };
+    return {
+      rateInUsdPer1m: cached.rateInUsdPer1m,
+      rateOutUsdPer1m: cached.rateOutUsdPer1m,
+      rateInUsdPer1k: cached.rateInUsdPer1k,
+      rateOutUsdPer1k: cached.rateOutUsdPer1k,
+    };
   }
 
   try {
@@ -43,11 +55,18 @@ export async function getModelCreditRates(modelId: string): Promise<{ rateInPer1
           { comboId: { contains: normModel } },
         ],
       },
-      select: { rateInPer1k: true, rateOutPer1k: true },
+      select: { rateInUsdPer1m: true, rateOutUsdPer1m: true, rateInUsdPer1k: true, rateOutUsdPer1k: true },
     });
 
     if (combo) {
-      const res = { rateInPer1k: combo.rateInPer1k, rateOutPer1k: combo.rateOutPer1k };
+      const in1m = combo.rateInUsdPer1m ? Number(combo.rateInUsdPer1m) : Number(combo.rateInUsdPer1k) * 1000;
+      const out1m = combo.rateOutUsdPer1m ? Number(combo.rateOutUsdPer1m) : Number(combo.rateOutUsdPer1k) * 1000;
+      const res = {
+        rateInUsdPer1m: in1m,
+        rateOutUsdPer1m: out1m,
+        rateInUsdPer1k: in1m / 1000,
+        rateOutUsdPer1k: out1m / 1000,
+      };
       pricingCache.set(normModel, { ...res, cachedAt: Date.now() });
       return res;
     }
@@ -60,52 +79,66 @@ export async function getModelCreditRates(modelId: string): Promise<{ rateInPer1
           { modelId: { contains: normModel } },
         ],
       },
+      select: { rateInUsdPer1m: true, rateOutUsdPer1m: true, rateInUsdPer1k: true, rateOutUsdPer1k: true },
     });
 
     if (pricing) {
-      const res = { rateInPer1k: pricing.rateInPer1k, rateOutPer1k: pricing.rateOutPer1k };
+      const in1m = pricing.rateInUsdPer1m ? Number(pricing.rateInUsdPer1m) : Number(pricing.rateInUsdPer1k) * 1000;
+      const out1m = pricing.rateOutUsdPer1m ? Number(pricing.rateOutUsdPer1m) : Number(pricing.rateOutUsdPer1k) * 1000;
+      const res = {
+        rateInUsdPer1m: in1m,
+        rateOutUsdPer1m: out1m,
+        rateInUsdPer1k: in1m / 1000,
+        rateOutUsdPer1k: out1m / 1000,
+      };
       pricingCache.set(normModel, { ...res, cachedAt: Date.now() });
       return res;
     }
   } catch {}
 
-  // Fallback defaults based on model family
-  let rateInPer1k = 25;
-  let rateOutPer1k = 100;
+  // Fallback defaults based on model family (per 1M tokens)
+  let rateInUsdPer1m = 0.15;
+  let rateOutUsdPer1m = 0.60;
 
   if (normModel.includes("claude-3-5-sonnet") || normModel.includes("claude-3.5-sonnet") || normModel.includes("opus")) {
-    rateInPer1k = 500;
-    rateOutPer1k = 2500;
+    rateInUsdPer1m = 3.00;
+    rateOutUsdPer1m = 15.00;
   } else if (normModel.includes("gpt-4o") && !normModel.includes("mini")) {
-    rateInPer1k = 400;
-    rateOutPer1k = 1600;
+    rateInUsdPer1m = 2.50;
+    rateOutUsdPer1m = 10.00;
   } else if (normModel.includes("gpt-4o-mini") || normModel.includes("haiku")) {
-    rateInPer1k = 30;
-    rateOutPer1k = 120;
+    rateInUsdPer1m = 0.15;
+    rateOutUsdPer1m = 0.60;
   } else if (normModel.includes("deepseek")) {
-    rateInPer1k = 45;
-    rateOutPer1k = 180;
+    rateInUsdPer1m = 0.27;
+    rateOutUsdPer1m = 1.10;
   } else if (normModel.includes("gemini-2.5-pro") || normModel.includes("gemini-3.1-pro")) {
-    rateInPer1k = 50;
-    rateOutPer1k = 200;
+    rateInUsdPer1m = 1.25;
+    rateOutUsdPer1m = 5.00;
   }
 
-  pricingCache.set(normModel, { rateInPer1k, rateOutPer1k, cachedAt: Date.now() });
-  return { rateInPer1k, rateOutPer1k };
+  const res = {
+    rateInUsdPer1m,
+    rateOutUsdPer1m,
+    rateInUsdPer1k: rateInUsdPer1m / 1000,
+    rateOutUsdPer1k: rateOutUsdPer1m / 1000,
+  };
+  pricingCache.set(normModel, { ...res, cachedAt: Date.now() });
+  return res;
 }
 
 /**
- * Calculates total credits cost for a request
+ * Calculates total balance cost for a request
  */
-export async function calculateCreditsCost(
+export async function calculateUsdCost(
   modelId: string,
   promptTokens: number,
   completionTokens: number
 ): Promise<number> {
-  const { rateInPer1k, rateOutPer1k } = await getModelCreditRates(modelId);
-  const inCost = (promptTokens / 1000) * rateInPer1k;
-  const outCost = (completionTokens / 1000) * rateOutPer1k;
-  const total = Math.max(1, Math.ceil(inCost + outCost));
+  const rates = await getModelUsdRates(modelId);
+  const inCost = (promptTokens / 1_000_000) * (rates.rateInUsdPer1m ?? (rates.rateInUsdPer1k * 1000));
+  const outCost = (completionTokens / 1_000_000) * (rates.rateOutUsdPer1m ?? (rates.rateOutUsdPer1k * 1000));
+  const total = Math.max(0.00000001, Number((inCost + outCost).toFixed(8)));
   return total;
 }
 
@@ -189,8 +222,8 @@ export async function checkTierModelAccess(
 /**
  * Deducts credits from user balance in real-time
  */
-export async function deductUserCredits(userId: string, credits: number) {
-  if (!userId || credits <= 0) return;
+export async function deductUserBalance(userId: string, amountUsd: number) {
+  if (!userId || amountUsd <= 0) return;
 
   try {
     const user = await prisma.user.findUnique({
@@ -198,41 +231,41 @@ export async function deductUserCredits(userId: string, credits: number) {
       select: {
         id: true,
         email: true,
-        creditBalance: true,
-        monthlyCreditsAllocated: true,
-        monthlyCreditsRemaining: true,
+        balanceUsd: true,
+        monthlyBalanceAllocatedUsd: true,
+        monthlyBalanceRemainingUsd: true,
         subscriptionTier: true,
       },
     });
 
     if (!user) return;
 
-    const remainingMonthly = Number(user.monthlyCreditsRemaining);
-    const monthlyDecrement = Math.min(remainingMonthly, credits);
-    const currentCreditBal = user.creditBalance;
-    const newCreditBal = currentCreditBal > BigInt(credits) ? currentCreditBal - BigInt(credits) : BigInt(0);
-    const newMonthlyRemaining = BigInt(remainingMonthly) > BigInt(monthlyDecrement) ? BigInt(remainingMonthly) - BigInt(monthlyDecrement) : BigInt(0);
+    const remainingMonthly = Number(user.monthlyBalanceRemainingUsd);
+    const monthlyDecrement = Math.min(remainingMonthly, amountUsd);
+    const currentBalance = user.balanceUsd;
+    const newBalance = Math.max(0, Number(currentBalance) - amountUsd);
+    const newMonthlyRemaining = Math.max(0, remainingMonthly - monthlyDecrement);
 
-    console.log(`[DEBUG deductUserCredits] userId=${userId} currentCreditBal=${currentCreditBal} credits=${credits} newCreditBal=${newCreditBal}`);
+    console.log(`[DEBUG deductUserBalance] userId=${userId} currentBalance=${currentBalance} amountUsd=${amountUsd} newBalance=${newBalance}`);
 
     const updated = await prisma.user.update({
       where: { id: userId },
       data: {
-        creditBalance: newCreditBal,
-        monthlyCreditsRemaining: newMonthlyRemaining,
+        balanceUsd: newBalance,
+        monthlyBalanceRemainingUsd: newMonthlyRemaining,
       },
       select: {
         id: true,
         email: true,
-        creditBalance: true,
-        monthlyCreditsAllocated: true,
+        balanceUsd: true,
+        monthlyBalanceAllocatedUsd: true,
         subscriptionTier: true,
       },
     });
 
     // Check for Low Balance (<10%) alert
-    const newBal = Number(updated.creditBalance);
-    const allocated = Number(updated.monthlyCreditsAllocated) || 20000;
+    const newBal = Number(updated.balanceUsd);
+    const allocated = Number(updated.monthlyBalanceAllocatedUsd) || 0;
     if (newBal > 0 && newBal < allocated * 0.1) {
       const throttleKey = `low-bal-${user.id}`;
       if (!alertThrottle.has(throttleKey)) {
@@ -241,49 +274,49 @@ export async function deductUserCredits(userId: string, credits: number) {
 
         sendLowBalanceAlert({
           userEmail: updated.email,
-          remainingCredits: newBal,
+          remainingUsd: newBal,
           tier: updated.subscriptionTier,
         }).catch(() => {});
       }
     }
   } catch (err) {
-    console.error("[Credits Deduction Error]", err);
+    console.error("[USD Deduction Error]", err);
   }
 }
 
 /**
  * Refunds credits back to user balance in real-time (e.g. upon upstream error, empty response, or failed turn)
  */
-export async function refundUserCredits(userId: string, credits: number) {
-  if (!userId || credits <= 0) return;
+export async function refundUserBalance(userId: string, amountUsd: number) {
+  if (!userId || amountUsd <= 0) return;
 
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
-        creditBalance: true,
-        monthlyCreditsRemaining: true,
+        balanceUsd: true,
+        monthlyBalanceRemainingUsd: true,
       },
     });
 
     if (!user) return;
 
-    const currentCreditBal = user.creditBalance;
-    const newCreditBal = currentCreditBal + BigInt(credits);
-    const newMonthlyRemaining = user.monthlyCreditsRemaining + BigInt(credits);
+    const currentBalance = user.balanceUsd;
+    const newBalance = Number(currentBalance) + amountUsd;
+    const newMonthlyRemaining = Number(user.monthlyBalanceRemainingUsd) + amountUsd;
 
-    console.log(`[REFUND refundUserCredits] userId=${userId} refunded=${credits} newCreditBal=${newCreditBal}`);
+    console.log(`[REFUND refundUserBalance] userId=${userId} refunded=${amountUsd} newBalance=${newBalance}`);
 
     await prisma.user.update({
       where: { id: userId },
       data: {
-        creditBalance: newCreditBal,
-        monthlyCreditsRemaining: newMonthlyRemaining,
+        balanceUsd: newBalance,
+        monthlyBalanceRemainingUsd: newMonthlyRemaining,
       },
     });
   } catch (err) {
-    console.error("[REFUND ERROR] Failed to refund user credits:", err);
+    console.error("[REFUND ERROR] Failed to refund USD balance:", err);
   }
 }
 

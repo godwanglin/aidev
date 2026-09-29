@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Allowed sort fields
-    const validSortFields = ["createdAt", "creditBalance", "name", "email", "subscriptionTier"];
+    const validSortFields = ["createdAt", "balanceUsd", "name", "email", "subscriptionTier"];
     const effectiveSortField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
 
     const [users, totalCount, statsAgg, activeSubscribersCount, adminCount, tierConfigs] =
@@ -63,10 +63,10 @@ export async function GET(req: NextRequest) {
             name: true,
             role: true,
             tokenBalance: true,
-            creditBalance: true,
-            purchasedCredits: true,
-            monthlyCreditsAllocated: true,
-            monthlyCreditsRemaining: true,
+            balanceUsd: true,
+            purchasedBalanceUsd: true,
+            monthlyBalanceAllocatedUsd: true,
+            monthlyBalanceRemainingUsd: true,
             subscriptionTier: true,
             subscriptionStartedAt: true,
             subscriptionExpiresAt: true,
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         prisma.user.count({ where }),
         prisma.user.aggregate({
           _sum: {
-            creditBalance: true,
+            balanceUsd: true,
           },
           _count: {
             id: true,
@@ -115,10 +115,10 @@ export async function GET(req: NextRequest) {
         email: u.email,
         name: u.name || "Tanpa Nama",
         role: u.role || "USER",
-        creditBalance: Number(u.creditBalance || 0),
-        purchasedCredits: Number(u.purchasedCredits || 0),
-        monthlyCreditsAllocated: Number(u.monthlyCreditsAllocated || 0),
-        monthlyCreditsRemaining: Number(u.monthlyCreditsRemaining || 0),
+        balanceUsd: Number(u.balanceUsd || 0),
+        purchasedBalanceUsd: Number(u.purchasedBalanceUsd || 0),
+        monthlyBalanceAllocatedUsd: Number(u.monthlyBalanceAllocatedUsd || 0),
+        monthlyBalanceRemainingUsd: Number(u.monthlyBalanceRemainingUsd || 0),
         tokenBalance: Number(u.tokenBalance || 0),
         subscriptionTier: (u.subscriptionTier || "FREE").toUpperCase(),
         subscriptionStartedAt: u.subscriptionStartedAt,
@@ -143,14 +143,14 @@ export async function GET(req: NextRequest) {
       stats: {
         totalUsers: statsAgg._count.id || 0,
         activeSubscribers: activeSubscribersCount,
-        totalCreditsInCirculation: Number(statsAgg._sum.creditBalance || 0),
+        totalBalanceUsdInCirculation: Number(statsAgg._sum.balanceUsd || 0),
         totalAdmins: adminCount,
       },
       tiers: tierConfigs.map((t) => ({
         id: t.id,
         name: t.name,
         priceIdr: t.priceIdr,
-        monthlyCredits: Number(t.monthlyCredits),
+        monthlyBalanceUsd: Number(t.monthlyBalanceUsd),
         rpmLimit: t.rpmLimit,
         maxKeys: t.maxKeys,
         routingPriority: t.routingPriority,
@@ -188,7 +188,7 @@ export async function PATCH(req: NextRequest) {
 
     // 1. ACTION: CHANGE_TIER
     if (action === "CHANGE_TIER") {
-      const { tierId, addCredits = true } = body;
+      const { tierId, addBalance = true } = body;
       if (!tierId) {
         return NextResponse.json({ error: "Tier ID is required" }, { status: 400 });
       }
@@ -199,10 +199,10 @@ export async function PATCH(req: NextRequest) {
       });
 
       const isFree = normalizedTier === "FREE";
-      const creditsToAdd =
-        !isFree && addCredits && tierConfig?.monthlyCredits
-          ? tierConfig.monthlyCredits
-          : BigInt(0);
+      const balanceToAddUsd =
+        !isFree && addBalance && tierConfig?.monthlyBalanceUsd
+          ? tierConfig.monthlyBalanceUsd
+          : 0;
 
       const userUpdateData: any = {
         subscriptionTier: normalizedTier,
@@ -212,15 +212,15 @@ export async function PATCH(req: NextRequest) {
       };
 
       if (tierConfig) {
-        userUpdateData.monthlyCreditsAllocated = tierConfig.monthlyCredits;
-        userUpdateData.monthlyCreditsRemaining = tierConfig.monthlyCredits;
+        userUpdateData.monthlyBalanceAllocatedUsd = Number(tierConfig.monthlyBalanceUsd);
+        userUpdateData.monthlyBalanceRemainingUsd = Number(tierConfig.monthlyBalanceUsd);
       } else if (isFree) {
-        userUpdateData.monthlyCreditsAllocated = BigInt(20000);
-        userUpdateData.monthlyCreditsRemaining = BigInt(20000);
+        userUpdateData.monthlyBalanceAllocatedUsd = 0;
+        userUpdateData.monthlyBalanceRemainingUsd = 0;
       }
 
-      if (creditsToAdd > BigInt(0)) {
-        userUpdateData.creditBalance = { increment: creditsToAdd };
+      if (Number(balanceToAddUsd) > 0) {
+        userUpdateData.balanceUsd = { increment: balanceToAddUsd };
       }
 
       const [updatedUser] = await prisma.$transaction([
@@ -231,12 +231,12 @@ export async function PATCH(req: NextRequest) {
         prisma.tokenTopup.create({
           data: {
             userId: targetUser.id,
-            amount: BigInt(0),
+            amount: 0,
             priceIdr: 0,
             method: "ADMIN_TIER_OVERRIDE",
             description: `Subscription Tier changed to ${tierConfig?.name || normalizedTier} by Admin (${admin.email})${
-              creditsToAdd > BigInt(0)
-                ? ` (+${Number(creditsToAdd).toLocaleString("id-ID")} CR auto-allocated)`
+              Number(balanceToAddUsd) > 0
+                ? ` (+${Number(balanceToAddUsd).toLocaleString("id-ID")} USD auto-allocated)`
                 : ""
             }`,
           },
@@ -250,38 +250,38 @@ export async function PATCH(req: NextRequest) {
           id: updatedUser.id,
           email: updatedUser.email,
           subscriptionTier: updatedUser.subscriptionTier,
-          creditBalance: Number(updatedUser.creditBalance),
-          monthlyCreditsAllocated: Number(updatedUser.monthlyCreditsAllocated),
-          monthlyCreditsRemaining: Number(updatedUser.monthlyCreditsRemaining),
+          balanceUsd: Number(updatedUser.balanceUsd),
+          monthlyBalanceAllocatedUsd: Number(updatedUser.monthlyBalanceAllocatedUsd),
+          monthlyBalanceRemainingUsd: Number(updatedUser.monthlyBalanceRemainingUsd),
           subscriptionExpiresAt: updatedUser.subscriptionExpiresAt,
         },
       });
     }
 
-    // 2. ACTION: INJECT_CREDITS
-    if (action === "INJECT_CREDITS") {
-      const { amount, creditType = "PERMANENT", reason } = body;
-      const numAmount = parseInt(amount, 10);
+    // 2. ACTION: INJECT_BALANCE
+    if (action === "INJECT_BALANCE") {
+      const { amount, balanceType = "PERMANENT", reason } = body;
+      const numAmount = Number(amount);
 
       if (isNaN(numAmount) || numAmount <= 0) {
         return NextResponse.json(
-          { error: "Nominal kredit harus berupa angka positif" },
+          { error: "Nominal USD harus berupa angka positif" },
           { status: 400 }
         );
       }
 
-      const creditBigInt = BigInt(numAmount);
-      const isMonthly = creditType === "MONTHLY";
+      const balanceUsdAmount = Number(numAmount);
+      const isMonthly = balanceType === "MONTHLY";
 
       const userUpdateData: any = {
-        creditBalance: { increment: creditBigInt },
+        balanceUsd: { increment: balanceUsdAmount },
       };
 
       if (isMonthly) {
-        userUpdateData.monthlyCreditsRemaining = { increment: creditBigInt };
-        userUpdateData.monthlyCreditsAllocated = { increment: creditBigInt };
+        userUpdateData.monthlyBalanceRemainingUsd = { increment: balanceUsdAmount };
+        userUpdateData.monthlyBalanceAllocatedUsd = { increment: balanceUsdAmount };
       } else {
-        userUpdateData.purchasedCredits = { increment: creditBigInt };
+        userUpdateData.purchasedBalanceUsd = { increment: balanceUsdAmount };
       }
 
       const [updatedUser] = await prisma.$transaction([
@@ -292,11 +292,11 @@ export async function PATCH(req: NextRequest) {
         prisma.tokenTopup.create({
           data: {
             userId: targetUser.id,
-            amount: BigInt(0),
+            amount: 0,
             priceIdr: 0,
             method: "ADMIN_INJECTION",
-            description: `Admin Credit Injection: +${numAmount.toLocaleString("id-ID")} CR (${
-              isMonthly ? "Kuota Bulanan" : "Kredit Permanen"
+            description: `Admin Balance Injection: +${numAmount.toLocaleString("id-ID")} USD (${
+              isMonthly ? "Kuota Bulanan" : "Saldo Permanen"
             }) oleh ${admin.email} - Alasan: ${reason || "Penyesuaian Manual"}`,
           },
         }),
@@ -304,13 +304,13 @@ export async function PATCH(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: `Berhasil menginjeksikan +${numAmount.toLocaleString("id-ID")} CR ke akun ${targetUser.email}`,
+        message: `Berhasil menginjeksikan +${numAmount.toLocaleString("id-ID")} USD ke akun ${targetUser.email}`,
         user: {
           id: updatedUser.id,
           email: updatedUser.email,
-          creditBalance: Number(updatedUser.creditBalance),
-          purchasedCredits: Number(updatedUser.purchasedCredits),
-          monthlyCreditsRemaining: Number(updatedUser.monthlyCreditsRemaining),
+          balanceUsd: Number(updatedUser.balanceUsd),
+          purchasedBalanceUsd: Number(updatedUser.purchasedBalanceUsd),
+          monthlyBalanceRemainingUsd: Number(updatedUser.monthlyBalanceRemainingUsd),
         },
       });
     }

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * Lightweight /v1/usage handler.
- * Returns current user tier, credit balance, quota, and percentage of credit used.
+ * Returns current user tier, USD balance, quota, and percentage of balance used.
  */
 export async function handleUsage(req: NextRequest): Promise<NextResponse> {
   const auth = await authenticateApiKey(req.headers.get("authorization"), req.headers.get("x-api-key"));
@@ -26,15 +26,15 @@ export async function handleUsage(req: NextRequest): Promise<NextResponse> {
   const tierName = tierConfig?.name || userTier;
   const badgeColor = userTier === "PLUS" ? "gray" : (tierConfig?.badgeColor || (userTier === "ULTRA" ? "amber" : userTier === "PRO" ? "purple" : "gray"));
 
-  const balance = Number(user.creditBalance ?? 0);
-  const purchased = Number(user.purchasedCredits ?? 0);
+  const balance = Number(user.balanceUsd ?? 0);
+  const purchased = Number(user.purchasedBalanceUsd ?? 0);
 
-  // Total monthly allocated credits: from user record or tier config
-  const tierMonthlyCredits = Number(tierConfig?.monthlyCredits ?? 20000);
-  const userAllocated = Number(user.monthlyCreditsAllocated ?? 0);
-  const allocated = userAllocated > 0 ? userAllocated : tierMonthlyCredits;
+  // Total monthly allocated USD: from user record or tier config
+  const tierMonthlyBalanceUsd = Number(tierConfig?.monthlyBalanceUsd ?? 0);
+  const userAllocated = Number(user.monthlyBalanceAllocatedUsd ?? 0);
+  const allocated = userAllocated > 0 ? userAllocated : tierMonthlyBalanceUsd;
 
-  const userRemaining = Number(user.monthlyCreditsRemaining ?? 0);
+  const userRemaining = Number(user.monthlyBalanceRemainingUsd ?? 0);
   const remaining = userAllocated > 0 ? userRemaining : Math.min(balance, allocated);
   const used = Math.max(0, allocated - remaining);
 
@@ -56,6 +56,12 @@ export async function handleUsage(req: NextRequest): Promise<NextResponse> {
     // Non-blocking
   }
 
+  const balanceVal = Number(balance.toFixed(2));
+  const allocatedVal = Number(allocated.toFixed(2));
+  const remainingVal = Number(remaining.toFixed(2));
+  const usedVal = Number(used.toFixed(2));
+  const purchasedVal = Number(purchased.toFixed(2));
+
   return NextResponse.json({
     tier: {
       id: userTier,
@@ -63,14 +69,27 @@ export async function handleUsage(req: NextRequest): Promise<NextResponse> {
       badgeColor,
       expiresAt: user.subscriptionExpiresAt || null,
     },
-    credits: {
-      balance,
-      allocated,
-      remaining,
-      used,
-      purchased,
+    balance: {
+      balance: balanceVal,
+      allocated: allocatedVal,
+      remaining: remainingVal,
+      used: usedVal,
+      purchased: purchasedVal,
       percentageUsed,
     },
+    // Backward compatibility alias for coding agents expecting "credits"
+    credits: {
+      balance: balanceVal,
+      allocated: allocatedVal,
+      remaining: remainingVal,
+      used: usedVal,
+      purchased: purchasedVal,
+      percentageUsed,
+    },
+    // Top-level aliases common in various client tools
+    total_available: balanceVal,
+    total_granted: allocatedVal,
+    total_used: usedVal,
     requestsToday,
     user: {
       id: user.id,

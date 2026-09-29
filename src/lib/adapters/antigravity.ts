@@ -914,7 +914,7 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
             promptTokens: (promptTokens || 15) + rtkSaved,
             completionTokens: completionTokens || 25,
             totalTokens: (totalTokens || (promptTokens + completionTokens) || 40) + rtkSaved,
-            creditsCost: undefined,
+            costUsd: undefined,
             durationMs,
           });
         }
@@ -1009,7 +1009,7 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
       promptTokens: upstreamPrompt + rtkSaved,
       completionTokens: completionTokens || 25,
       totalTokens: upstreamTotal + rtkSaved,
-      creditsCost: undefined,
+      costUsd: undefined,
       durationMs,
     });
   }

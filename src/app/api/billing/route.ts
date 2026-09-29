@@ -5,6 +5,7 @@ import { calculateUserDiscount } from "@/lib/discount";
 import { createDirectQrisCharge, createDirectVaCharge } from "@/lib/midtrans";
 import QRCode from "qrcode";
 import crypto from "crypto";
+import { idrToUsd, tokensForUsd } from "@/lib/billing-config";
 
 async function getSessionUser() {
   const sessionUser = await getCurrentUser();
@@ -36,9 +37,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [totalCount, topups, tokenAgg, pendingOrders, discountInfo, tierConfigs, freshUser] = await Promise.all([
-      prisma.tokenTopup.count({ where: { userId: user.id } }),
-      prisma.tokenTopup.findMany({
+    const [totalCount, userOrders, tokenAgg, pendingOrders, discountInfo, tierConfigs, topupPackages, freshUser] = await Promise.all([
+      prisma.order.count({ where: { userId: user.id } }),
+      prisma.order.findMany({
         where: { userId: user.id },
         skip,
         take: limit,
@@ -58,17 +59,21 @@ export async function GET(req: NextRequest) {
         where: { isActive: true },
         orderBy: { priceIdr: "asc" },
       }),
+      prisma.topupPackage.findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: "asc" },
+      }),
       prisma.user.findUnique({
         where: { id: user.id },
         select: {
           id: true,
           email: true,
           tokenBalance: true,
-          creditBalance: true,
+          balanceUsd: true,
           subscriptionTier: true,
           subscriptionExpiresAt: true,
-          monthlyCreditsAllocated: true,
-          monthlyCreditsRemaining: true,
+          monthlyBalanceAllocatedUsd: true,
+          monthlyBalanceRemainingUsd: true,
           bonusRescueClaimed: true,
         },
       }),
@@ -78,8 +83,46 @@ export async function GET(req: NextRequest) {
     const totalPages = Math.ceil(totalCount / limit) || 1;
     const totalConsumed = tokenAgg._sum.totalTokens || 0;
 
-    const allocated = Number(activeUser.monthlyCreditsAllocated) || 20000;
-    const remaining = Number(activeUser.monthlyCreditsRemaining);
+    let currentTier = (activeUser.subscriptionTier || "FREE").toUpperCase();
+    const isSubscriptionExpired = Boolean(
+      currentTier !== "FREE" &&
+      activeUser.subscriptionExpiresAt &&
+      new Date(activeUser.subscriptionExpiresAt).getTime() <= Date.now()
+    );
+
+    const freeTierConfig = tierConfigs.find((t) => t.id === "FREE");
+    const configuredFreeQuota = freeTierConfig ? Number(freeTierConfig.monthlyBalanceUsd) : 5.0;
+
+    if (isSubscriptionExpired) {
+      currentTier = "FREE";
+      await prisma.user.update({
+        where: { id: activeUser.id },
+        data: {
+          subscriptionTier: "FREE",
+          subscriptionExpiresAt: null,
+          monthlyBalanceAllocatedUsd: configuredFreeQuota,
+          monthlyBalanceRemainingUsd: configuredFreeQuota,
+        },
+      });
+      activeUser.subscriptionTier = "FREE";
+      activeUser.subscriptionExpiresAt = null;
+      activeUser.monthlyBalanceAllocatedUsd = configuredFreeQuota;
+      activeUser.monthlyBalanceRemainingUsd = configuredFreeQuota;
+    } else if (currentTier === "FREE" && Number(activeUser.monthlyBalanceAllocatedUsd) !== configuredFreeQuota) {
+      // Auto-sync Free Tier users with DB tier config
+      await prisma.user.update({
+        where: { id: activeUser.id },
+        data: {
+          monthlyBalanceAllocatedUsd: configuredFreeQuota,
+          monthlyBalanceRemainingUsd: configuredFreeQuota,
+        },
+      });
+      activeUser.monthlyBalanceAllocatedUsd = configuredFreeQuota;
+      activeUser.monthlyBalanceRemainingUsd = configuredFreeQuota;
+    }
+
+    const allocated = Number(activeUser.monthlyBalanceAllocatedUsd) || 0;
+    const remaining = Number(activeUser.monthlyBalanceRemainingUsd);
     const used = Math.max(0, allocated - remaining);
     const usagePct = allocated > 0 ? Math.min(100, Math.round((used / allocated) * 100)) : 0;
     const isProOrUltra = activeUser.subscriptionTier === "PRO" || activeUser.subscriptionTier === "ULTRA";
@@ -87,11 +130,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       balanceTokens: Number(activeUser.tokenBalance),
-      creditBalance: Number(activeUser.creditBalance || 0),
+      balanceUsd: Number(activeUser.balanceUsd || 0),
       subscriptionTier: activeUser.subscriptionTier || "FREE",
       subscriptionExpiresAt: activeUser.subscriptionExpiresAt,
-      monthlyCreditsAllocated: allocated,
-      monthlyCreditsRemaining: remaining,
+      monthlyBalanceAllocatedUsd: allocated,
+      monthlyBalanceRemainingUsd: remaining,
       bonusRescueClaimed: Boolean(activeUser.bonusRescueClaimed),
       usagePct,
       canClaimRescueBonus,
@@ -99,13 +142,23 @@ export async function GET(req: NextRequest) {
         id: t.id,
         name: t.name,
         priceIdr: t.priceIdr,
-        monthlyCredits: Number(t.monthlyCredits),
+        monthlyBalanceUsd: Number(t.monthlyBalanceUsd),
         rpmLimit: t.rpmLimit,
         maxKeys: t.maxKeys,
         routingPriority: t.routingPriority,
         bonusPercentage: t.bonusPercentage,
         badgeColor: t.badgeColor,
         description: t.description,
+        features: t.features ? JSON.parse(t.features) : [],
+      })),
+      topupPackages: topupPackages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        priceIdr: p.priceIdr,
+        bonusPercentage: p.bonusPercentage,
+        tag: p.tag,
+        badgeColor: p.badgeColor || "blue",
+        balanceUsd: p.balanceUsd !== null && p.balanceUsd !== undefined ? Number(Number(p.balanceUsd).toFixed(2)) : Number((idrToUsd(p.priceIdr) * (1 + p.bonusPercentage / 100)).toFixed(2)),
       })),
       totalConsumedTokens: totalConsumed,
       userDiscount: discountInfo,
@@ -114,7 +167,7 @@ export async function GET(req: NextRequest) {
           ? {
               orderId: pendingOrders[0].orderId,
               tokenAmount: Number(pendingOrders[0].tokenAmount),
-              creditAmount: Number(pendingOrders[0].creditAmount || 0),
+              balanceAmountUsd: Number(pendingOrders[0].balanceAmountUsd || 0),
               orderType: pendingOrders[0].orderType || "TOPUP",
               tierTarget: pendingOrders[0].tierTarget,
               basePrice: pendingOrders[0].basePrice,
@@ -127,14 +180,24 @@ export async function GET(req: NextRequest) {
               createdAt: pendingOrders[0].createdAt,
             }
           : null,
-      topups: topups.map((t) => ({
-        id: t.id,
-        amount: Number(t.amount),
-        priceIdr: t.priceIdr,
-        method: t.method,
-        description: t.description,
-        createdAt: t.createdAt,
-      })),
+      topups: userOrders.map((o) => {
+        let desc = o.orderType === "SUBSCRIPTION"
+          ? `Langganan Paket ${o.tierTarget || "PRO"}`
+          : `Top-Up Saldo USD`;
+        if (o.discountPct > 0) {
+          desc += ` (Diskon ${o.discountPct}%)`;
+        }
+        return {
+          id: o.id,
+          orderId: o.orderId,
+          balanceAmountUsd: Number(o.balanceAmountUsd || 0),
+          priceIdr: o.priceIdr,
+          method: o.method,
+          status: o.status,
+          description: desc,
+          createdAt: o.paidAt || o.createdAt,
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -161,16 +224,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const freshUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        subscriptionTier: true,
+        subscriptionExpiresAt: true,
+      },
+    });
+
     let basePrice = 15000;
     let finalPrice = 15000;
-    let creditAmount = 150000;
-    let tokenAmount = 1500000;
+    let balanceAmountUsd = 0;
+    let tokenAmount = 0;
     let tierTarget: string | null = null;
     let discountPct = 0;
     let discountReason: string | null = null;
 
     if (orderType === "SUBSCRIPTION") {
       const targetId = String(body.tier || "PRO").toUpperCase();
+      if (targetId === "FREE") {
+        return NextResponse.json(
+          { error: "Paket Free Tier adalah paket dasar dan tidak memerlukan pembayaran." },
+          { status: 400 }
+        );
+      }
+
       tierTarget = targetId;
       const tierConfig = await prisma.subscriptionTierConfig.findUnique({
         where: { id: targetId },
@@ -180,14 +260,64 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Tier langganan tidak ditemukan" }, { status: 400 });
       }
 
+      // TIER PROTECTION: Check for downgrade attempt while an active subscription exists
+      const TIER_LEVELS: Record<string, number> = {
+        FREE: 0,
+        PLUS: 1,
+        PRO: 2,
+        ULTRA: 3,
+      };
+
+      const currentTier = (freshUser?.subscriptionTier || "FREE").toUpperCase();
+      const isSubscriptionActive = Boolean(
+        currentTier !== "FREE" &&
+        freshUser?.subscriptionExpiresAt &&
+        new Date(freshUser.subscriptionExpiresAt).getTime() > Date.now()
+      );
+
+      const currentLevel = TIER_LEVELS[currentTier] ?? 0;
+      const targetLevel = TIER_LEVELS[targetId] ?? 0;
+
+      if (isSubscriptionActive && targetLevel < currentLevel) {
+        const expiryStr = freshUser?.subscriptionExpiresAt
+          ? new Date(freshUser.subscriptionExpiresAt).toLocaleDateString("id-ID", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })
+          : "";
+        return NextResponse.json(
+          {
+            error: `Proteksi Downgrade: Anda sedang aktif di paket ${currentTier}${
+              expiryStr ? ` hingga ${expiryStr}` : ""
+            }. Tidak dapat downgrade ke paket ${targetId}. Silakan tunggu masa aktif selesai atau pilih paket yang setara/lebih tinggi.`,
+          },
+          { status: 400 }
+        );
+      }
+
       basePrice = tierConfig.priceIdr;
       finalPrice = tierConfig.priceIdr;
-      creditAmount = Number(tierConfig.monthlyCredits);
-      tokenAmount = creditAmount * 10;
+      balanceAmountUsd = Number(tierConfig.monthlyBalanceUsd);
+      tokenAmount = tokensForUsd(balanceAmountUsd);
     } else {
-      // TOPUP KETENGAN
-      creditAmount = Number(body.creditAmount) || Number(body.amount) || 150000;
-      basePrice = Math.round(creditAmount / 10);
+      // TOP-UP: customer pays IDR, account receives official USD balance.
+      basePrice = Math.max(1000, Math.round(Number(body.priceIdr || body.basePrice || 0)));
+      if (basePrice < 1000) {
+        return NextResponse.json({ error: "Nominal top-up minimal Rp 1.000" }, { status: 400 });
+      }
+
+      // Check if matches an active top-up package with bonus from database
+      const matchedPackage = await prisma.topupPackage.findFirst({
+        where: { priceIdr: basePrice, isActive: true },
+      });
+
+      if (matchedPackage && matchedPackage.balanceUsd !== null && matchedPackage.balanceUsd !== undefined) {
+        balanceAmountUsd = Number(Number(matchedPackage.balanceUsd).toFixed(2));
+      } else {
+        const bonusPct = matchedPackage ? matchedPackage.bonusPercentage : 0;
+        balanceAmountUsd = Number((idrToUsd(basePrice) * (1 + bonusPct / 100)).toFixed(2));
+      }
 
       // Calculate applied discounts for topups
       const discountInfo = await calculateUserDiscount(user.id);
@@ -197,7 +327,7 @@ export async function POST(req: NextRequest) {
       if (discountPct > 0) {
         finalPrice = Math.round(basePrice * (1 - discountPct / 100));
       }
-      tokenAmount = creditAmount * 10;
+      tokenAmount = tokensForUsd(balanceAmountUsd);
     }
 
     const orderId = `AIDEV-${Date.now().toString().slice(-6)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
@@ -254,7 +384,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         orderType,
         tierTarget: tierTarget || null,
-        creditAmount: BigInt(creditAmount),
+        balanceAmountUsd: Number(balanceAmountUsd),
         tokenAmount: BigInt(tokenAmount),
         basePrice,
         priceIdr: finalPrice,
@@ -273,7 +403,7 @@ export async function POST(req: NextRequest) {
         orderId: order.orderId,
         orderType: order.orderType,
         tierTarget: order.tierTarget,
-        creditAmount: Number(order.creditAmount),
+        balanceAmountUsd: Number(order.balanceAmountUsd),
         tokenAmount: Number(order.tokenAmount),
         basePrice: order.basePrice,
         priceIdr: order.priceIdr,
@@ -318,7 +448,7 @@ export async function PUT(req: NextRequest) {
         where: { id: order.userId },
         select: {
           tokenBalance: true,
-          creditBalance: true,
+          balanceUsd: true,
           subscriptionTier: true,
         },
       });
@@ -328,7 +458,7 @@ export async function PUT(req: NextRequest) {
         status: "PAID",
         message: "Pembayaran telah berhasil diverifikasi! Saldo dan paket telah aktif.",
         newBalanceTokens: Number(freshUser?.tokenBalance || 0),
-        newCreditBalance: Number(freshUser?.creditBalance || 0),
+        newBalanceUsd: Number(freshUser?.balanceUsd || 0),
         tier: freshUser?.subscriptionTier,
       });
     }
@@ -351,7 +481,7 @@ export async function PUT(req: NextRequest) {
         status: "PAID",
         message: "Pembayaran berhasil diverifikasi oleh payment gateway!",
         newBalanceTokens: Number(settleResult.user.tokenBalance),
-        newCreditBalance: Number(settleResult.user.creditBalance),
+        newBalanceUsd: Number(settleResult.user.balanceUsd),
         tier: settleResult.user.subscriptionTier,
       });
     }

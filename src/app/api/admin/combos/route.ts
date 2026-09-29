@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { invalidateComboCache, getActiveCooldowns } from "@/lib/combo-router";
 import { invalidateModelsCache } from "@/lib/models-cache";
 
-import { clearPricingCache } from "@/lib/credits";
+import { clearPricingCache } from "@/lib/billing";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -49,11 +49,13 @@ export async function POST(req: NextRequest) {
       name,
       description,
       type,
-      costPerImage,
+      imageCostUsd,
       strategy,
       cooldownSeconds,
-      rateInPer1k,
-      rateOutPer1k,
+      rateInUsdPer1m,
+      rateOutUsdPer1m,
+      rateInUsdPer1k,
+      rateOutUsdPer1k,
       isActive,
       isPublic,
       items,
@@ -80,9 +82,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const inRate = Number(rateInPer1k) >= 0 ? Math.round(Number(rateInPer1k)) : 25;
-    const outRate = Number(rateOutPer1k) >= 0 ? Math.round(Number(rateOutPer1k)) : 100;
-    const imageCost = Number(costPerImage) >= 0 ? Math.round(Number(costPerImage)) : 500;
+    let inRate1m = 0.15;
+    let outRate1m = 0.60;
+    let inRate1k = 0.00015;
+    let outRate1k = 0.0006;
+
+    if (rateInUsdPer1m !== undefined && Number(rateInUsdPer1m) >= 0) {
+      inRate1m = Number(rateInUsdPer1m);
+      inRate1k = inRate1m / 1000;
+    } else if (rateInUsdPer1k !== undefined && Number(rateInUsdPer1k) >= 0) {
+      inRate1k = Number(rateInUsdPer1k);
+      inRate1m = inRate1k * 1000;
+    }
+
+    if (rateOutUsdPer1m !== undefined && Number(rateOutUsdPer1m) >= 0) {
+      outRate1m = Number(rateOutUsdPer1m);
+      outRate1k = outRate1m / 1000;
+    } else if (rateOutUsdPer1k !== undefined && Number(rateOutUsdPer1k) >= 0) {
+      outRate1k = Number(rateOutUsdPer1k);
+      outRate1m = outRate1k * 1000;
+    }
+
+    const imageCost = Number(imageCostUsd) >= 0 ? Number(imageCostUsd) : 0.005;
 
     const newCombo = await prisma.comboModel.create({
       data: {
@@ -90,11 +111,13 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         description: description?.trim() || null,
         type: type === "image" ? "image" : "chat",
-        costPerImage: imageCost,
+        imageCostUsd: imageCost,
         strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : "FALLBACK",
         cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : 60,
-        rateInPer1k: inRate,
-        rateOutPer1k: outRate,
+        rateInUsdPer1m: inRate1m,
+        rateOutUsdPer1m: outRate1m,
+        rateInUsdPer1k: inRate1k,
+        rateOutUsdPer1k: outRate1k,
         isActive: isActive !== undefined ? Boolean(isActive) : true,
         isPublic: isPublic !== undefined ? Boolean(isPublic) : true,
         items: {

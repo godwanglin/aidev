@@ -36,7 +36,7 @@ interface OrderUser {
   name: string | null;
   role: string;
   subscriptionTier: string;
-  creditBalance: number;
+  balanceUsd: number;
 }
 
 interface OrderItem {
@@ -44,7 +44,7 @@ interface OrderItem {
   orderId: string;
   userId: string;
   tokenAmount: number;
-  creditAmount: number;
+  balanceAmountUsd: number;
   orderType: string;
   tierTarget: string | null;
   basePrice: number;
@@ -65,7 +65,7 @@ interface OrderStats {
   pendingOrders: number;
   paidOrders: number;
   totalRevenueIdr: number;
-  totalCreditsIssued: number;
+  totalBalanceUsdIssued: number;
 }
 
 export default function AdminOrdersPage() {
@@ -75,7 +75,7 @@ export default function AdminOrdersPage() {
     pendingOrders: 0,
     paidOrders: 0,
     totalRevenueIdr: 0,
-    totalCreditsIssued: 0,
+    totalBalanceUsdIssued: 0,
   });
 
   const [loading, setLoading] = useState(true);
@@ -686,7 +686,7 @@ export default function AdminOrdersPage() {
                                 </span>
                               </div>
                               <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "2px" }}>
-                                +{(o.creditAmount / 1000).toLocaleString("id-ID")}K CR / bln (30 hari)
+                                +${Number(o.balanceAmountUsd || 0).toFixed(2)} / bln (30 hari)
                               </div>
                             </div>
                           ) : (
@@ -694,7 +694,7 @@ export default function AdminOrdersPage() {
                               <div style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                 <Coins size={12} className="text-green" />
                                 <span style={{ fontWeight: 700, fontSize: "12.5px", color: "var(--ink)" }}>
-                                  +{o.creditAmount.toLocaleString("id-ID")} CR
+                                  +${Number(o.balanceAmountUsd || 0).toFixed(2)}
                                 </span>
                               </div>
                               <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "2px" }}>
@@ -1020,7 +1020,7 @@ export default function AdminOrdersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",
@@ -1134,8 +1134,7 @@ export default function AdminOrdersPage() {
                         border: "1px solid #ddd6fe",
                       }}
                     >
-                      {approveModalOrder.tierTarget} TIER (+
-                      {(approveModalOrder.creditAmount / 1000).toLocaleString("id-ID")}K CR / 30 Hari)
+                      {approveModalOrder.tierTarget} TIER (+${Number(approveModalOrder.balanceAmountUsd || 0).toFixed(2)} / 30 Hari)
                     </span>
                   ) : (
                     <span
@@ -1148,7 +1147,7 @@ export default function AdminOrdersPage() {
                         border: "1px solid #a7f3d0",
                       }}
                     >
-                      +{approveModalOrder.creditAmount.toLocaleString("id-ID")} CR Permanen
+                      +${Number(approveModalOrder.balanceAmountUsd || 0).toFixed(2)} Permanen
                     </span>
                   )}
                 </div>
@@ -1227,7 +1226,7 @@ export default function AdminOrdersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",
@@ -1357,7 +1356,7 @@ export default function AdminOrdersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backgroundColor: "var(--overlay-backdrop)",
               backdropFilter: "blur(4px)",
               display: "flex",
               alignItems: "center",
@@ -1455,9 +1454,9 @@ export default function AdminOrdersPage() {
                 )}
 
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span className="text-muted">Jumlah Kredit (CR):</span>
+                  <span className="text-muted">Jumlah Saldo:</span>
                   <strong style={{ color: "var(--green)" }}>
-                    +{detailModalOrder.creditAmount.toLocaleString("id-ID")} CR
+                    +${Number(detailModalOrder.balanceAmountUsd || 0).toFixed(2)}
                   </strong>
                 </div>
 

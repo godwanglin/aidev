@@ -1027,7 +1027,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
             promptTokens: promptTokens || 15,
             completionTokens: hasTokens ? completionTokens : 0,
             totalTokens: hasTokens ? (promptTokens + completionTokens) : (promptTokens || 15),
-            creditsCost: statusCode >= 400 ? 0 : undefined,
+            costUsd: statusCode >= 400 ? 0 : undefined,
             durationMs,
           });
         }
@@ -1102,7 +1102,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       promptTokens: promptTokens || 15,
       completionTokens: hasTokens ? (completionTokens || 20) : 0,
       totalTokens: hasTokens ? (totalTokens || (promptTokens + completionTokens) || 35) : (promptTokens || 15),
-      creditsCost: statusCode >= 400 ? 0 : undefined,
+      costUsd: statusCode >= 400 ? 0 : undefined,
       durationMs,
     });
   }

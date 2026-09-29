@@ -132,7 +132,7 @@ export async function createDirectVaCharge(params: {
     payload.payment_type = "echannel";
     payload.echannel = {
       bill_info1: "Payment For:",
-      bill_info2: "AI Token Credit",
+      bill_info2: "AI Token Balance",
     };
   } else if (bank === "permata") {
     payload.payment_type = "permata";

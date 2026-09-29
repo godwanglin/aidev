@@ -3,8 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { invalidateComboCache } from "@/lib/combo-router";
 import { invalidateModelsCache } from "@/lib/models-cache";
-
-import { clearPricingCache } from "@/lib/credits";
+import { clearPricingCache } from "@/lib/billing";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -12,95 +11,182 @@ async function verifyAdmin() {
   return user;
 }
 
-export async function PUT(
+export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   const admin = await verifyAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id } = await params;
-
+  const { id } = await Promise.resolve(params);
   try {
+    const combo = await prisma.comboModel.findFirst({
+      where: {
+        OR: [{ id }, { comboId: id }],
+      },
+      include: {
+        items: {
+          orderBy: { priority: "asc" },
+        },
+      },
+    });
+
+    if (!combo) {
+      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, combo });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  const admin = await verifyAdmin();
+  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await Promise.resolve(params);
+  try {
+    const target = await prisma.comboModel.findFirst({
+      where: {
+        OR: [{ id }, { comboId: id }],
+      },
+      include: { items: true },
+    });
+
+    if (!target) {
+      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    }
+
     const body = await req.json();
+
+    // Check if this is a quick toggle (e.g. { isActive: false } or { isPublic: true })
+    const isQuickToggle =
+      (body.isActive !== undefined || body.isPublic !== undefined) &&
+      body.comboId === undefined &&
+      body.name === undefined &&
+      body.items === undefined;
+
+    if (isQuickToggle) {
+      const updated = await prisma.comboModel.update({
+        where: { id: target.id },
+        data: {
+          ...(body.isActive !== undefined ? { isActive: Boolean(body.isActive) } : {}),
+          ...(body.isPublic !== undefined ? { isPublic: Boolean(body.isPublic) } : {}),
+        },
+      });
+
+      invalidateComboCache();
+      invalidateModelsCache();
+      clearPricingCache();
+
+      return NextResponse.json({ success: true, combo: updated });
+    }
+
+    // Full update from edit modal
     const {
       comboId,
       name,
       description,
       type,
-      costPerImage,
+      imageCostUsd,
       strategy,
       cooldownSeconds,
-      rateInPer1k,
-      rateOutPer1k,
+      rateInUsdPer1m,
+      rateOutUsdPer1m,
+      rateInUsdPer1k,
+      rateOutUsdPer1k,
       isActive,
       isPublic,
       items,
     } = body;
 
-    const existing = await prisma.comboModel.findUnique({
-      where: { id },
-      include: { items: true },
-    });
+    const cleanComboId = comboId ? comboId.trim().toLowerCase() : target.comboId;
 
-    if (!existing) {
-      return NextResponse.json({ error: "Combo not found." }, { status: 404 });
-    }
-
-    const cleanComboId = comboId ? comboId.trim().toLowerCase() : existing.comboId;
-
-    // Check duplicate comboId if changing
-    if (cleanComboId !== existing.comboId) {
-      const duplicate = await prisma.comboModel.findUnique({
+    // Check duplicate if comboId changed
+    if (cleanComboId !== target.comboId) {
+      const dup = await prisma.comboModel.findUnique({
         where: { comboId: cleanComboId },
       });
-      if (duplicate && duplicate.id !== id) {
+      if (dup) {
         return NextResponse.json(
-          { error: `Combo ID '${cleanComboId}' is already taken.` },
+          { error: `Combo with ID '${cleanComboId}' already exists.` },
           { status: 400 }
         );
       }
     }
 
-    const inRate = rateInPer1k !== undefined && Number(rateInPer1k) >= 0 ? Math.round(Number(rateInPer1k)) : existing.rateInPer1k;
-    const outRate = rateOutPer1k !== undefined && Number(rateOutPer1k) >= 0 ? Math.round(Number(rateOutPer1k)) : existing.rateOutPer1k;
-    const imageCost = costPerImage !== undefined && Number(costPerImage) >= 0 ? Math.round(Number(costPerImage)) : existing.costPerImage;
+    // Calculate rates: prefer rateInUsdPer1m / rateOutUsdPer1m (per 1M tokens)
+    let inRate1m = 0.15;
+    let outRate1m = 0.60;
+    let inRate1k = 0.00015;
+    let outRate1k = 0.0006;
 
-    // Execute update transaction
+    if (rateInUsdPer1m !== undefined && Number(rateInUsdPer1m) >= 0) {
+      inRate1m = Number(rateInUsdPer1m);
+      inRate1k = inRate1m / 1000;
+    } else if (rateInUsdPer1k !== undefined && Number(rateInUsdPer1k) >= 0) {
+      inRate1k = Number(rateInUsdPer1k);
+      inRate1m = inRate1k * 1000;
+    } else {
+      inRate1m = Number(target.rateInUsdPer1m || 0.15);
+      inRate1k = Number(target.rateInUsdPer1k || 0.00015);
+    }
+
+    if (rateOutUsdPer1m !== undefined && Number(rateOutUsdPer1m) >= 0) {
+      outRate1m = Number(rateOutUsdPer1m);
+      outRate1k = outRate1m / 1000;
+    } else if (rateOutUsdPer1k !== undefined && Number(rateOutUsdPer1k) >= 0) {
+      outRate1k = Number(rateOutUsdPer1k);
+      outRate1m = outRate1k * 1000;
+    } else {
+      outRate1m = Number(target.rateOutUsdPer1m || 0.60);
+      outRate1k = Number(target.rateOutUsdPer1k || 0.0006);
+    }
+
+    const imageCost =
+      imageCostUsd !== undefined && Number(imageCostUsd) >= 0
+        ? Number(imageCostUsd)
+        : Number(target.imageCostUsd || 0.005);
+
+    // Update combo model and items in transaction
     const updated = await prisma.$transaction(async (tx) => {
-      // If items are provided, replace them
+      // If items provided, replace items
       if (Array.isArray(items)) {
         await tx.comboModelItem.deleteMany({
-          where: { comboModelId: id },
+          where: { comboModelId: target.id },
         });
 
-        if (items.length > 0) {
-          await tx.comboModelItem.createMany({
-            data: items.map((it: any, index: number) => ({
-              comboModelId: id,
-              modelId: it.modelId.trim(),
-              priority: it.priority !== undefined ? Number(it.priority) : index + 1,
-              weight: Number(it.weight) > 0 ? Number(it.weight) : 1,
-              isActive: it.isActive !== undefined ? Boolean(it.isActive) : true,
-            })),
-          });
-        }
+        await tx.comboModelItem.createMany({
+          data: items.map((it: any, index: number) => ({
+            comboModelId: target.id,
+            modelId: it.modelId.trim(),
+            priority: it.priority !== undefined ? Number(it.priority) : index + 1,
+            weight: Number(it.weight) > 0 ? Number(it.weight) : 1,
+            isActive: it.isActive !== undefined ? Boolean(it.isActive) : true,
+          })),
+        });
       }
 
       return tx.comboModel.update({
-        where: { id },
+        where: { id: target.id },
         data: {
           comboId: cleanComboId,
-          name: name !== undefined ? name.trim() : existing.name,
-          description: description !== undefined ? (description?.trim() || null) : existing.description,
-          type: type !== undefined ? (type === "image" ? "image" : "chat") : existing.type,
-          costPerImage: imageCost,
-          strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : strategy === "FALLBACK" ? "FALLBACK" : existing.strategy,
-          cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : existing.cooldownSeconds,
-          rateInPer1k: inRate,
-          rateOutPer1k: outRate,
-          isActive: isActive !== undefined ? Boolean(isActive) : existing.isActive,
-          isPublic: isPublic !== undefined ? Boolean(isPublic) : existing.isPublic,
+          name: name ? name.trim() : target.name,
+          description: description !== undefined ? (description?.trim() || null) : target.description,
+          type: type === "image" ? "image" : "chat",
+          imageCostUsd: imageCost,
+          strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : "FALLBACK",
+          cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : 60,
+          rateInUsdPer1m: inRate1m,
+          rateOutUsdPer1m: outRate1m,
+          rateInUsdPer1k: inRate1k,
+          rateOutUsdPer1k: outRate1k,
+          isActive: isActive !== undefined ? Boolean(isActive) : target.isActive,
+          isPublic: isPublic !== undefined ? Boolean(isPublic) : target.isPublic,
         },
         include: {
           items: {
@@ -114,10 +200,7 @@ export async function PUT(
     invalidateModelsCache();
     clearPricingCache();
 
-    return NextResponse.json({
-      success: true,
-      combo: updated,
-    });
+    return NextResponse.json({ success: true, combo: updated });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -125,22 +208,32 @@ export async function PUT(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   const admin = await verifyAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id } = await params;
-
+  const { id } = await Promise.resolve(params);
   try {
+    const target = await prisma.comboModel.findFirst({
+      where: {
+        OR: [{ id }, { comboId: id }],
+      },
+    });
+
+    if (!target) {
+      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    }
+
     await prisma.comboModel.delete({
-      where: { id },
+      where: { id: target.id },
     });
 
     invalidateComboCache();
     invalidateModelsCache();
+    clearPricingCache();
 
-    return NextResponse.json({ success: true, message: "Combo deleted successfully." });
+    return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

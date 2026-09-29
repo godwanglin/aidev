@@ -101,7 +101,7 @@ export default function EditConnectionModal({
         </div>
 
         {errorMsg && (
-          <div className="login-error text-xs p-2.5 mx-4 mt-3 rounded bg-red-950/80 border border-red-800 text-red-300">
+          <div className="login-error text-xs p-2.5 mx-4 mt-3 rounded bg-[var(--red-soft)] border border-[var(--red-border)] text-[var(--red)]">
             {errorMsg}
           </div>
         )}

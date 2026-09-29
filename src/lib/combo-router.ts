@@ -11,7 +11,7 @@ export interface CachedCombo {
   isActive: boolean;
   isPublic: boolean;
   type?: string;
-  costPerImage?: number;
+  imageCostUsd?: number;
   items: {
     id: string;
     modelId: string;

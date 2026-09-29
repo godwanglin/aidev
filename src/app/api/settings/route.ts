@@ -29,12 +29,16 @@ export async function GET() {
   try {
     const user = await getSessionUser();
 
-    // Zero upstream / backend infrastructure leakage
     return NextResponse.json({
       user: {
         id: user?.id,
         email: user?.email || "user@devportal.local",
         name: user?.name || "Developer",
+        balanceUsd: Number(user?.balanceUsd || 0),
+        monthlyBalanceAllocatedUsd: Number(user?.monthlyBalanceAllocatedUsd || 0),
+        monthlyBalanceRemainingUsd: Number(user?.monthlyBalanceRemainingUsd || 0),
+        subscriptionTier: user?.subscriptionTier || "FREE",
+        subscriptionExpiresAt: user?.subscriptionExpiresAt,
         tokenBalance: Number(user?.tokenBalance || 0),
         totalKeys: user?._count.apiKeys || 0,
       },

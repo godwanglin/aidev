@@ -233,7 +233,7 @@ export default function OAuthDarkModal({
               >
                 {copied ? (
                   <>
-                    <Check size={12} className="text-green-600" />
+                    <Check size={12} className="text-[var(--green)]" />
                     <span>Tersalin</span>
                   </>
                 ) : (

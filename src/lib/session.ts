@@ -53,7 +53,7 @@ export async function getCurrentUser() {
       name: true,
       role: true,
       tokenBalance: true,
-      creditBalance: true,
+      balanceUsd: true,
       subscriptionTier: true,
       subscriptionExpiresAt: true,
     },

@@ -59,7 +59,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Metode pembayaran apa saja yang didukung untuk top up?",
-    a: "Kami mendukung QRIS instan (BCA, GoPay, OVO, DANA, ShopeePay, LinkAja) serta Virtual Account Bank (BCA & Mandiri) dengan auto-credit saldo real-time.",
+    a: "Kami mendukung QRIS instan (BCA, GoPay, OVO, DANA, ShopeePay, LinkAja) serta Virtual Account Bank (BCA & Mandiri) dengan auto-isi saldo real-time.",
   },
   {
     q: "Apakah gateway ini mendukung tool-calling dan streaming SSE?",
@@ -160,10 +160,10 @@ export default function SupportPage() {
   }
 
   const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-    OPEN: { bg: "#fef3c7", text: "#92400e", label: "Open" },
-    IN_PROGRESS: { bg: "#dbeafe", text: "#1e40af", label: "In Progress" },
-    RESOLVED: { bg: "#dcfce7", text: "#166534", label: "Resolved" },
-    CLOSED: { bg: "#f1f5f9", text: "#64748b", label: "Closed" },
+    OPEN: { bg: "var(--amber-soft)", text: "var(--amber)", label: "Open" },
+    IN_PROGRESS: { bg: "var(--blue-soft)", text: "var(--blue)", label: "In Progress" },
+    RESOLVED: { bg: "var(--emerald-soft)", text: "var(--emerald)", label: "Resolved" },
+    CLOSED: { bg: "var(--surface-hover)", text: "var(--muted)", label: "Closed" },
   };
 
   return (
@@ -362,8 +362,8 @@ export default function SupportPage() {
                       <span
                         className="font-bold px-1.5 py-0.2 rounded text-[10px]"
                         style={{
-                          backgroundColor: statusColors[selectedTicket.status]?.bg || "#f1f5f9",
-                          color: statusColors[selectedTicket.status]?.text || "#64748b",
+                          backgroundColor: statusColors[selectedTicket.status]?.bg || "var(--surface-hover)",
+                          color: statusColors[selectedTicket.status]?.text || "var(--muted)",
                         }}
                       >
                         {statusColors[selectedTicket.status]?.label || selectedTicket.status}
@@ -402,7 +402,7 @@ export default function SupportPage() {
                 </div>
 
                 {/* Messages List */}
-                <div className="p-3 flex-1 overflow-y-auto space-y-3 bg-[#fcfcfd]" style={{ maxHeight: "300px" }}>
+                <div className="p-3 flex-1 overflow-y-auto space-y-3 bg-[var(--bg)]" style={{ maxHeight: "300px" }}>
                   {/* First message */}
                   <div className="flex flex-col items-start max-w-[85%]">
                     <div className="flex items-center gap-1 mb-1 text-[10px] text-muted">
@@ -410,7 +410,7 @@ export default function SupportPage() {
                       <span className="font-semibold">Anda</span>
                       <span>• {new Date(selectedTicket.createdAt).toLocaleTimeString()}</span>
                     </div>
-                    <div className="p-2.5 rounded bg-white border border-slate-200 text-xs text-ink shadow-sm">
+                    <div className="p-2.5 rounded bg-[var(--card)] border border-[var(--line)] text-xs text-ink shadow-sm">
                       {selectedTicket.message}
                     </div>
                   </div>
@@ -435,8 +435,8 @@ export default function SupportPage() {
                           <div
                             className={`p-2.5 rounded text-xs shadow-sm ${
                               !isMe
-                                ? "bg-[#2563eb] text-white"
-                                : "bg-white border border-slate-200 text-ink"
+                                ? "bg-[var(--blue)] text-white"
+                                : "bg-[var(--card)] border border-[var(--line)] text-ink"
                             }`}
                           >
                             {msg.message}

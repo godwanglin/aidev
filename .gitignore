@@ -40,4 +40,6 @@ cloudflared.exe
 *.tsbuildinfo
 scripts/dist/
 scripts/9router_ref/
+backups/
+scratch/
 

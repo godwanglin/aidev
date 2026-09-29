@@ -63,27 +63,27 @@ export default function UsageChart({ modelBreakdown }: UsageChartProps) {
           data={chartData}
           margin={{ top: 8, right: 10, left: -10, bottom: 0 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
           <XAxis
             dataKey="model"
-            stroke="#94a3b8"
+            stroke="var(--muted)"
             fontSize={11}
             tickLine={false}
             axisLine={false}
             dy={4}
           />
           <YAxis
-            stroke="#94a3b8"
+            stroke="var(--muted)"
             fontSize={10}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)}
           />
-          <Tooltip content={<CustomTooltip />} cursor={{ fill: "#f1f5f9" }} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--surface-hover)", opacity: 0.7 }} />
           <Bar
             dataKey="requests"
             name="Requests by Model"
-            fill="#2563eb"
+            fill="var(--blue)"
             radius={[3, 3, 0, 0]}
             maxBarSize={48}
           />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import {
@@ -15,8 +16,12 @@ import {
   RefreshCw,
   Sparkles,
   Search,
+  Crown,
+  AlertCircle,
 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
+import { Modal } from "@/components/Modal";
+import { Pagination } from "@/components/Pagination";
 
 interface ApiKeyItem {
   id: string;
@@ -42,11 +47,21 @@ export default function KeysPage() {
     hasNextPage: false,
   });
 
+  const [tierInfo, setTierInfo] = useState<{
+    id: string;
+    name: string;
+    rpmLimit: number;
+    maxKeys: number;
+    activeKeysCount: number;
+    canCreate: boolean;
+  } | null>(null);
+
   const [showModal, setShowModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
   async function fetchKeys(targetPage = page) {
@@ -57,6 +72,7 @@ export default function KeysPage() {
       if (json.data) {
         setKeys(json.data);
         if (json.pagination) setPagination(json.pagination);
+        if (json.tier) setTierInfo(json.tier);
       }
     } catch {}
     setLoading(false);
@@ -69,20 +85,30 @@ export default function KeysPage() {
   async function handleCreateKey(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setCreateError(null);
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newKeyName || "Default API Key" }),
       });
-      const json = await res.json();
-      if (json.success && json.data?.rawKey) {
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success && json.data?.rawKey) {
         setGeneratedKey(json.data.rawKey);
         setNewKeyName("");
+        setCreateError(null);
         setPage(1);
         fetchKeys(1);
+      } else {
+        const errorMsg = json.error || `Gagal membuat API key (Status: ${res.status}).`;
+        setCreateError(errorMsg);
+        alert(errorMsg);
       }
-    } catch {}
+    } catch {
+      const netError = "Gagal membuat API key. Terjadi kesalahan jaringan.";
+      setCreateError(netError);
+      alert(netError);
+    }
     setSubmitting(false);
   }
 
@@ -108,6 +134,20 @@ export default function KeysPage() {
           title="API Keys"
           subtitle="Manage secure internal tokens with server-side pagination."
         >
+          {tierInfo && (
+            <div className="flex items-center gap-2 mr-2">
+              <span className={`tier-badge-pill ${tierInfo.id.toLowerCase()}`}>
+                <Crown size={11} />
+                <span>{tierInfo.name}</span>
+              </span>
+              <span className="mono text-xs text-muted">
+                Keys: <strong className="text-ink">{pagination.totalCount}</strong>/{tierInfo.maxKeys === -1 ? "∞" : tierInfo.maxKeys}
+              </span>
+              <span className="mono text-xs text-blue font-semibold">
+                • {tierInfo.rpmLimit} RPM
+              </span>
+            </div>
+          )}
           <button
             className="control btn-icon-only"
             onClick={() => fetchKeys(page)}
@@ -120,6 +160,7 @@ export default function KeysPage() {
             onClick={() => {
               setGeneratedKey(null);
               setNewKeyName("");
+              setCreateError(null);
               setShowModal(true);
             }}
           >
@@ -238,160 +279,149 @@ export default function KeysPage() {
             </table>
           </div>
 
-          <div className="table-footer">
-            <div className="table-footer-left">
-              <span className="table-footer-text">
-                Showing {pagination.totalCount === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
-                {Math.min(page * pageSize, pagination.totalCount)} of {pagination.totalCount} keys
-              </span>
-              <div className="per-page-wrap flex items-center gap-2">
-                <span className="text-muted text-xs">Per page:</span>
-                <CustomDropdown
-                  size="sm"
-                  value={String(pageSize)}
-                  onChange={(val) => {
-                    setPageSize(Number(val));
-                    setPage(1);
-                  }}
-                  options={[
-                    { value: "5", label: "5" },
-                    { value: "10", label: "10" },
-                    { value: "20", label: "20" },
-                  ]}
-                  minWidth={65}
-                  width={65}
-                />
-              </div>
-            </div>
-
-            <div className="pager">
-              <button
-                className="pager-btn"
-                disabled={!pagination.hasPrevPage}
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                title="Previous Page"
-              >
-                <ChevronLeft size={11} />
-                <span>Prev</span>
-              </button>
-              <span className="pager-info">
-                {page}/{pagination.totalPages}
-              </span>
-              <button
-                className="pager-btn"
-                disabled={!pagination.hasNextPage}
-                onClick={() => setPage((p) => Math.min(p + 1, pagination.totalPages))}
-                title="Next Page"
-              >
-                <span>Next</span>
-                <ChevronRight size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={pagination.totalPages}
+            totalCount={pagination.totalCount}
+            pageSize={pageSize}
+            pageSizeOptions={[5, 10, 20]}
+            itemName="keys"
+            onPageChange={(p) => setPage(p)}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setPage(1);
+            }}
+          />
         </article>
 
-        {/* Modal Popup Create & Show Newly Created Key */}
-        {showModal && (
-          <div className="modal-overlay">
-            <div className="modal-card" style={{ width: "480px" }}>
-              <div className="modal-header">
-                <div className="modal-title-wrap">
-                  <KeyRound size={15} className="text-blue" style={{ flexShrink: 0 }} />
-                  <h3 className="modal-title-text">
-                    {generatedKey ? "Secret API Key Generated" : "Create New Secret Key"}
-                  </h3>
+        {/* Reusable Modal Popup Create & Show Newly Created Key */}
+        <Modal
+          isOpen={showModal}
+          onClose={() => {
+            setShowModal(false);
+            setGeneratedKey(null);
+          }}
+          title={generatedKey ? "Secret API Key Generated" : "Create New Secret Key"}
+          icon={<KeyRound size={15} className="text-blue shrink-0" />}
+          maxWidth="480px"
+        >
+          {!generatedKey ? (
+            /* Step 1: Input Key Name */
+            <form onSubmit={handleCreateKey}>
+              {createError && (
+                <div className="text-xs bg-rose-50 text-rose-800 border border-rose-200 p-2.5 rounded-lg mb-3 font-medium flex items-center gap-1.5 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/80">
+                  <AlertCircle size={14} className="text-rose-600 shrink-0" />
+                  <span>{createError}</span>
                 </div>
+              )}
+
+              {tierInfo && !tierInfo.canCreate && (
+                <div className="text-xs bg-amber-50 text-amber-900 border border-amber-200 p-3 rounded-lg mb-3 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800/80 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                    <span>Batas Kuota Pembuatan API Key Tercapai!</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Paket <strong>{tierInfo.name}</strong> memiliki batas kuota <strong>{tierInfo.maxKeys} API Key</strong> (saat ini aktif: {pagination.totalCount}/{tierInfo.maxKeys}). Untuk menambah kuota key dan menaikkan limit RPM hingga 120 RPM, silakan upgrade paket langganan Anda.
+                  </p>
+                  <Link
+                    href="/billing"
+                    className="primary btn-inline text-xs font-semibold py-1 px-2.5 rounded w-fit inline-flex"
+                    onClick={() => setShowModal(false)}
+                  >
+                    <Sparkles size={11} />
+                    <span>Upgrade Paket di Billing</span>
+                  </Link>
+                </div>
+              )}
+
+              <div className="form-group mb-3">
+                <label>Key Name / Identifier</label>
+                <input
+                  suppressHydrationWarning
+                  type="text"
+                  className="control w-full"
+                  placeholder="e.g. Production Backend, Cursor AI, Agent Runner"
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  disabled={Boolean(tierInfo && !tierInfo.canCreate)}
+                  autoFocus
+                />
+                <div className="text-muted block mt-1.5 text-xs space-y-0.5">
+                  <div>
+                    Rate Limit otomatis: <strong className="text-blue font-mono">{tierInfo?.rpmLimit || 5} requests/minute</strong> (berdasarkan paket <strong>{tierInfo?.name || "Free Tier"}</strong>).
+                  </div>
+                  <div>
+                    Kuota API Key: <strong className="mono">{pagination.totalCount}</strong> / {tierInfo?.maxKeys === -1 ? "Unlimited" : `${tierInfo?.maxKeys || 2} Keys`}.
+                  </div>
+                </div>
+              </div>
+              <div className="modal-actions">
                 <button
-                  className="btn-close"
+                  type="button"
+                  className="control"
+                  onClick={() => setShowModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary btn-inline"
+                  disabled={submitting || Boolean(tierInfo && !tierInfo.canCreate)}
+                >
+                  <Sparkles size={13} />
+                  <span>
+                    {submitting
+                      ? "Generating..."
+                      : tierInfo && !tierInfo.canCreate
+                      ? "Kuota Key Penuh"
+                      : "Generate Secret Key"}
+                  </span>
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Step 2: Show Key with Copy Button */
+            <div className="invoice-box">
+              <div className="banner-alert mb-2" style={{ margin: 0 }}>
+                <div className="banner-icon">
+                  <ShieldAlert size={16} />
+                </div>
+                <div className="banner-text">
+                  <strong>Please save this secret key immediately!</strong>
+                  <p>For your security, you will not be able to view it again after closing this popup.</p>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Your Internal API Secret Key</label>
+                <div className="copy-box mt-1">
+                  <code className="text-xs font-semibold mono select-all break-all">{generatedKey}</code>
+                  <button
+                    className="btn-copy shrink-0"
+                    onClick={() => handleCopy(generatedKey)}
+                  >
+                    {copied ? <Check size={13} /> : <Copy size={13} />}
+                    <span>{copied ? "Copied" : "Copy"}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="primary w-full btn-inline justify-center"
                   onClick={() => {
                     setShowModal(false);
                     setGeneratedKey(null);
                   }}
                 >
-                  ✕
+                  <span>I Have Saved My Secret Key</span>
                 </button>
               </div>
-
-              {!generatedKey ? (
-                /* Step 1: Input Key Name */
-                <form onSubmit={handleCreateKey}>
-                  <div className="form-group mb-3">
-                    <label>Key Name / Identifier</label>
-                    <input
-                      suppressHydrationWarning
-                      type="text"
-                      className="control w-full"
-                      placeholder="e.g. Production Backend, Cursor AI, Agent Runner"
-                      value={newKeyName}
-                      onChange={(e) => setNewKeyName(e.target.value)}
-                      autoFocus
-                    />
-                    <small className="text-muted block mt-1 text-xs">
-                      Default Rate Limit is set to 30 requests/minute.
-                    </small>
-                  </div>
-                  <div className="modal-actions">
-                    <button
-                      type="button"
-                      className="control"
-                      onClick={() => setShowModal(false)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="primary btn-inline"
-                      disabled={submitting}
-                    >
-                      <Sparkles size={13} />
-                      <span>{submitting ? "Generating..." : "Generate Secret Key"}</span>
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                /* Step 2: Show Key with Copy Button */
-                <div className="invoice-box">
-                  <div className="banner-alert mb-2" style={{ margin: 0 }}>
-                    <div className="banner-icon">
-                      <ShieldAlert size={16} />
-                    </div>
-                    <div className="banner-text">
-                      <strong>Please save this secret key immediately!</strong>
-                      <p>For your security, you will not be able to view it again after closing this popup.</p>
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label>Your Internal API Secret Key</label>
-                    <div className="copy-box mt-1">
-                      <code className="text-xs font-semibold mono select-all break-all">{generatedKey}</code>
-                      <button
-                        className="btn-copy shrink-0"
-                        onClick={() => handleCopy(generatedKey)}
-                      >
-                        {copied ? <Check size={13} /> : <Copy size={13} />}
-                        <span>{copied ? "Copied" : "Copy"}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="modal-actions">
-                    <button
-                      type="button"
-                      className="primary w-full btn-inline justify-center"
-                      onClick={() => {
-                        setShowModal(false);
-                        setGeneratedKey(null);
-                      }}
-                    >
-                      <span>I Have Saved My Secret Key</span>
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
-        )}
+          )}
+        </Modal>
       </div>
     </DashboardShell>
   );

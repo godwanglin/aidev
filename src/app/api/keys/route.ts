@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 10, 5), 50);
     const skip = (page - 1) * limit;
 
-    const [totalCount, apiKeys] = await Promise.all([
+    const [totalCount, apiKeys, freshUser] = await Promise.all([
       prisma.apiKey.count({ where: { userId: user.id } }),
       prisma.apiKey.findMany({
         where: { userId: user.id },
@@ -37,12 +37,44 @@ export async function GET(req: NextRequest) {
           },
         },
       }),
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          subscriptionTier: true,
+          subscriptionExpiresAt: true,
+        },
+      }),
     ]);
+
+    const isExpired = Boolean(
+      freshUser?.subscriptionTier &&
+      freshUser.subscriptionTier !== "FREE" &&
+      freshUser.subscriptionExpiresAt &&
+      new Date(freshUser.subscriptionExpiresAt).getTime() <= Date.now()
+    );
+
+    const currentTierKey = isExpired ? "FREE" : (freshUser?.subscriptionTier || "FREE").toUpperCase();
+
+    const tierConfig = await prisma.subscriptionTierConfig.findUnique({
+      where: { id: currentTierKey },
+    });
+
+    const rpmLimit = tierConfig?.rpmLimit ?? (currentTierKey === "ULTRA" ? 120 : currentTierKey === "PRO" ? 60 : currentTierKey === "PLUS" ? 30 : 5);
+    const maxKeys = tierConfig?.maxKeys ?? (currentTierKey === "ULTRA" ? -1 : currentTierKey === "PRO" ? 10 : currentTierKey === "PLUS" ? 5 : 2);
+    const canCreate = maxKeys === -1 || totalCount < maxKeys;
 
     const totalPages = Math.ceil(totalCount / limit) || 1;
 
     return NextResponse.json({
       data: apiKeys,
+      tier: {
+        id: currentTierKey,
+        name: tierConfig?.name || currentTierKey,
+        rpmLimit,
+        maxKeys,
+        activeKeysCount: totalCount,
+        canCreate,
+      },
       pagination: {
         page,
         limit,
@@ -64,9 +96,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
+    const freshUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        role: true,
+        subscriptionTier: true,
+        subscriptionExpiresAt: true,
+      },
+    });
+
+    const isExpired = Boolean(
+      freshUser?.subscriptionTier &&
+      freshUser.subscriptionTier !== "FREE" &&
+      freshUser.subscriptionExpiresAt &&
+      new Date(freshUser.subscriptionExpiresAt).getTime() <= Date.now()
+    );
+
+    const currentTierKey = isExpired ? "FREE" : (freshUser?.subscriptionTier || "FREE").toUpperCase();
+
+    const tierConfig = await prisma.subscriptionTierConfig.findUnique({
+      where: { id: currentTierKey },
+    });
+
+    const rpmLimit = tierConfig?.rpmLimit ?? (currentTierKey === "ULTRA" ? 120 : currentTierKey === "PRO" ? 60 : currentTierKey === "PLUS" ? 30 : 5);
+    const maxKeys = tierConfig?.maxKeys ?? (currentTierKey === "ULTRA" ? -1 : currentTierKey === "PRO" ? 10 : currentTierKey === "PLUS" ? 5 : 2);
+
+    // Enforce maximum keys limit per tier
+    const currentKeysCount = await prisma.apiKey.count({
+      where: { userId: user.id },
+    });
+
+    if (maxKeys !== -1 && currentKeysCount >= maxKeys) {
+      return NextResponse.json(
+        {
+          error: `Batas kuota API Key untuk paket ${tierConfig?.name || currentTierKey} telah tercapai (${currentKeysCount}/${maxKeys} keys). Silakan upgrade paket langganan Anda untuk menambah kuota API Key.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const name = body.name || "Default API Key";
-    const rateLimit = 30;
+    const rateLimit = rpmLimit; // Rate limit follows active subscription tier!
 
     const { rawKey, prefix, hashedKey } = generateApiKey();
 

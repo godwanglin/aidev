@@ -353,12 +353,12 @@ async function fetchDeepSeekAccountQuota(apiKey: string): Promise<{ quotas: Quot
           const grantedPct = Math.min(100, Math.round((granted / 10) * 100));
           quotas.push({
             id: "deepseek-granted",
-            name: `Granted Credits: ${sym}${granted.toFixed(2)}`,
+            name: `Granted USD: ${sym}${granted.toFixed(2)}`,
             remainingFraction: grantedPct / 100,
             usedAmount: Math.max(0, 1000 - Math.round(grantedPct * 10)),
             totalAmount: 1000,
             percentage: grantedPct,
-            resetHuman: "Promotional Credits",
+            resetHuman: "Promotional USD",
             status: grantedPct > 20 ? "HEALTHY" : "LOW",
           });
         }
@@ -527,8 +527,8 @@ async function fetchOpenRouterAccountQuota(apiKey: string): Promise<{ quotas: Qu
           const pct = Math.max(0, Math.min(100, Math.round((remaining / limit) * 100)));
           const status: "HEALTHY" | "LOW" | "EMPTY" = remaining <= 0 ? "EMPTY" : remaining < 1.0 ? "LOW" : "HEALTHY";
           quotas.push({
-            id: "openrouter-credits",
-            name: `Credits: $${remaining.toFixed(2)} USD`,
+            id: "openrouter-balance",
+            name: `USD: $${remaining.toFixed(2)} USD`,
             remainingFraction: pct / 100,
             usedAmount: Math.round(usage * 100),
             totalAmount: Math.round(limit * 100),

@@ -260,9 +260,9 @@ export default function AdminLogsPage() {
 
     if (scope === "POST") {
       // e.g. gpt-6-astra → gemini-2.5-flash · FMT: openai→gemini · STREAM · 1 MSG · 0 TOOL · ACCOUNT:agpertama658@gmail.com
-      const parts = message.split(" · ");
+      const parts = message.split(/ · | · /);
       const modelPart = parts[0];
-      const [fromModel, toModel] = modelPart.split(" → ");
+      const [fromModel, toModel] = modelPart.split(/ → | → /);
 
       return (
         <span>
@@ -315,8 +315,8 @@ export default function AdminLogsPage() {
     }
 
     if (scope === "CLIENT_REQUEST") {
-      // e.g. ACCOUNT: Test Codex Stream Key (Admin) · BALANCE: 8.439.308 CR (ULTRA) · REQ: /v1/chat/completions (gpt-6-astra)
-      const parts = message.split(" · ");
+      // e.g. ACCOUNT: Test Codex Stream Key (Admin) · BALANCE: 8.439.308 USD (ULTRA) · REQ: /v1/chat/completions (gpt-6-astra)
+      const parts = message.split(/ · | · /);
       return (
         <span>
           {parts.map((p, i) => {
@@ -340,9 +340,9 @@ export default function AdminLogsPage() {
     }
 
     if (scope === "AUTH_REFRESH" || scope === "BG_TOKEN_REFRESH") {
-      const parts = message.split(" · ");
+      const parts = message.split(/ · | · /);
       const isError = message.includes("❌") || message.includes("failed");
-      const isSuccess = message.includes("✅");
+      const isSuccess = message.includes("✅") || message.includes("✅");
       const headColor = isError ? "#fb7185" : isSuccess ? "#34d399" : "#c084fc";
 
       return (

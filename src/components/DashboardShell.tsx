@@ -40,7 +40,7 @@ const searchableItems = [
   { title: "API Keys Management", category: "Navigation", href: "/keys", keywords: "api keys token secrets generate revoke 30 rpm" },
   { title: "Logs & Usage History", category: "Navigation", href: "/logs", keywords: "logs usage history requests latency latency status errors" },
   { title: "AI Models & Pricing", category: "Navigation", href: "/models", keywords: "models pricing cost tokens gpt-5.2 gpt-5.5 claude opus sonnet" },
-  { title: "Subscription & Billing", category: "Navigation", href: "/billing", keywords: "billing token balance credits buy payment qris virtual account invoice subscription plus pro ultra" },
+  { title: "Subscription & Billing", category: "Navigation", href: "/billing", keywords: "billing token balance balance buy payment qris virtual account invoice subscription plus pro ultra" },
   { title: "Account Settings", category: "Navigation", href: "/settings", keywords: "settings profile email password security" },
   { title: "GPT-5.2 Core Model", category: "AI Models", href: "/models", keywords: "gpt-5.2 openai 128k prompt cost" },
   { title: "GPT-5.5 Ultra Model", category: "AI Models", href: "/models", keywords: "gpt-5.5 openai 256k ultra" },
@@ -141,7 +141,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     ...searchableItems,
     ...(isAdmin
       ? [
-          { title: "Admin User Management", category: "Admin", href: "/admin/users", keywords: "admin users accounts daftar user tier credits inject balance pelanggan" },
+          { title: "Admin User Management", category: "Admin", href: "/admin/users", keywords: "admin users accounts daftar user tier saldo inject balance pelanggan" },
           { title: "Admin Transaksi & Order", category: "Admin", href: "/admin/orders", keywords: "admin orders transactions transaksi pembayaran approve manual bayar pesanan qris va" },
           { title: "Admin Discount Control", category: "Admin", href: "/admin/discounts", keywords: "admin discounts flash sale promo loyalty" },
           { title: "Admin Models Management", category: "Admin", href: "/admin/models", keywords: "admin models crud add edit delete pricing" },
@@ -245,7 +245,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
               <div className="admin-nav-section">
                 <div className="admin-divider" />
                 <div className="admin-header-label">
-                  <span className="flex items-center gap-1 text-[#64748b]">
+                  <span className="flex items-center gap-1 text-[var(--muted)]">
                     <ShieldCheck size={11} className="text-amber-500" />
                     <span>Admin Console</span>
                   </span>
@@ -275,7 +275,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             <div className="help-nav-section" style={{ marginTop: "12px" }}>
               <div className="admin-divider" />
               <div className="admin-header-label">
-                <span className="flex items-center gap-1 text-[#64748b]">
+                <span className="flex items-center gap-1 text-[var(--muted)]">
                   <LifeBuoy size={11} className="text-blue" />
                   <span>Bantuan & Panduan</span>
                 </span>
@@ -442,17 +442,16 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
             {currentUser && (
               <Link
                 href="/billing"
-                className="topbar-credit-pill"
-                title={`Saldo: ${Number(currentUser.creditBalance ?? 0).toLocaleString("id-ID")} Credits | Tier: ${currentUser.subscriptionTier || "FREE"} (Klik untuk kelola billing)`}
+                className="topbar-balance-pill"
+                title={`Saldo: $${Number(currentUser.balanceUsd ?? 0).toFixed(2)} | Tier: ${currentUser.subscriptionTier || "FREE"} (Klik untuk kelola billing)`}
               >
-                <Coins size={13} className="topbar-credit-icon" />
-                <span className="topbar-credit-val">
-                  {Number(currentUser.creditBalance ?? 0) >= 1_000_000
-                    ? `${(Number(currentUser.creditBalance ?? 0) / 1_000_000).toFixed(1)}M`
-                    : Number(currentUser.creditBalance ?? 0).toLocaleString("id-ID")}
-                  <span className="topbar-credit-unit">CR</span>
+                <Coins size={13} className="topbar-balance-icon" />
+                <span className="topbar-balance-val">
+                  {Number(currentUser.balanceUsd ?? 0) >= 1_000_000
+                    ? `$${(Number(currentUser.balanceUsd ?? 0) / 1_000_000).toFixed(1)}M`
+                    : `$${Number(currentUser.balanceUsd ?? 0).toFixed(2)}`}
                 </span>
-                <span className="topbar-credit-divider desktop-only" />
+                <span className="topbar-balance-divider desktop-only" />
                 <span
                   className={`topbar-tier-tag desktop-only ${
                     currentUser.subscriptionTier === "ULTRA"
@@ -503,14 +502,14 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
         </header>
 
         {/* Low Balance Warning Banner */}
-        {currentUser && (Number(currentUser.creditBalance ?? 0) <= 20000 && Number(currentUser.tokenBalance ?? 0) <= 500000) && (
+        {currentUser && (Number(currentUser.balanceUsd ?? 0) <= 0.5 && Number(currentUser.tokenBalance ?? 0) <= 500000) && (
           <div className="low-token-banner">
             <div className="flex items-center gap-2">
               <AlertTriangle size={15} className="text-amber-500 shrink-0" />
               <span className="text-xs">
                 <strong>Peringatan Kuota Menipis:</strong> Sisa saldo kredit Anda saat ini adalah{" "}
                 <span className="mono font-semibold">
-                  {Number(currentUser.creditBalance ?? 0).toLocaleString()} Credits
+                  ${Number(currentUser.balanceUsd ?? 0).toFixed(2)}
                 </span>
                 . Segera lakukan top-up ketengan atau upgrade paket langganan.
               </span>
@@ -578,7 +577,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-muted">Saldo Dompet AI:</span>
                     <span className="font-bold text-ink mono">
-                      {Number(currentUser?.creditBalance ?? 0).toLocaleString("id-ID")} CR
+                      ${Number(currentUser?.balanceUsd ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <Link

@@ -88,7 +88,7 @@ export async function authenticateApiKey(authHeader: string | null, xApiKey?: st
           email: true,
           role: true,
           tokenBalance: true,
-          creditBalance: true,
+          balanceUsd: true,
           subscriptionTier: true,
           subscriptionExpiresAt: true,
         },
@@ -112,15 +112,15 @@ export async function authenticateApiKey(authHeader: string | null, xApiKey?: st
     };
   }
 
-  // 1. Strict Credit Balance Check (Exempt ADMIN role)
+  // 1. Strict USD Balance Check (Exempt ADMIN role)
   const isAdmin = apiKeyRecord.user?.role === "ADMIN";
-  const currentCredits = Number(apiKeyRecord.user?.creditBalance ?? 0);
-  console.log(`[DEBUG auth.ts check] key=${apiKeyRecord.name} role=${apiKeyRecord.user?.role} creditBalance=${apiKeyRecord.user?.creditBalance} currentCredits=${currentCredits} isLeq0=${currentCredits <= 0}`);
-  if (!isAdmin && currentCredits <= 0) {
+  const currentBalanceUsd = Number(apiKeyRecord.user?.balanceUsd ?? 0);
+  console.log(`[DEBUG auth.ts check] key=${apiKeyRecord.name} role=${apiKeyRecord.user?.role} balanceUsd=${apiKeyRecord.user?.balanceUsd} currentBalanceUsd=${currentBalanceUsd} isLeq0=${currentBalanceUsd <= 0}`);
+  if (!isAdmin && currentBalanceUsd <= 0) {
     return {
       success: false,
       apiKey: apiKeyRecord,
-      error: "Saldo credit Anda telah habis (0 CR). Silakan top up saldo atau perbarui paket langganan Anda di http://localhost:3000/billing",
+      error: "Saldo Anda telah habis (0 USD). Silakan top up saldo atau perbarui paket langganan Anda di http://localhost:3000/billing",
       status: 402,
     };
   }

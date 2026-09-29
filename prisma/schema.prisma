@@ -8,24 +8,24 @@ datasource db {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  email            String            @unique
-  name             String?
-  passwordHash     String            @default("")
-  role             String            @default("USER")
-  tokenBalance     BigInt            @default(10000000)
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String  @default("")
+  role         String  @default("USER")
+  tokenBalance BigInt  @default(10000000)
 
-  // Saldo dalam bentuk Credits (Rasio 1 IDR = 10 CR)
-  creditBalance             BigInt            @default(20000) // Default 20k credits (Free Tier starter)
-  purchasedCredits          BigInt            @default(0)     // Kredit permanen dari top-up ketengan
-  monthlyCreditsAllocated   BigInt            @default(20000) // Total jatah kredit bulanan pada periode aktif
-  monthlyCreditsRemaining   BigInt            @default(20000) // Sisa jatah kredit bulanan
+  // Official USD balance. IDR/USD conversion belongs only to payment configuration.
+  balanceUsd                 Decimal @default(0) @db.Decimal(18, 8)
+  purchasedBalanceUsd        Decimal @default(0) @db.Decimal(18, 8)
+  monthlyBalanceAllocatedUsd Decimal @default(0) @db.Decimal(18, 8)
+  monthlyBalanceRemainingUsd Decimal @default(0) @db.Decimal(18, 8)
 
   // Status Langganan
-  subscriptionTier          String            @default("FREE") // "FREE", "PLUS", "PRO", "ULTRA"
-  subscriptionStartedAt     DateTime?
-  subscriptionExpiresAt     DateTime?
-  bonusRescueClaimed        Boolean           @default(false)  // Status klaim bonus 30% / 50%
+  subscriptionTier      String    @default("FREE") // "FREE", "PLUS", "PRO", "ULTRA"
+  subscriptionStartedAt DateTime?
+  subscriptionExpiresAt DateTime?
+  bonusRescueClaimed    Boolean   @default(false) // Status klaim bonus 30% / 50%
 
   createdAt        DateTime          @default(now())
   apiKeys          ApiKey[]
@@ -63,7 +63,7 @@ model RequestLog {
   promptTokens     Int?
   completionTokens Int?
   totalTokens      Int?
-  creditsCost      Int?     @default(0)
+  costUsd          Decimal? @default(0) @db.Decimal(18, 8)
   durationMs       Int?
   createdAt        DateTime @default(now())
 
@@ -90,54 +90,54 @@ model TokenTopup {
 }
 
 model Order {
-  id             String    @id @default(cuid())
-  orderId        String    @unique
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenAmount    BigInt
-  creditAmount   BigInt    @default(0)
-  orderType      String    @default("TOPUP") // "TOPUP" | "SUBSCRIPTION"
-  tierTarget     String?   // "PLUS", "PRO", "ULTRA" if subscription
-  basePrice      Int       @default(0)
-  priceIdr       Int
-  discountPct    Int       @default(0)
-  discountReason String?
-  method         String
-  status         String    @default("PENDING")
-  qrString       String?   @db.Text
-  vaNumber       String?
-  createdAt      DateTime  @default(now())
-  paidAt         DateTime?
+  id               String    @id @default(cuid())
+  orderId          String    @unique
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenAmount      BigInt
+  balanceAmountUsd Decimal   @default(0) @db.Decimal(18, 8)
+  orderType        String    @default("TOPUP") // "TOPUP" | "SUBSCRIPTION"
+  tierTarget       String? // "PLUS", "PRO", "ULTRA" if subscription
+  basePrice        Int       @default(0)
+  priceIdr         Int
+  discountPct      Int       @default(0)
+  discountReason   String?
+  method           String
+  status           String    @default("PENDING")
+  qrString         String?   @db.Text
+  vaNumber         String?
+  createdAt        DateTime  @default(now())
+  paidAt           DateTime?
 
   @@index([userId])
   @@index([userId, status, paidAt])
 }
 
 model SystemSetting {
-  id                       String    @id @default("global_config")
-  promoDiscountActive      Boolean   @default(false)
-  promoDiscountPct         Int       @default(0)
-  promoStartedAt           DateTime?
-  promoExpiresAt           DateTime?
-  firstTopupDiscountActive Boolean   @default(true)
-  firstTopupDiscountPct    Int       @default(20)
-  highUsageDiscountActive  Boolean   @default(true)
-  highUsageThresholdTokens BigInt    @default(50000000)
-  highUsageDiscountPct     Int       @default(10)
-  highUsageDays            Int       @default(3)
-  discordWebhookUrl        String?   @db.Text
-  discordAlertMoneyIn      Boolean   @default(true)
-  discordAlertProviderDown Boolean   @default(true)
-  discordAlertSupportTicket Boolean  @default(true)
-  discordAlertLowBalance   Boolean   @default(true)
-  healthCheckIntervalMinutes Int     @default(10)
-  midtransServerKey        String?   @db.Text
-  midtransClientKey        String?   @db.Text
-  midtransIsProduction     Boolean   @default(false)
-  defaultRoutingStrategy   String    @default("SMART_FALLBACK") // "ROUND_ROBIN" | "SMART_FALLBACK"
-  quotaSyncIntervalMinutes Int       @default(15)
-  rtkCompressionActive     Boolean   @default(true)
-  updatedAt                DateTime  @default(now()) @updatedAt
+  id                         String    @id @default("global_config")
+  promoDiscountActive        Boolean   @default(false)
+  promoDiscountPct           Int       @default(0)
+  promoStartedAt             DateTime?
+  promoExpiresAt             DateTime?
+  firstTopupDiscountActive   Boolean   @default(true)
+  firstTopupDiscountPct      Int       @default(20)
+  highUsageDiscountActive    Boolean   @default(true)
+  highUsageThresholdTokens   BigInt    @default(50000000)
+  highUsageDiscountPct       Int       @default(10)
+  highUsageDays              Int       @default(3)
+  discordWebhookUrl          String?   @db.Text
+  discordAlertMoneyIn        Boolean   @default(true)
+  discordAlertProviderDown   Boolean   @default(true)
+  discordAlertSupportTicket  Boolean   @default(true)
+  discordAlertLowBalance     Boolean   @default(true)
+  healthCheckIntervalMinutes Int       @default(10)
+  midtransServerKey          String?   @db.Text
+  midtransClientKey          String?   @db.Text
+  midtransIsProduction       Boolean   @default(false)
+  defaultRoutingStrategy     String    @default("SMART_FALLBACK") // "ROUND_ROBIN" | "SMART_FALLBACK"
+  quotaSyncIntervalMinutes   Int       @default(15)
+  rtkCompressionActive       Boolean   @default(true)
+  updatedAt                  DateTime  @default(now()) @updatedAt
 }
 
 model LoyaltyDiscount {
@@ -188,7 +188,7 @@ model TicketMessage {
   id         String        @id @default(cuid())
   ticketId   String
   ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  senderId   String        // User ID or "ADMIN"
+  senderId   String // User ID or "ADMIN"
   senderRole String        @default("USER") // "USER" | "ADMIN"
   senderName String?
   message    String        @db.Text
@@ -198,40 +198,40 @@ model TicketMessage {
 }
 
 model ProviderConnection {
-  id               String        @id @default(cuid())
-  provider         String        // "OPENAI", "ANTHROPIC", "GOOGLE", "OPENROUTER", "OPENCODE", "CUSTOM"
-  name             String        // Label / alias, contoh: "OpenAI Main Account"
-  authType         String        @default("API_KEY") // "API_KEY" | "OAUTH"
+  id       String @id @default(cuid())
+  provider String // "OPENAI", "ANTHROPIC", "GOOGLE", "OPENROUTER", "OPENCODE", "CUSTOM"
+  name     String // Label / alias, contoh: "OpenAI Main Account"
+  authType String @default("API_KEY") // "API_KEY" | "OAUTH"
 
   // Encrypted Credentials (AES-256-GCM)
-  apiKeyEncrypted  String?       @db.Text
-  accessTokenEnc   String?       @db.Text
-  refreshTokenEnc  String?       @db.Text
-  tokenExpiresAt   DateTime?
+  apiKeyEncrypted String?   @db.Text
+  accessTokenEnc  String?   @db.Text
+  refreshTokenEnc String?   @db.Text
+  tokenExpiresAt  DateTime?
 
   // Custom Provider Specific
-  baseUrl          String?       // Contoh: "https://api.groq.com/openai/v1"
-  compatibility    String?       @default("OPENAI") // "OPENAI" | "ANTHROPIC"
-  customHeaders    String?       @db.Text // JSON string format
+  baseUrl       String? // Contoh: "https://api.groq.com/openai/v1"
+  compatibility String? @default("OPENAI") // "OPENAI" | "ANTHROPIC"
+  customHeaders String? @db.Text // JSON string format
 
   // Account & Quota Metadata
-  accountEmail     String?
-  tier             String?
-  quotaLimitTokens BigInt?
-  quotaUsedTokens  BigInt?
-  quotaRemainingUsd Decimal?     @db.Decimal(10, 2)
-  lastSyncedAt     DateTime?
-  syncStatus       String        @default("NORMAL") // "NORMAL", "LOW_QUOTA", "EXHAUSTED", "ERROR"
+  accountEmail      String?
+  tier              String?
+  quotaLimitTokens  BigInt?
+  quotaUsedTokens   BigInt?
+  quotaRemainingUsd Decimal?  @db.Decimal(10, 2)
+  lastSyncedAt      DateTime?
+  syncStatus        String    @default("NORMAL") // "NORMAL", "LOW_QUOTA", "EXHAUSTED", "ERROR"
 
   // Routing Config
-  isActive         Boolean       @default(true)
-  priority         Int           @default(1) // 1 = highest priority
-  weight           Int           @default(1) // Round-Robin weight
-  cooldownUntil    DateTime?     // Temporary cooldown if 429 occurs
+  isActive      Boolean   @default(true)
+  priority      Int       @default(1) // 1 = highest priority
+  weight        Int       @default(1) // Round-Robin weight
+  cooldownUntil DateTime? // Temporary cooldown if 429 occurs
 
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  upstreamLogs     UpstreamLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  upstreamLogs UpstreamLog[]
 
   @@index([provider, isActive])
   @@index([provider, priority])
@@ -263,14 +263,16 @@ model UpstreamLog {
 model ComboModel {
   id              String           @id @default(cuid())
   comboId         String           @unique // e.g. "combo/free-coding", "combo:general"
-  name            String           // e.g. "Auto-Rotate Free Coding Stack"
+  name            String // e.g. "Auto-Rotate Free Coding Stack"
   description     String?          @db.Text
   type            String           @default("chat") // "chat" | "image" | "embedding"
   strategy        String           @default("FALLBACK") // "FALLBACK" | "ROUND_ROBIN"
   cooldownSeconds Int              @default(60)
-  rateInPer1k     Int              @default(25)  // Credits per 1,000 prompt tokens
-  rateOutPer1k    Int              @default(100) // Credits per 1,000 completion tokens
-  costPerImage    Int              @default(500) // Credits per image generation
+  rateInUsdPer1k  Decimal          @default(0) @db.Decimal(18, 8)
+  rateOutUsdPer1k Decimal          @default(0) @db.Decimal(18, 8)
+  rateInUsdPer1m  Decimal          @default(0) @db.Decimal(18, 8)
+  rateOutUsdPer1m Decimal          @default(0) @db.Decimal(18, 8)
+  imageCostUsd    Decimal          @default(0) @db.Decimal(18, 8)
   isActive        Boolean          @default(true)
   isPublic        Boolean          @default(true)
   createdAt       DateTime         @default(now())
@@ -285,7 +287,7 @@ model ComboModelItem {
   id           String     @id @default(cuid())
   comboModelId String
   comboModel   ComboModel @relation(fields: [comboModelId], references: [id], onDelete: Cascade)
-  modelId      String     // Target model identifier e.g. "or/poolside/laguna-s-2.1:free", "deepseek/deepseek-flash"
+  modelId      String // Target model identifier e.g. "or/poolside/laguna-s-2.1:free", "deepseek/deepseek-flash"
   priority     Int        @default(1) // 1 = Tier 1 (highest priority for Fallback)
   weight       Int        @default(1) // Weight for Round-Robin
   isActive     Boolean    @default(true)
@@ -295,27 +297,45 @@ model ComboModelItem {
 }
 
 model SubscriptionTierConfig {
-  id                 String   @id // "FREE", "PLUS", "PRO", "ULTRA"
-  name               String   // "Free Tier", "Plus", "Pro", "Ultra"
-  priceIdr           Int      // 0, 49000, 99000, 249000
-  monthlyCredits     BigInt   // 20000, 650000, 1200000, 3500000
-  rpmLimit           Int      @default(15) // 15, 30, 60, 120
-  maxKeys            Int      @default(2)  // 2, 5, 10, -1 (unlimited)
-  routingPriority    String   @default("REGULAR") // "REGULAR", "FAST_LANE", "DEDICATED"
-  bonusPercentage    Int      @default(0)  // 0, 0, 30, 50
-  allowedModelIds    String   @db.Text     // JSON Array: ["ag/gemini-3.8-flash-high", ...]
-  badgeColor         String   @default("blue")
-  description        String?  @db.Text
-  isActive           Boolean  @default(true)
-  updatedAt          DateTime @updatedAt
+  id                String   @id // "FREE", "PLUS", "PRO", "ULTRA"
+  name              String // "Free Tier", "Plus", "Pro", "Ultra"
+  priceIdr          Int // 0, 49000, 99000, 249000
+  monthlyBalanceUsd Decimal  @db.Decimal(18, 8)
+  rpmLimit          Int      @default(15) // 15, 30, 60, 120
+  maxKeys           Int      @default(2) // 2, 5, 10, -1 (unlimited)
+  routingPriority   String   @default("REGULAR") // "REGULAR", "FAST_LANE", "DEDICATED"
+  bonusPercentage   Int      @default(0) // 0, 0, 30, 50
+  allowedModelIds   String   @db.Text // JSON Array: ["ag/gemini-3.8-flash-high", ...]
+  badgeColor        String   @default("blue")
+  description       String?  @db.Text
+  features          String?  @db.Text // JSON Array of feature strings
+  isActive          Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+}
+
+model TopupPackage {
+  id              String   @id @default(cuid())
+  name            String
+  priceIdr        Int
+  balanceUsd      Decimal  @default(1.00) @db.Decimal(18, 8)
+  bonusPercentage Int      @default(0)
+  tag             String?
+  badgeColor      String?  @default("blue")
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
 }
 
 model ModelPricing {
-  id             String   @id @default(cuid())
-  modelId        String   @unique // e.g. "ag/gemini-3.8-flash-high", "claude-3-5-sonnet"
-  name           String?
-  rateInPer1k    Int      @default(25)  // Credits per 1,000 prompt tokens
-  rateOutPer1k   Int      @default(100) // Credits per 1,000 completion tokens
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(cuid())
+  modelId         String   @unique // e.g. "ag/gemini-3.8-flash-high", "claude-3-5-sonnet"
+  name            String?
+  rateInUsdPer1k  Decimal  @default(0) @db.Decimal(18, 8)
+  rateOutUsdPer1k Decimal  @default(0) @db.Decimal(18, 8)
+  rateInUsdPer1m  Decimal  @default(0) @db.Decimal(18, 8)
+  rateOutUsdPer1m Decimal  @default(0) @db.Decimal(18, 8)
+  updatedAt       DateTime @updatedAt
 }
-

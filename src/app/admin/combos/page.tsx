@@ -36,11 +36,13 @@ interface ComboItem {
   name: string;
   description: string | null;
   type?: "chat" | "image" | string;
-  costPerImage?: number;
+  imageCostUsd?: number;
   strategy: "FALLBACK" | "ROUND_ROBIN";
   cooldownSeconds: number;
-  rateInPer1k?: number;
-  rateOutPer1k?: number;
+  rateInUsdPer1k?: number;
+  rateOutUsdPer1k?: number;
+  rateInUsdPer1m?: number;
+  rateOutUsdPer1m?: number;
   isActive: boolean;
   isPublic: boolean;
   createdAt: string;
@@ -113,13 +115,13 @@ export default function AdminCombosPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [modelType, setModelType] = useState<"chat" | "image">("chat");
-  const [costPerImage, setCostPerImage] = useState<number>(500);
+  const [imageCostUsd, setCostPerImage] = useState<number>(0.005);
   const [strategy, setStrategy] = useState<"FALLBACK" | "ROUND_ROBIN">("FALLBACK");
   const [cooldownSeconds, setCooldownSeconds] = useState(60);
   const [isActive, setIsActive] = useState(true);
   const [isPublic, setIsPublic] = useState(true);
-  const [rateInPer1k, setRateInPer1k] = useState(25);
-  const [rateOutPer1k, setRateOutPer1k] = useState(100);
+  const [rateInUsdPer1m, setRateInPer1m] = useState(0.15);
+  const [rateOutUsdPer1m, setRateOutPer1m] = useState(0.60);
   const [selectedItems, setSelectedItems] = useState<{ modelId: string; priority: number; weight: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
@@ -205,13 +207,13 @@ export default function AdminCombosPage() {
     setName("");
     setDescription("");
     setModelType("chat");
-    setCostPerImage(500);
+    setCostPerImage(0.005);
     setStrategy("FALLBACK");
     setCooldownSeconds(60);
     setIsActive(true);
     setIsPublic(true);
-    setRateInPer1k(25);
-    setRateOutPer1k(100);
+    setRateInPer1m(0.15);
+    setRateOutPer1m(0.60);
     setSelectedItems([]);
     setPickerSearch("");
     setManualModelInput("");
@@ -224,13 +226,19 @@ export default function AdminCombosPage() {
     setName(combo.name);
     setDescription(combo.description || "");
     setModelType((combo.type as any) === "image" ? "image" : "chat");
-    setCostPerImage(combo.costPerImage !== undefined ? combo.costPerImage : 500);
+    setCostPerImage(combo.imageCostUsd !== undefined ? Number(combo.imageCostUsd) : 0.005);
     setStrategy(combo.strategy);
     setCooldownSeconds(combo.cooldownSeconds);
     setIsActive(combo.isActive);
     setIsPublic(combo.isPublic);
-    setRateInPer1k(combo.rateInPer1k !== undefined ? combo.rateInPer1k : 25);
-    setRateOutPer1k(combo.rateOutPer1k !== undefined ? combo.rateOutPer1k : 100);
+    const in1m = combo.rateInUsdPer1m !== undefined && combo.rateInUsdPer1m !== null
+      ? Number(combo.rateInUsdPer1m)
+      : (combo.rateInUsdPer1k ? Number(combo.rateInUsdPer1k) * 1000 : 0.15);
+    const out1m = combo.rateOutUsdPer1m !== undefined && combo.rateOutUsdPer1m !== null
+      ? Number(combo.rateOutUsdPer1m)
+      : (combo.rateOutUsdPer1k ? Number(combo.rateOutUsdPer1k) * 1000 : 0.60);
+    setRateInPer1m(in1m);
+    setRateOutPer1m(out1m);
     setSelectedItems(
       combo.items.map((it) => ({
         modelId: it.modelId,
@@ -363,11 +371,13 @@ export default function AdminCombosPage() {
       name: name.trim(),
       description: description.trim() || null,
       type: modelType,
-      costPerImage: modelType === "image" ? (Number(costPerImage) >= 0 ? Number(costPerImage) : 500) : 500,
+      imageCostUsd: modelType === "image" ? (Number(imageCostUsd) >= 0 ? Number(imageCostUsd) : 0.005) : 0.005,
       strategy,
       cooldownSeconds: Number(cooldownSeconds) || 60,
-      rateInPer1k: Number(rateInPer1k) >= 0 ? Number(rateInPer1k) : 25,
-      rateOutPer1k: Number(rateOutPer1k) >= 0 ? Number(rateOutPer1k) : 100,
+      rateInUsdPer1m: Number(rateInUsdPer1m) >= 0 ? Number(rateInUsdPer1m) : 0.15,
+      rateOutUsdPer1m: Number(rateOutUsdPer1m) >= 0 ? Number(rateOutUsdPer1m) : 0.60,
+      rateInUsdPer1k: (Number(rateInUsdPer1m) >= 0 ? Number(rateInUsdPer1m) : 0.15) / 1000,
+      rateOutUsdPer1k: (Number(rateOutUsdPer1m) >= 0 ? Number(rateOutUsdPer1m) : 0.60) / 1000,
       isActive,
       isPublic,
       items: selectedItems,
@@ -621,7 +631,7 @@ export default function AdminCombosPage() {
                 <tr>
                   <th style={{ width: "220px", minWidth: "200px" }}>Combo Identifier</th>
                   <th style={{ width: "150px", minWidth: "140px" }}>Strategy</th>
-                  <th style={{ width: "170px", minWidth: "150px" }}>Credit Cost</th>
+                  <th style={{ width: "170px", minWidth: "150px" }}>Cost ($ / 1M tok)</th>
                   <th style={{ minWidth: "240px" }}>Candidate Stack & Order</th>
                   <th style={{ width: "90px", minWidth: "85px" }}>Cooldown</th>
                   <th style={{ width: "110px", minWidth: "105px" }}>Public View</th>
@@ -725,7 +735,7 @@ export default function AdminCombosPage() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#7e22ce" }}>
                               <ImageIcon size={12} className="shrink-0" style={{ color: "#a855f7" }} />
-                              <span>{combo.costPerImage ?? 500} CR</span>
+                              <span>${Number(combo.imageCostUsd ?? 0.005)}</span>
                             </div>
                             <span className="text-[10.5px] text-muted">Fixed per image</span>
                           </div>
@@ -733,9 +743,15 @@ export default function AdminCombosPage() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--ink)" }}>
                               <Coins size={12} className="text-amber-500 shrink-0" />
-                              <span>{combo.rateInPer1k ?? 25} In / {combo.rateOutPer1k ?? 100} Out</span>
+                              <span>
+                                ${(combo.rateInUsdPer1m !== undefined && combo.rateInUsdPer1m !== null
+                                  ? Number(combo.rateInUsdPer1m)
+                                  : combo.rateInUsdPer1k ? Number(combo.rateInUsdPer1k) * 1000 : 0.15)} In / ${(combo.rateOutUsdPer1m !== undefined && combo.rateOutUsdPer1m !== null
+                                  ? Number(combo.rateOutUsdPer1m)
+                                  : combo.rateOutUsdPer1k ? Number(combo.rateOutUsdPer1k) * 1000 : 0.60)} Out
+                              </span>
                             </div>
-                            <span className="text-[10.5px] text-muted">Credits / 1k tokens</span>
+                            <span className="text-[10.5px] text-muted">$ / 1M tokens</span>
                           </div>
                         )}
                       </td>
@@ -1104,26 +1120,27 @@ export default function AdminCombosPage() {
                   </div>
                 </div>
 
-                {/* Credit Consumption Pricing */}
+                {/* Cost Pricing ($) */}
                 {modelType === "image" ? (
                   <div className="combo-pricing-box" style={{ padding: "12px 14px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)", marginBottom: "14px" }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#a855f7", marginBottom: "6px" }}>
                         <ImageIcon size={13} className="text-purple-600 shrink-0" />
-                        <span>Cost Per Image (Credits)</span>
+                        <span>Cost Per Image ($)</span>
                       </label>
                       <input
                         suppressHydrationWarning
                         type="number"
+                        step="any"
                         className="control w-full text-xs font-semibold"
-                        value={costPerImage}
+                        value={imageCostUsd}
                         onChange={(e) => setCostPerImage(Math.max(0, Number(e.target.value)))}
                         min={0}
-                        placeholder="e.g. 500"
+                        placeholder="e.g. 0.005"
                         required
                       />
                       <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
-                        Biaya kredit flat per generate gambar (default 500 CR = Rp 500). Bebas dari billing rate token input/output.
+                        Biaya flat per generate gambar (default $0.005). Bebas dari billing rate token input/output.
                       </p>
                     </div>
                   </div>
@@ -1132,40 +1149,42 @@ export default function AdminCombosPage() {
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "var(--ink)", marginBottom: "6px" }}>
                         <Coins size={12} className="text-amber-500 shrink-0" />
-                        <span>Input Rate (Credits / 1k tokens)</span>
+                        <span>Input Rate ($ / 1M tokens)</span>
                       </label>
                       <input
                         suppressHydrationWarning
                         type="number"
+                        step="any"
                         className="control w-full text-xs font-semibold"
-                        value={rateInPer1k}
-                        onChange={(e) => setRateInPer1k(Math.max(0, Number(e.target.value)))}
+                        value={rateInUsdPer1m}
+                        onChange={(e) => setRateInPer1m(Math.max(0, Number(e.target.value)))}
                         min={0}
-                        placeholder="e.g. 25"
+                        placeholder="e.g. 0.625"
                         required
                       />
                       <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
-                        Biaya kredit per 1.000 token prompt input user.
+                        Biaya per 1.000.000 token prompt input user.
                       </p>
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "var(--ink)", marginBottom: "6px" }}>
                         <Coins size={12} className="text-amber-500 shrink-0" />
-                        <span>Output Rate (Credits / 1k tokens)</span>
+                        <span>Output Rate ($ / 1M tokens)</span>
                       </label>
                       <input
                         suppressHydrationWarning
                         type="number"
+                        step="any"
                         className="control w-full text-xs font-semibold"
-                        value={rateOutPer1k}
-                        onChange={(e) => setRateOutPer1k(Math.max(0, Number(e.target.value)))}
+                        value={rateOutUsdPer1m}
+                        onChange={(e) => setRateOutPer1m(Math.max(0, Number(e.target.value)))}
                         min={0}
-                        placeholder="e.g. 100"
+                        placeholder="e.g. 2.50"
                         required
                       />
                       <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
-                        Biaya kredit per 1.000 token completion output LLM.
+                        Biaya per 1.000.000 token completion output LLM.
                       </p>
                     </div>
                   </div>

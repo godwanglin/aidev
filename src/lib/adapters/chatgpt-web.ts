@@ -768,7 +768,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
             promptTokens,
             completionTokens,
             totalTokens: promptTokens + completionTokens,
-            creditsCost: 0,
+            costUsd: 0,
             durationMs,
           });
         }
@@ -863,7 +863,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
       promptTokens,
       completionTokens,
       totalTokens,
-      creditsCost: 0,
+      costUsd: 0,
       durationMs,
     });
   }

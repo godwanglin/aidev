@@ -56,7 +56,7 @@ export default function OverviewPage() {
       val: data.totalRequests.toLocaleString(),
       trend: data.reqTrend,
       up: !data.reqTrend.startsWith("-"),
-      color: "#2563eb",
+      color: "var(--blue)",
       series:
         data.sparkSeries && data.sparkSeries.length > 0
           ? data.sparkSeries
@@ -70,7 +70,7 @@ export default function OverviewPage() {
           : data.totalTokens.toLocaleString(),
       trend: data.tokenTrend,
       up: !data.tokenTrend.startsWith("-"),
-      color: "#2563eb",
+      color: "var(--blue)",
       series:
         data.sparkSeries && data.sparkSeries.length > 0
           ? data.sparkSeries
@@ -81,7 +81,7 @@ export default function OverviewPage() {
       val: data.avgMillionTokens,
       trend: data.avgTrend,
       up: !data.avgTrend.startsWith("-"),
-      color: "#059669",
+      color: "var(--emerald)",
       series:
         data.sparkSeries && data.sparkSeries.length > 0
           ? data.sparkSeries
@@ -92,7 +92,7 @@ export default function OverviewPage() {
       val: data.errorRate,
       trend: data.errorRate === "0.00%" ? "0.0%" : "+" + data.errorRate,
       up: data.errorRate === "0.00%",
-      color: data.errorRate === "0.00%" ? "#059669" : "#dc2626",
+      color: data.errorRate === "0.00%" ? "var(--emerald)" : "var(--red)",
       series: [0, 0, 0, 0, 0, 0, 0],
     },
   ];

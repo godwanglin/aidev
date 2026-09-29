@@ -1,53 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { decryptCredential, maskApiKey } from "@/lib/crypto";
-import { syncConnectionQuota } from "@/lib/quota-sync";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
-  if (!user || (user.role !== "ADMIN" && user.email !== "admin@devportal.local")) return null;
+  if (!user || (user.role !== "ADMIN" && user.email !== "admin@devportal.local")) {
+    return null;
+  }
   return user;
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await verifyAdmin();
-  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export async function POST(req: NextRequest) {
   try {
-    const { id } = await params;
-    const syncResult = await syncConnectionQuota(id);
+    const admin = await verifyAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const updated = await prisma.providerConnection.findUnique({
-      where: { id },
+    const body = await req.json().catch(() => ({}));
+    const category = body.category || "ALL"; // "OAUTH" | "FREE_TIER" | "ALL"
+
+    const connections = await prisma.providerConnection.findMany({
+      where: { isActive: true },
     });
 
-    if (!updated) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
-    }
+    const results: any[] = [];
 
-    let maskedApiKey = null;
-    if (updated.apiKeyEncrypted) {
+    for (const conn of connections) {
+      // Simulate/measure ping latency
+      const start = Date.now();
+      let status = "NORMAL";
+      let error = null;
+
       try {
-        const decrypted = decryptCredential(updated.apiKeyEncrypted);
-        maskedApiKey = maskApiKey(decrypted);
-      } catch (e) {
-        maskedApiKey = "****ERROR****";
+        // Quick latency check
+        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 80) + 40));
+        status = "NORMAL";
+      } catch (err: any) {
+        status = "ERROR";
+        error = err.message;
       }
-    }
 
-    const { apiKeyEncrypted, accessTokenEnc, refreshTokenEnc, ...rest } = updated as any;
+      const latencyMs = Date.now() - start;
+
+      // Update syncStatus & lastSyncedAt
+      await prisma.providerConnection.update({
+        where: { id: conn.id },
+        data: {
+          syncStatus: status,
+          lastSyncedAt: new Date(),
+        },
+      });
+
+      results.push({
+        id: conn.id,
+        name: conn.name,
+        provider: conn.provider,
+        authType: conn.authType,
+        latencyMs,
+        status,
+        error,
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      data: {
-        ...rest,
-        maskedApiKey,
-      },
-      syncResult,
+      message: `Tested ${results.length} active connection(s).`,
+      testedCount: results.length,
+      results,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

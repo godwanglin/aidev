@@ -219,12 +219,12 @@ export function ProviderAvatar({
           minWidth: `${size}px`,
           minHeight: `${size}px`,
           borderRadius: "6px",
-          backgroundColor: "#f5f3ff",
-          border: "1px solid #ddd6fe",
+          backgroundColor: "var(--purple-soft)",
+          border: "1px solid var(--purple-border)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "#7c3aed",
+          color: "var(--purple)",
           boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           ...style,
         }}
@@ -235,8 +235,8 @@ export function ProviderAvatar({
     );
   }
 
-  const containerBg = brandColor ? `${brandColor}14` : "#f8fafc";
-  const containerBorder = brandColor ? `${brandColor}33` : "#e2e8f0";
+  const containerBg = brandColor ? `${brandColor}14` : "var(--surface-hover)";
+  const containerBorder = brandColor ? `${brandColor}33` : "var(--line)";
 
   return (
     <div

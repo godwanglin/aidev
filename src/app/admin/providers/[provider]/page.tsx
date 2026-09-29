@@ -114,7 +114,7 @@ export default function ProviderDetailPage() {
       name: cleanName,
       slug: providerSlug,
       category: "CUSTOM",
-      color: "#64748b",
+      color: "var(--muted)",
       iconName: "Network",
       authType: "API_KEY",
     };
@@ -955,11 +955,11 @@ export default function ProviderDetailPage() {
                         </div>
 
                         {conn.authType === "API_KEY" || isCustomProvider ? (
-                          <KeyRound size={13} className="text-[#a1a1aa] shrink-0 ml-1" />
+                          <KeyRound size={13} className="text-[var(--muted)] shrink-0 ml-1" />
                         ) : conn.authType === "COOKIE" ? (
-                          <Cookie size={13} className="text-emerald-500 shrink-0 ml-1" />
+                          <Cookie size={13} className="text-[var(--emerald)] shrink-0 ml-1" />
                         ) : (
-                          <Lock size={13} className="text-[#a1a1aa] shrink-0 ml-1" />
+                          <Lock size={13} className="text-[var(--muted)] shrink-0 ml-1" />
                         )}
 
                         <div className="conn-identity-wrap">
@@ -1190,7 +1190,7 @@ export default function ProviderDetailPage() {
                         type="button"
                         onClick={handleImportFromModels}
                         disabled={isImportingModels}
-                        className="control btn-inline text-xs font-semibold px-3.5 py-1.5 flex items-center gap-1.5 bg-[#f8fafc] hover:bg-[#f1f5f9]"
+                        className="control btn-inline text-xs font-semibold px-3.5 py-1.5 flex items-center gap-1.5"
                         title="Import list of models directly from upstream GET /v1/models"
                       >
                         <Download size={12} className={isImportingModels ? "animate-bounce" : ""} />
@@ -1396,7 +1396,7 @@ export default function ProviderDetailPage() {
               <div className="codex-confirm-body">
                 <p>
                   Use 1 Codex reset credit for{" "}
-                  <strong style={{ color: "#0f172a" }}>
+                  <strong style={{ color: "var(--ink-heading)" }}>
                     {confirmConsumeConn.accountEmail || confirmConsumeConn.name}
                   </strong>
                   . This cannot be undone. Remaining credits:{" "}
@@ -1562,12 +1562,12 @@ export default function ProviderDetailPage() {
               <form onSubmit={handleAddCustomApiKey}>
                 <div className="oauth-modal-body">
                   {(customProviderData?.baseUrl || providerMeta.baseUrl) && (
-                    <div className="mb-4 p-3 rounded-lg bg-blue-50/80 border border-blue-100 flex items-center justify-between text-xs">
+                    <div className="mb-4 p-3 rounded-lg bg-[var(--blue-soft)] border border-[var(--blue-border)] flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                        <span className="text-slate-600 font-medium">Upstream Endpoint:</span>
+                        <span className="w-2 h-2 rounded-full bg-[var(--blue)] animate-pulse" />
+                        <span className="text-[var(--ink)] font-medium">Upstream Endpoint:</span>
                       </div>
-                      <code className="font-mono font-semibold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
+                      <code className="font-mono font-semibold text-[var(--blue)] bg-[var(--card)] px-2 py-0.5 rounded border border-[var(--blue-border)]">
                         {customProviderData?.baseUrl || providerMeta.baseUrl}
                       </code>
                     </div>

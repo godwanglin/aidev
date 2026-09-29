@@ -4,7 +4,7 @@ import { logRequest } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { resolveUpstreamConnection, logUpstreamRequest } from "@/lib/router";
 import { isComboModel, findCombo, resolveComboCandidates, markComboModelCooldown } from "@/lib/combo-router";
-import { checkTierModelAccess } from "@/lib/credits";
+import { checkTierModelAccess } from "@/lib/billing";
 import { adminLogger } from "@/lib/admin-logger";
 import { isAntigravityProvider, dispatchAntigravityImage } from "@/lib/adapters/antigravity";
 import { isCodexProvider, dispatchCodexImage } from "@/lib/adapters/codex";
@@ -21,7 +21,7 @@ interface ImageGenerationBody {
 
 /**
  * Handler for POST /v1/images/generations (Strict OpenAI-compatible Image Generation API)
- * Enforces isPublic validation, tier checking, real-time credit deduction, and combo routing without silent fallback.
+ * Enforces isPublic validation, tier checking, real-time balance deduction, and combo routing without silent fallback.
  */
 export async function handleImagesGenerations(req: NextRequest): Promise<NextResponse> {
   const startTime = Date.now();
@@ -37,15 +37,15 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
     );
   }
 
-  // 2. Strict credit balance check (reject 402 if <= 0, exempt ADMIN)
+  // 2. Strict USD balance check (reject 402 if <= 0, exempt ADMIN)
   const clientUserRole = (auth.apiKey as any)?.user?.role || "USER";
-  const clientUserCredit = Number((auth.apiKey as any)?.user?.creditBalance ?? 0);
-  if (clientUserRole !== "ADMIN" && clientUserCredit <= 0) {
+  const clientUserBalanceUsd = Number((auth.apiKey as any)?.user?.balanceUsd ?? 0);
+  if (clientUserRole !== "ADMIN" && clientUserBalanceUsd <= 0) {
     return NextResponse.json(
       {
         error: {
-          message: "Saldo credit Anda telah habis (0 CR). Silakan top up saldo atau perbarui paket langganan Anda.",
-          type: "insufficient_credits",
+          message: "Saldo Anda telah habis (0 USD). Silakan top up saldo atau perbarui paket langganan Anda.",
+          type: "insufficient_balance",
           code: 402,
         },
       },
@@ -86,7 +86,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
   adminLogger.clientRequest({
     account: (auth.apiKey as any)?.user?.name || (auth.apiKey as any)?.user?.email || "User",
     role: clientUserRole,
-    balance: `${clientUserCredit} CR`,
+    balance: `${clientUserBalanceUsd} USD`,
     tier: userTier,
     subPath: reqPath,
     model: requestedModel,
@@ -111,7 +111,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
   // 4. Strict Public Validation: Only isPublic === true allowed (unless ADMIN)
   const isCombo = await isComboModel(requestedModel);
   let candidates: string[] = [];
-  let creditsCostPerImage = 500; // Default 500 credits per image generation
+  let costUsdPerImage = 0.005; // Default USD cost per image generation
 
   if (isCombo) {
     const combo = await findCombo(requestedModel);
@@ -129,8 +129,8 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
       );
     }
 
-    if (combo.costPerImage && combo.costPerImage > 0) {
-      creditsCostPerImage = combo.costPerImage;
+    if (Number(combo.imageCostUsd) > 0) {
+      costUsdPerImage = Number(combo.imageCostUsd);
     }
 
     const comboInfo = await resolveComboCandidates(requestedModel);
@@ -206,7 +206,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
 
         const latencyMs = Date.now() - upstreamStartTime;
 
-        // 1. Real-time token / credit deduction log
+        // 1. Real-time token / balance deduction log
         logRequest({
           apiKeyId,
           path: reqPath,
@@ -216,7 +216,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           promptTokens: Math.ceil(prompt.length / 4) || 20,
           completionTokens: 1000,
           totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
-          creditsCost: creditsCostPerImage,
+          costUsd: costUsdPerImage,
           durationMs: latencyMs,
         });
 
@@ -264,7 +264,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
 
         const latencyMs = Date.now() - upstreamStartTime;
 
-        // 1. Real-time token / credit deduction log
+        // 1. Real-time token / balance deduction log
         logRequest({
           apiKeyId,
           path: reqPath,
@@ -274,7 +274,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           promptTokens: Math.ceil(prompt.length / 4) || 20,
           completionTokens: 1000,
           totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
-          creditsCost: creditsCostPerImage,
+          costUsd: costUsdPerImage,
           durationMs: latencyMs,
         });
 
@@ -333,7 +333,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
       if (upstreamRes.ok) {
         const data = await upstreamRes.json();
 
-        // 1. Real-time token / credit deduction log
+        // 1. Real-time token / balance deduction log
         logRequest({
           apiKeyId,
           path: reqPath,
@@ -343,7 +343,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           promptTokens: Math.ceil(prompt.length / 4) || 20,
           completionTokens: 1000,
           totalTokens: (Math.ceil(prompt.length / 4) || 20) + 1000,
-          creditsCost: creditsCostPerImage,
+          costUsd: costUsdPerImage,
           durationMs: Date.now() - startTime,
         });
 
@@ -436,7 +436,7 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
     promptTokens: Math.ceil(prompt.length / 4) || 20,
     completionTokens: 0,
     totalTokens: Math.ceil(prompt.length / 4) || 20,
-    creditsCost: 0,
+    costUsd: 0,
     durationMs: Date.now() - startTime,
   });
 

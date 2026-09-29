@@ -14,11 +14,11 @@ export async function POST(req: NextRequest) {
       select: {
         id: true,
         email: true,
-        creditBalance: true,
+        balanceUsd: true,
         subscriptionTier: true,
         subscriptionExpiresAt: true,
-        monthlyCreditsAllocated: true,
-        monthlyCreditsRemaining: true,
+        monthlyBalanceAllocatedUsd: true,
+        monthlyBalanceRemainingUsd: true,
         bonusRescueClaimed: true,
       },
     });
@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const allocated = Number(dbUser.monthlyCreditsAllocated) || (tier === "PRO" ? 1200000 : 3500000);
-    const remaining = Number(dbUser.monthlyCreditsRemaining);
+    const allocated = Number(dbUser.monthlyBalanceAllocatedUsd) || (tier === "PRO" ? 6.1875 : 15.5625);
+    const remaining = Number(dbUser.monthlyBalanceRemainingUsd);
     const used = Math.max(0, allocated - remaining);
     const usageRatio = allocated > 0 ? used / allocated : 0;
 
@@ -68,27 +68,27 @@ export async function POST(req: NextRequest) {
 
     // Calculate bonus amount
     const bonusPercent = tier === "PRO" ? 30 : 50;
-    const bonusCredits = Math.round((allocated * bonusPercent) / 100);
+    const bonusBalanceUsd = Number(((allocated * bonusPercent) / 100).toFixed(2));
 
     const updated = await prisma.user.update({
       where: { id: dbUser.id },
       data: {
-        creditBalance: { increment: BigInt(bonusCredits) },
-        monthlyCreditsRemaining: { increment: BigInt(bonusCredits) },
+        balanceUsd: { increment: Number(bonusBalanceUsd) },
+        monthlyBalanceRemainingUsd: { increment: Number(bonusBalanceUsd) },
         bonusRescueClaimed: true,
       },
       select: {
-        creditBalance: true,
-        monthlyCreditsRemaining: true,
+        balanceUsd: true,
+        monthlyBalanceRemainingUsd: true,
         bonusRescueClaimed: true,
       },
     });
 
     return NextResponse.json({
       success: true,
-      message: `Selamat! Emergency Rescue Bonus +${bonusPercent}% (+${bonusCredits.toLocaleString()} Credits) berhasil disuntikkan ke akun Anda.`,
-      bonusCredits,
-      newBalance: Number(updated.creditBalance),
+      message: `Selamat! Emergency Rescue Bonus +${bonusPercent}% (+$${bonusBalanceUsd.toFixed(2)}) berhasil ditambahkan ke akun Anda.`,
+      bonusBalanceUsd,
+      newBalance: Number(updated.balanceUsd),
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

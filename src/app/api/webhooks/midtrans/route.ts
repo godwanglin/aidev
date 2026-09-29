@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     if (isSuccess) {
       const { settleOrder } = await import("@/lib/orders");
       await settleOrder(orderId, "MIDTRANS", paymentType);
-      return NextResponse.json({ success: true, message: "Payment settled and credits/subscription activated" });
+      return NextResponse.json({ success: true, message: "Payment settled and balance/subscription activated" });
     }
 
     if (transactionStatus === "cancel" || transactionStatus === "deny" || transactionStatus === "expire") {

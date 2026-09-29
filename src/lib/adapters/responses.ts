@@ -1736,7 +1736,7 @@ export async function transformChatResponseToResponses(
             promptTokens: promptTokens || params.logContext.estimatedPromptTokens || 0,
             completionTokens: 0,
             totalTokens: promptTokens || params.logContext.estimatedPromptTokens || 0,
-            creditsCost: 0,
+            costUsd: 0,
             durationMs: Date.now() - params.logContext.startTime,
           });
         }
@@ -2249,7 +2249,7 @@ export async function transformChatResponseToResponses(
           promptTokens: promptTokens || params.logContext.estimatedPromptTokens || 0,
           completionTokens: 0,
           totalTokens: promptTokens || params.logContext.estimatedPromptTokens || 0,
-          creditsCost: 0,
+          costUsd: 0,
           durationMs: Date.now() - params.logContext.startTime,
         });
       }

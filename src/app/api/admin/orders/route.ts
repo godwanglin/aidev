@@ -53,10 +53,10 @@ export async function GET(req: NextRequest) {
       where.method = method.toUpperCase();
     }
 
-    const validSortFields = ["createdAt", "priceIdr", "creditAmount"];
+    const validSortFields = ["createdAt", "priceIdr", "balanceAmountUsd"];
     const effectiveSortField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
 
-    const [orders, totalCount, totalAll, pendingCount, paidCount, revenueAgg, creditsAgg] =
+    const [orders, totalCount, totalAll, pendingCount, paidCount, revenueAgg, balanceAgg] =
       await Promise.all([
         prisma.order.findMany({
           where,
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
                 name: true,
                 role: true,
                 subscriptionTier: true,
-                creditBalance: true,
+                balanceUsd: true,
               },
             },
           },
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
         }),
         prisma.order.aggregate({
           where: { status: "PAID" },
-          _sum: { creditAmount: true },
+          _sum: { balanceAmountUsd: true },
         }),
       ]);
 
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
       orderId: o.orderId,
       userId: o.userId,
       tokenAmount: Number(o.tokenAmount),
-      creditAmount: Number(o.creditAmount),
+      balanceAmountUsd: Number(o.balanceAmountUsd),
       orderType: o.orderType,
       tierTarget: o.tierTarget,
       basePrice: o.basePrice,
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
             name: o.user.name,
             role: o.user.role,
             subscriptionTier: o.user.subscriptionTier,
-            creditBalance: Number(o.user.creditBalance),
+            balanceUsd: Number(o.user.balanceUsd),
           }
         : null,
     }));
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
         pendingOrders: pendingCount,
         paidOrders: paidCount,
         totalRevenueIdr: revenueAgg._sum.priceIdr || 0,
-        totalCreditsIssued: Number(creditsAgg._sum.creditAmount || 0),
+        totalBalanceUsdIssued: Number(balanceAgg._sum.balanceAmountUsd || 0),
       },
     });
   } catch (err: any) {
