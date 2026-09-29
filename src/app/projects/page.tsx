@@ -1,3 +1,6 @@
+"use client";
+
+import { useState, useMemo } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import { Pagination } from "@/components/Pagination";
@@ -23,6 +26,19 @@ const projectsData = [
 ];
 
 export default function ProjectsPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
+
+  const filtered = useMemo(() => {
+    return projectsData.filter((p) =>
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.env.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
   return (
     <DashboardShell>
       <div className="content">
@@ -32,7 +48,16 @@ export default function ProjectsPage() {
         >
           <div className="project-search-wrap">
             <Search size={13} strokeWidth={1.5} />
-            <input suppressHydrationWarning className="project-search" placeholder="Filter projects..." />
+            <input
+              suppressHydrationWarning
+              className="project-search"
+              placeholder="Filter projects..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
+            />
           </div>
           <button className="primary btn-inline">
             <Plus size={13} strokeWidth={2} />
@@ -56,7 +81,7 @@ export default function ProjectsPage() {
                 </tr>
               </thead>
               <tbody>
-                {projectsData.map((p) => {
+                {paged.map((p) => {
                   const Icon = p.icon;
                   return (
                     <tr key={p.name}>
@@ -88,12 +113,12 @@ export default function ProjectsPage() {
             </table>
           </div>
           <Pagination
-            page={1}
-            totalPages={2}
-            totalCount={12}
-            pageSize={8}
+            page={page}
+            totalPages={totalPages}
+            totalCount={filtered.length}
+            pageSize={pageSize}
             itemName="projects"
-            onPageChange={() => {}}
+            onPageChange={(newPage) => setPage(newPage)}
           />
         </article>
       </div>
