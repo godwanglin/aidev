@@ -78,6 +78,9 @@ const PROVIDER_INFO: Record<string, { label: string; color: string }> = {
   GROQ: { label: "Groq", color: "#f43f5e" },
   MISTRAL: { label: "Mistral AI", color: "#ec4899" },
   TOGETHER: { label: "Together AI", color: "#8b5cf6" },
+  CHATGPT_WEB: { label: "ChatGPT Web", color: "#10a37f" },
+  CHATGPT: { label: "ChatGPT Web", color: "#10a37f" },
+  GPTWEB: { label: "ChatGPT Web", color: "#10a37f" },
 };
 
 function getCanonicalProvider(provider: string): string {
@@ -87,6 +90,7 @@ function getCanonicalProvider(provider: string): string {
   if (p === "OLLAMA") return "OLLAMA_CLOUD";
   if (p === "ANTHROPIC") return "CLAUDE_CODE";
   if (p === "QWEN" || p === "DASHSCOPE") return "ALIBABA";
+  if (p === "CHATGPT" || p === "GPTWEB") return "CHATGPT_WEB";
   return p;
 }
 
@@ -657,12 +661,7 @@ export default function AdminCombosPage() {
                             </span>
                             {combo.type === "image" ? (
                               <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
-                                style={{
-                                  backgroundColor: "#f3e8ff",
-                                  color: "#7e22ce",
-                                  border: "1px solid #d8b4fe",
-                                }}
+                                className="combo-type-image inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
                                 title="Image Generation Model (/v1/images/generations)"
                               >
                                 <ImageIcon size={10} />
@@ -670,12 +669,7 @@ export default function AdminCombosPage() {
                               </span>
                             ) : (
                               <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
-                                style={{
-                                  backgroundColor: "#ecfdf5",
-                                  color: "#047857",
-                                  border: "1px solid #a7f3d0",
-                                }}
+                                className="combo-type-chat inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
                                 title="Chat / Text LLM (/v1/chat/completions)"
                               >
                                 <Zap size={10} />
@@ -709,12 +703,7 @@ export default function AdminCombosPage() {
                       <td>
                         {combo.strategy === "ROUND_ROBIN" ? (
                           <span
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
-                            style={{
-                              backgroundColor: "#e0f2fe",
-                              color: "#0369a1",
-                              border: "1px solid #bae6fd",
-                            }}
+                            className="combo-strategy-rr inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
                             title="Rotates sequentially per request to balance load and multiply quota"
                           >
                             <ArrowDownUp size={11} />
@@ -722,12 +711,7 @@ export default function AdminCombosPage() {
                           </span>
                         ) : (
                           <span
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
-                            style={{
-                              backgroundColor: "#fef3c7",
-                              color: "#92400e",
-                              border: "1px solid #fde68a",
-                            }}
+                            className="combo-strategy-fallback inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
                             title="Tries Tier 1 first; only falls back to Tier 2 upon 429/quota exhaustion"
                           >
                             <ShieldAlert size={11} />
@@ -747,7 +731,7 @@ export default function AdminCombosPage() {
                           </div>
                         ) : (
                           <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#1e293b" }}>
+                            <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--ink)" }}>
                               <Coins size={12} className="text-amber-500 shrink-0" />
                               <span>{combo.rateInPer1k ?? 25} In / {combo.rateOutPer1k ?? 100} Out</span>
                             </div>
@@ -766,6 +750,7 @@ export default function AdminCombosPage() {
                             return (
                               <div
                                 key={item.id || idx}
+                                className={`combo-model-chip ${isCooling ? "cooling" : ""}`}
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
@@ -774,20 +759,16 @@ export default function AdminCombosPage() {
                                   borderRadius: "6px",
                                   fontSize: "11px",
                                   fontFamily: "'JetBrains Mono', monospace",
-                                  backgroundColor: isCooling ? "#fef2f2" : "#f8fafc",
-                                  border: isCooling ? "1px solid #fca5a5" : "1px solid #e2e8f0",
-                                  color: isCooling ? "#991b1b" : "#334155",
                                   boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
                                 }}
                               >
                                 <span
+                                  className={combo.strategy === "ROUND_ROBIN" ? "combo-item-badge-rr" : "combo-item-badge-fallback"}
                                   style={{
                                     fontWeight: 700,
                                     fontSize: "9.5px",
                                     padding: "1px 5px",
                                     borderRadius: "4px",
-                                    backgroundColor: combo.strategy === "ROUND_ROBIN" ? "#e2e8f0" : "#dbeafe",
-                                    color: combo.strategy === "ROUND_ROBIN" ? "#475569" : "#1d4ed8",
                                   }}
                                 >
                                   {combo.strategy === "ROUND_ROBIN" ? `W:${item.weight}` : `T${item.priority}`}
@@ -872,15 +853,13 @@ export default function AdminCombosPage() {
                       <td>
                         <button
                           onClick={() => handleToggleActive(combo)}
+                          className={`combo-status-pill ${combo.isActive ? "active" : "disabled"}`}
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
                             gap: "5px",
                             padding: "3px 9px",
                             borderRadius: "999px",
-                            border: combo.isActive ? "1px solid #d1fae5" : "1px solid #e2e8f0",
-                            backgroundColor: combo.isActive ? "#ecfdf5" : "#f8fafc",
-                            color: combo.isActive ? "#065f46" : "#64748b",
                             fontSize: "11px",
                             fontWeight: 600,
                             cursor: "pointer",
@@ -956,7 +935,7 @@ export default function AdminCombosPage() {
               <form onSubmit={handleSubmit}>
                 {/* Model Category / Type Selector */}
                 <div className="form-group" style={{ marginBottom: "16px" }}>
-                  <label className="text-xs font-semibold" style={{ color: "#1e293b", marginBottom: "8px", display: "block" }}>
+                  <label className="text-xs font-semibold" style={{ color: "var(--ink)", marginBottom: "8px", display: "block" }}>
                     Model Category / Target Endpoint
                   </label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
@@ -968,8 +947,8 @@ export default function AdminCombosPage() {
                         gap: "10px",
                         padding: "10px 14px",
                         borderRadius: "8px",
-                        border: modelType === "chat" ? "2px solid #10b981" : "1px solid #e2e8f0",
-                        backgroundColor: modelType === "chat" ? "#f0fdf4" : "#ffffff",
+                        border: modelType === "chat" ? "2px solid #10b981" : "1px solid var(--line)",
+                        backgroundColor: modelType === "chat" ? "rgba(16, 185, 129, 0.12)" : "var(--card)",
                         cursor: "pointer",
                         transition: "all 0.15s ease",
                       }}
@@ -979,21 +958,21 @@ export default function AdminCombosPage() {
                           width: "32px",
                           height: "32px",
                           borderRadius: "6px",
-                          backgroundColor: modelType === "chat" ? "#dcfce7" : "#f1f5f9",
+                          backgroundColor: modelType === "chat" ? "rgba(16, 185, 129, 0.2)" : "var(--surface-hover)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: modelType === "chat" ? "#15803d" : "#64748b",
+                          color: modelType === "chat" ? "#10b981" : "var(--muted)",
                           flexShrink: 0,
                         }}
                       >
                         <Zap size={16} />
                       </div>
                       <div>
-                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "chat" ? "#166534" : "#1e293b" }}>
+                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "chat" ? "#10b981" : "var(--ink)" }}>
                           Chat / Text LLM
                         </div>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                        <div style={{ fontSize: "11px", color: "var(--muted)" }}>
                           /v1/chat/completions (per-token rate)
                         </div>
                       </div>
@@ -1007,8 +986,8 @@ export default function AdminCombosPage() {
                         gap: "10px",
                         padding: "10px 14px",
                         borderRadius: "8px",
-                        border: modelType === "image" ? "2px solid #a855f7" : "1px solid #e2e8f0",
-                        backgroundColor: modelType === "image" ? "#faf5ff" : "#ffffff",
+                        border: modelType === "image" ? "2px solid #a855f7" : "1px solid var(--line)",
+                        backgroundColor: modelType === "image" ? "rgba(168, 85, 247, 0.12)" : "var(--card)",
                         cursor: "pointer",
                         transition: "all 0.15s ease",
                       }}
@@ -1018,21 +997,21 @@ export default function AdminCombosPage() {
                           width: "32px",
                           height: "32px",
                           borderRadius: "6px",
-                          backgroundColor: modelType === "image" ? "#f3e8ff" : "#f1f5f9",
+                          backgroundColor: modelType === "image" ? "rgba(168, 85, 247, 0.2)" : "var(--surface-hover)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: modelType === "image" ? "#7e22ce" : "#64748b",
+                          color: modelType === "image" ? "#a855f7" : "var(--muted)",
                           flexShrink: 0,
                         }}
                       >
                         <ImageIcon size={16} />
                       </div>
                       <div>
-                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "image" ? "#6b21a8" : "#1e293b" }}>
+                        <div style={{ fontSize: "12.5px", fontWeight: 600, color: modelType === "image" ? "#a855f7" : "var(--ink)" }}>
                           Image Generation
                         </div>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                        <div style={{ fontSize: "11px", color: "var(--muted)" }}>
                           /v1/images/generations (fixed per image)
                         </div>
                       </div>
@@ -1127,9 +1106,9 @@ export default function AdminCombosPage() {
 
                 {/* Credit Consumption Pricing */}
                 {modelType === "image" ? (
-                  <div style={{ background: "#faf5ff", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e9d5ff", marginBottom: "14px" }}>
+                  <div className="combo-pricing-box" style={{ padding: "12px 14px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)", marginBottom: "14px" }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#6b21a8", marginBottom: "6px" }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#a855f7", marginBottom: "6px" }}>
                         <ImageIcon size={13} className="text-purple-600 shrink-0" />
                         <span>Cost Per Image (Credits)</span>
                       </label>
@@ -1143,15 +1122,15 @@ export default function AdminCombosPage() {
                         placeholder="e.g. 500"
                         required
                       />
-                      <p className="text-[11px] text-purple-700" style={{ marginTop: "4px" }}>
+                      <p className="text-[11px] text-muted" style={{ marginTop: "4px" }}>
                         Biaya kredit flat per generate gambar (default 500 CR = Rp 500). Bebas dari billing rate token input/output.
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", background: "#f8fafc", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "14px" }}>
+                  <div className="combo-pricing-box" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", padding: "12px 14px", borderRadius: "8px", border: "1px solid var(--line)", marginBottom: "14px" }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "var(--ink)", marginBottom: "6px" }}>
                         <Coins size={12} className="text-amber-500 shrink-0" />
                         <span>Input Rate (Credits / 1k tokens)</span>
                       </label>
@@ -1171,7 +1150,7 @@ export default function AdminCombosPage() {
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "#1e293b", marginBottom: "6px" }}>
+                      <label className="flex items-center gap-1.5 font-semibold text-xs" style={{ color: "var(--ink)", marginBottom: "6px" }}>
                         <Coins size={12} className="text-amber-500 shrink-0" />
                         <span>Output Rate (Credits / 1k tokens)</span>
                       </label>
@@ -1259,13 +1238,12 @@ export default function AdminCombosPage() {
 
                   {/* Grouped Model Picker (Visual Chips by Provider) */}
                   <div
+                    className="combo-picker-box"
                     style={{
-                      border: "1px solid var(--line)",
                       borderRadius: "var(--radius-md)",
                       padding: "12px",
                       maxHeight: "260px",
                       overflowY: "auto",
-                      backgroundColor: "#f8fafc",
                       marginBottom: "8px",
                     }}
                   >
@@ -1340,7 +1318,7 @@ export default function AdminCombosPage() {
                                 style={{
                                   fontSize: "11.5px",
                                   fontWeight: 700,
-                                  color: "#334155",
+                                  color: "var(--ink)",
                                 }}
                               >
                                 {info.label}
@@ -1383,6 +1361,7 @@ export default function AdminCombosPage() {
                                         ]);
                                       }
                                     }}
+                                    className={`combo-picker-btn ${isSelected ? "selected" : ""}`}
                                     style={{
                                       display: "inline-flex",
                                       alignItems: "center",
@@ -1392,13 +1371,6 @@ export default function AdminCombosPage() {
                                       fontSize: "11.5px",
                                       fontWeight: 500,
                                       cursor: "pointer",
-                                      border: isSelected
-                                        ? "1.5px solid #3b82f6"
-                                        : "1px solid #e2e8f0",
-                                      background: isSelected
-                                        ? "#eff6ff"
-                                        : "#ffffff",
-                                      color: isSelected ? "#1d4ed8" : "#334155",
                                       transition: "all 0.12s ease",
                                     }}
                                     title={`${m.name} (${m.modelId})`}
@@ -1453,19 +1425,18 @@ export default function AdminCombosPage() {
                       }}
                     >
                       <div
+                        className="combo-selected-header"
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
                           alignItems: "center",
                           padding: "8px 12px",
-                          backgroundColor: "#f1f5f9",
-                          borderBottom: "1px solid var(--line)",
                         }}
                       >
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "#475569" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-soft)" }}>
                           {strategy === "FALLBACK" ? "PRIORITY ORDER (Tier 1 → Tier N)" : "ROTATION ORDER"}
                         </span>
-                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>
+                        <span style={{ fontSize: "10px", color: "var(--muted)" }}>
                           Drag order determines {strategy === "FALLBACK" ? "priority" : "rotation sequence"}
                         </span>
                       </div>
@@ -1473,33 +1444,32 @@ export default function AdminCombosPage() {
                       {selectedItems.map((it, idx) => (
                         <div
                           key={it.modelId}
+                          className="combo-selected-row"
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
                             padding: "8px 12px",
-                            borderBottom: idx < selectedItems.length - 1 ? "1px solid #f1f5f9" : "none",
-                            backgroundColor: "#ffffff",
+                            borderBottom: idx < selectedItems.length - 1 ? "1px solid var(--line)" : "none",
                             fontSize: "12px",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <span
+                              className={strategy === "ROUND_ROBIN" ? "combo-item-badge-rr" : "combo-item-badge-fallback"}
                               style={{
                                 display: "inline-block",
                                 padding: "2px 8px",
                                 borderRadius: "4px",
                                 fontSize: "10px",
                                 fontWeight: 700,
-                                backgroundColor: strategy === "ROUND_ROBIN" ? "#e2e8f0" : "#dbeafe",
-                                color: strategy === "ROUND_ROBIN" ? "#475569" : "#1d4ed8",
                                 minWidth: "42px",
                                 textAlign: "center",
                               }}
                             >
                               {strategy === "ROUND_ROBIN" ? `W:${it.weight}` : `Tier ${it.priority}`}
                             </span>
-                            <span className="mono" style={{ fontWeight: 500, color: "#334155" }}>
+                            <span className="mono" style={{ fontWeight: 500, color: "var(--ink)" }}>
                               {it.modelId}
                             </span>
                           </div>

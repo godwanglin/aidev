@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { maskApiKey, decryptCredential, encryptCredential } from "@/lib/crypto";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
+import { parseCookieInput, verifyAndFetchChatGptSession } from "@/lib/web-providers/chatgpt-session";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -23,7 +24,11 @@ export async function GET(req: NextRequest) {
       if (conn.apiKeyEncrypted) {
         try {
           const decrypted = decryptCredential(conn.apiKeyEncrypted);
-          maskedApiKey = maskApiKey(decrypted);
+          if (conn.authType === "COOKIE") {
+            maskedApiKey = "Cookie Session (Active)";
+          } else {
+            maskedApiKey = maskApiKey(decrypted);
+          }
         } catch (e) {
           maskedApiKey = "****ERROR****";
         }
@@ -89,7 +94,39 @@ export async function POST(req: NextRequest) {
     }
 
     let apiKeyEncrypted = null;
-    if (apiKey) {
+    let accessTokenEnc = null;
+    let tokenExpiresAt = null;
+    let finalAccountEmail = accountEmail;
+
+    // Special verification and handling for COOKIE authType / CHATGPT_WEB
+    if (authType === "COOKIE" || providerKey === "CHATGPT_WEB") {
+      if (!apiKey || !apiKey.trim()) {
+        return NextResponse.json({ error: "Cookie akun wajib diisi." }, { status: 400 });
+      }
+
+      const parsed = parseCookieInput(apiKey);
+      if (!parsed.cookieString) {
+        return NextResponse.json({ error: "Format cookie tidak valid." }, { status: 400 });
+      }
+
+      // Live verify session with chatgpt.com
+      const sessionResult = await verifyAndFetchChatGptSession(parsed.cookieString);
+      if (!sessionResult.success || !sessionResult.accessToken) {
+        return NextResponse.json(
+          { error: sessionResult.error || "Gagal memverifikasi sesi cookie ChatGPT." },
+          { status: 400 }
+        );
+      }
+
+      apiKeyEncrypted = encryptCredential(parsed.cookieString);
+      accessTokenEnc = encryptCredential(sessionResult.accessToken);
+      if (sessionResult.expires) {
+        tokenExpiresAt = new Date(sessionResult.expires);
+      }
+      if (sessionResult.user?.email) {
+        finalAccountEmail = sessionResult.user.email;
+      }
+    } else if (apiKey) {
       apiKeyEncrypted = encryptCredential(apiKey);
     }
 
@@ -97,12 +134,14 @@ export async function POST(req: NextRequest) {
       data: {
         provider: providerKey,
         name: name?.trim() || `${catalogItem?.name || providerKey} Account`,
-        authType,
+        authType: authType === "COOKIE" ? "COOKIE" : authType,
         apiKeyEncrypted,
+        accessTokenEnc,
+        tokenExpiresAt,
         baseUrl: effectiveBaseUrl,
         compatibility: compatibility || "OPENAI",
         customHeaders,
-        accountEmail,
+        accountEmail: finalAccountEmail,
         priority: Number(priority) || 1,
         weight: Number(weight) || 1,
         syncStatus: 'NORMAL'

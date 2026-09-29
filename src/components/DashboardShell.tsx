@@ -12,7 +12,6 @@ import {
   CreditCard,
   Settings,
   Search,
-  Bell,
   Rocket,
   User,
   LogOut,
@@ -32,6 +31,8 @@ import {
   Receipt,
   Menu,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 const searchableItems = [
@@ -69,6 +70,37 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    try {
+      const current = document.documentElement.getAttribute("data-theme") as "light" | "dark";
+      if (current === "dark" || current === "light") {
+        setTheme(current);
+      } else {
+        const saved = localStorage.getItem("aidev_theme") as "light" | "dark" | null;
+        if (saved) {
+          setTheme(saved);
+        } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          setTheme("dark");
+        }
+      }
+    } catch {}
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem("aidev_theme", next);
+      document.documentElement.setAttribute("data-theme", next);
+      if (next === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    } catch {}
+  };
 
   // Auto-close mobile drawer when pathname changes
   useEffect(() => {
@@ -448,9 +480,21 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
               </Link>
             )}
 
-            <button className="icon-btn desktop-only" aria-label="Notifications" title="Notifications">
-              <Bell size={14} strokeWidth={1.5} />
+            {/* Theme Toggle Button */}
+            <button
+              type="button"
+              className="icon-btn desktop-only"
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Mode Terang (Light)" : "Mode Gelap (Dark)"}
+              title={theme === "dark" ? "Ganti ke Mode Terang (Light)" : "Ganti ke Mode Gelap (Dark)"}
+            >
+              {theme === "dark" ? (
+                <Sun size={15} className="text-amber-400" />
+              ) : (
+                <Moon size={15} />
+              )}
             </button>
+
             <Link href="/keys" className="deploy desktop-only">
               <Rocket size={13} strokeWidth={1.75} />
               <span>Get API Key</span>
@@ -632,6 +676,23 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
               </div>
 
               <div className="mobile-drawer-footer">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="mobile-drawer-theme-btn"
+                >
+                  {theme === "dark" ? (
+                    <>
+                      <Sun size={15} className="text-amber-400" />
+                      <span>Mode Terang (Light)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Moon size={15} />
+                      <span>Mode Gelap (Dark)</span>
+                    </>
+                  )}
+                </button>
                 <button type="button" onClick={handleLogout} className="mobile-drawer-logout-btn">
                   <LogOut size={14} />
                   <span>Sign Out / Keluar</span>

@@ -65,6 +65,13 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     defaultUpstreamModel: "gpt-5.5",
   },
   {
+    prefix: "gptweb/",
+    providerId: "CHATGPT_WEB",
+    providerName: "ChatGPT Web",
+    aliases: ["chatgpt-web/", "chatgpt/", "cw/"],
+    defaultUpstreamModel: "auto",
+  },
+  {
     prefix: "cc/",
     providerId: "CLAUDE_CODE",
     providerName: "Claude Code",

@@ -16,6 +16,7 @@ import {
   Layers,
   KeyRound,
   Sparkles,
+  Globe,
 } from "lucide-react";
 import { FULL_PROVIDER_CATALOG, CatalogProviderItem } from "@/lib/oauth/config";
 import { renderProviderIcon, ProviderAvatar } from "@/components/providers/ProviderIcons";
@@ -44,7 +45,7 @@ export default function ProvidersCatalogPage() {
   const [success, setSuccess] = useState("");
 
   // Category filter
-  const [filterView, setFilterView] = useState<"ALL" | "CUSTOM" | "OAUTH" | "FREE_TIER">("ALL");
+  const [filterView, setFilterView] = useState<"ALL" | "CUSTOM" | "WEB" | "OAUTH" | "FREE_TIER">("ALL");
 
   // Custom Provider Modal
   const [showCustomModal, setShowCustomModal] = useState(false);
@@ -108,6 +109,11 @@ export default function ProvidersCatalogPage() {
   }, [connections]);
 
   // Partition Catalog Items
+  const webItems = useMemo(
+    () => FULL_PROVIDER_CATALOG.filter((item) => item.category === "WEB"),
+    []
+  );
+
   const oauthItems = useMemo(
     () => FULL_PROVIDER_CATALOG.filter((item) => item.category === "OAUTH"),
     []
@@ -233,6 +239,16 @@ export default function ProvidersCatalogPage() {
               {customProviders.length > 0 && (
                 <span className="segmented-nav-badge">{customProviders.length}</span>
               )}
+            </button>
+            <button
+              className={`segmented-nav-btn ${filterView === "WEB" ? "active" : ""}`}
+              onClick={() => setFilterView("WEB")}
+            >
+              <Globe size={13} strokeWidth={1.75} />
+              <span>Web Providers</span>
+              <span className="segmented-nav-badge" style={{ background: "#f59e0b", color: "#fff" }}>
+                LEGACY
+              </span>
             </button>
             <button
               className={`segmented-nav-btn ${filterView === "OAUTH" ? "active" : ""}`}
@@ -362,6 +378,82 @@ export default function ProvidersCatalogPage() {
                     );
                   })
                 )}
+              </div>
+            </section>
+          )}
+
+          {/* ===================================================================
+              CATEGORY: Web Providers (Cookie Session - LEGACY)
+              =================================================================== */}
+          {(filterView === "ALL" || filterView === "WEB") && (
+            <section className="hub-category-section">
+              <div className="hub-category-header">
+                <div className="flex items-center gap-2">
+                  <h3 className="hub-category-title">Web Providers</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                    LEGACY
+                  </span>
+                </div>
+              </div>
+
+              <div className="catalog-cards-grid">
+                {webItems.map((item) => {
+                  const conns =
+                    connectionsByProvider.get(item.id) ||
+                    connectionsByProvider.get("CHATGPT_WEB") ||
+                    connectionsByProvider.get("CHATGPT") ||
+                    [];
+                  const count = conns.length;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`provider-catalog-card cursor-pointer ${
+                        count > 0 ? "has-connections" : ""
+                      }`}
+                      onClick={() => navigateToProvider(item.slug)}
+                    >
+                      <div className="card-left-info">
+                        <ProviderAvatar
+                          slugOrId={item.slug}
+                          name={item.name}
+                          iconName={item.iconName}
+                          brandColor={item.color}
+                          size={32}
+                          imgSize={20}
+                        />
+                        <div className="provider-card-text">
+                          <div className="flex items-center gap-1.5">
+                            <span className="provider-card-name">{item.name}</span>
+                            <span className="text-[9.5px] font-medium px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-600">
+                              Cookie
+                            </span>
+                          </div>
+                          {count > 0 ? (
+                            <span className="provider-card-status connected">
+                              <span className="status-dot-indicator" />
+                              <span>{count} Connected</span>
+                            </span>
+                          ) : (
+                            <span className="provider-card-status none">
+                              No connections
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {count > 0 ? (
+                        <span className="text-muted text-[10.5px] font-semibold">
+                          Manage
+                        </span>
+                      ) : (
+                        <span className="text-blue text-[10.5px] font-semibold">
+                          + Connect
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}

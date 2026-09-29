@@ -784,25 +784,17 @@ export default function AdminQuotaTrackerPage() {
                                 <span className="quota-bucket-name">{quota.name}</span>
                               </div>
                               <div className="quota-bucket-right">
-                                <span
-                                  className="quota-pct-pill mono"
-                                  style={{
-                                    backgroundColor:
-                                      (isOllamaFree ? usedPct <= 50 : pct > 40)
-                                        ? "#ecfdf5"
-                                        : (isOllamaFree ? usedPct <= 80 : pct > 15)
-                                        ? "#fffbeb"
-                                        : "#fef2f2",
-                                    color:
-                                      (isOllamaFree ? usedPct <= 50 : pct > 40)
-                                        ? "#065f46"
-                                        : (isOllamaFree ? usedPct <= 80 : pct > 15)
-                                        ? "#92400e"
-                                        : "#991b1b",
-                                  }}
-                                >
-                                  {isOllamaFree ? `${usedPct}% used` : `${pct.toFixed(0)}%`}
-                                </span>
+                                {(() => {
+                                  const isGood = isOllamaFree ? usedPct <= 50 : pct > 40;
+                                  const isWarn = isOllamaFree ? usedPct <= 80 : pct > 15;
+                                  const pctClass = isGood ? "pct-good" : isWarn ? "pct-warn" : "pct-bad";
+
+                                  return (
+                                    <span className={`quota-pct-pill mono ${pctClass}`}>
+                                      {isOllamaFree ? `${usedPct}% used` : `${pct.toFixed(0)}%`}
+                                    </span>
+                                  );
+                                })()}
                                 {quota.resetHuman && (
                                   <span
                                     className="quota-reset-countdown mono"
@@ -853,20 +845,20 @@ export default function AdminQuotaTrackerPage() {
 
                     <div className="quota-footer-badges">
                       <span
-                        className="text-[10.5px] px-1.5 py-0.5 rounded font-medium"
-                        style={{
-                          backgroundColor: card.authType === "OAUTH" ? "#eff6ff" : "#f1f5f9",
-                          color: card.authType === "OAUTH" ? "#1d4ed8" : "#475569",
-                        }}
+                        className={`text-[10.5px] px-1.5 py-0.5 rounded font-medium ${
+                          card.authType === "OAUTH"
+                            ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 dark:border dark:border-blue-800/40"
+                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border dark:border-slate-700/50"
+                        }`}
                       >
                         {card.authType}
                       </span>
                       <span
-                        className="text-[10.5px] px-1.5 py-0.5 rounded font-medium"
-                        style={{
-                          backgroundColor: card.isActive ? "#ecfdf5" : "#f1f5f9",
-                          color: card.isActive ? "#065f46" : "#64748b",
-                        }}
+                        className={`text-[10.5px] px-1.5 py-0.5 rounded font-medium ${
+                          card.isActive
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border dark:border-emerald-800/40"
+                            : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 dark:border dark:border-slate-700/50"
+                        }`}
                       >
                         {card.isActive ? "Active" : "Inactive"}
                       </span>

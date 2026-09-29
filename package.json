@@ -22,6 +22,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "latest",
     "@types/qrcode": "^1.5.6",
     "@types/react": "latest",
@@ -29,6 +30,8 @@
     "eslint": "latest",
     "eslint-config-next": "latest",
     "openai": "^7.9.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
     "typescript": "latest"
   }
 }

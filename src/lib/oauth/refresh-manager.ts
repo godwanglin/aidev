@@ -67,7 +67,7 @@ async function callUpstreamRefreshToken(
 
   // 1. Anthropic / Claude Code (JSON payload, PKCE client without secret)
   if (p === "CLAUDE_CODE" || p === "CLAUDE" || p === "ANTHROPIC") {
-    const res = await fetch(config.tokenUrl || "https://claude.ai/oauth/token", {
+    const res = await fetch(config.tokenUrl || "https://platform.claude.com/v1/oauth/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -76,7 +76,7 @@ async function callUpstreamRefreshToken(
       body: JSON.stringify({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
-        client_id: config.defaultClientId || "claude-code-client",
+        client_id: config.defaultClientId || "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
       }),
     });
 

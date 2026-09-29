@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { decryptCredential } from "@/lib/crypto";
+import { decryptCredential, encryptCredential } from "@/lib/crypto";
 import { refreshOAuthToken } from "@/lib/oauth/service";
+import { verifyAndFetchChatGptSession } from "@/lib/web-providers/chatgpt-session";
 
 export interface SyncResult {
   connectionId: string;
@@ -33,6 +34,8 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
   let quotaUsedTokens = connection.quotaUsedTokens;
   let quotaRemainingUsd = connection.quotaRemainingUsd ? Number(connection.quotaRemainingUsd) : null;
   let errorMsg: string | undefined;
+  let newAccessTokenEnc: string | undefined;
+  let newTokenExpiresAt: Date | undefined;
 
   const startTime = Date.now();
 
@@ -40,6 +43,31 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
     const providerUpper = connection.provider.toUpperCase();
 
     switch (providerUpper) {
+      case "CHATGPT_WEB":
+      case "CHATGPT": {
+        const cookieString = connection.apiKeyEncrypted ? decryptCredential(connection.apiKeyEncrypted) : "";
+        if (cookieString) {
+          const sessionResult = await verifyAndFetchChatGptSession(cookieString);
+          if (sessionResult.success && sessionResult.accessToken) {
+            status = "NORMAL";
+            if (sessionResult.user?.email) {
+              accountEmail = sessionResult.user.email;
+            }
+            newAccessTokenEnc = encryptCredential(sessionResult.accessToken);
+            if (sessionResult.expires) {
+              newTokenExpiresAt = new Date(sessionResult.expires);
+            }
+          } else {
+            status = "ERROR";
+            errorMsg = sessionResult.error || "Gagal refresh session token dari cookie";
+          }
+        } else {
+          status = "ERROR";
+          errorMsg = "Cookie tidak ditemukan";
+        }
+        break;
+      }
+
       case "ANTIGRAVITY": {
         let token = connection.accessTokenEnc ? decryptCredential(connection.accessTokenEnc) : "";
         if (!token && connection.refreshTokenEnc) {
@@ -171,11 +199,16 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
         }
         if (token) {
           try {
+            const authHeaders: Record<string, string> = {
+              "anthropic-version": "2023-06-01",
+            };
+            if (token.startsWith("sk-ant-oat")) {
+              authHeaders["Authorization"] = `Bearer ${token}`;
+            } else {
+              authHeaders["x-api-key"] = token;
+            }
             const res = await fetch("https://api.anthropic.com/v1/models", {
-              headers: {
-                "x-api-key": token,
-                "anthropic-version": "2023-06-01",
-              },
+              headers: authHeaders,
             });
             if (res.status === 200 || res.status === 404) {
               status = "NORMAL";
@@ -367,6 +400,8 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
       accountEmail: accountEmail || connection.accountEmail,
       quotaRemainingUsd: quotaRemainingUsd !== null ? quotaRemainingUsd : connection.quotaRemainingUsd,
       lastSyncedAt: new Date(),
+      ...(newAccessTokenEnc ? { accessTokenEnc: newAccessTokenEnc } : {}),
+      ...(newTokenExpiresAt ? { tokenExpiresAt: newTokenExpiresAt } : {}),
     },
   });
 

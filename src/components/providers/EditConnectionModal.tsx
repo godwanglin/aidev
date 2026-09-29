@@ -7,7 +7,7 @@ export interface ConnectionItem {
   id: string;
   provider: string;
   name: string;
-  authType?: "API_KEY" | "OAUTH";
+  authType?: "API_KEY" | "OAUTH" | "COOKIE";
   accountEmail?: string | null;
   maskedApiKey?: string | null;
   apiKey?: string;

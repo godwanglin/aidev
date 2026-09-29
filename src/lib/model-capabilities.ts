@@ -34,6 +34,11 @@ export function getModelCapabilities(modelId: string, provider: string): {
     maxOutput = 128000;
     reasoning = true;
     ownedBy = "openai_codex";
+  } else if (lower.startsWith("gptweb/") || lower.includes("chatgpt")) {
+    contextWindow = 128000;
+    maxOutput = 16384;
+    reasoning = lower.includes("o1") || lower.includes("o3");
+    ownedBy = "chatgpt_web";
   } else if (lower.includes("claude")) {
     contextWindow = 200000;
     maxOutput = 64000;

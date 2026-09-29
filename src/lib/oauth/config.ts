@@ -21,9 +21,13 @@ export const OAUTH_PROVIDERS: Record<string, ProviderOAuthConfig> = {
     provider: "CLAUDE_CODE",
     category: "OAUTH",
     authorizeUrl: "https://claude.ai/oauth/authorize",
-    tokenUrl: "https://claude.ai/oauth/token",
-    defaultClientId: process.env.CLAUDE_OAUTH_CLIENT_ID || "claude-code-client",
-    scopes: ["openid", "profile", "email", "offline_access"],
+    tokenUrl: "https://platform.claude.com/v1/oauth/token",
+    defaultClientId: process.env.CLAUDE_OAUTH_CLIENT_ID || "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    fixedRedirectUri: "http://localhost:443/callback",
+    extraAuthorizeParams: {
+      code: "true",
+    },
+    scopes: ["org:create_api_key", "user:profile", "user:inference"],
     usePkce: true,
     color: "#d97706",
   },
@@ -144,11 +148,11 @@ export interface CatalogProviderItem {
   id: string;
   name: string;
   slug: string;
-  category: "CUSTOM" | "OAUTH" | "API_KEY" | "FREE_TIER";
+  category: "CUSTOM" | "OAUTH" | "API_KEY" | "FREE_TIER" | "WEB";
   color: string;
   iconName: string;
   description?: string;
-  authType: "API_KEY" | "OAUTH";
+  authType: "API_KEY" | "OAUTH" | "COOKIE";
   baseUrl?: string;
   defaultPrefix?: string;
   readyByDefault?: boolean;
@@ -156,6 +160,20 @@ export interface CatalogProviderItem {
 
 // Full 9Router Catalog Definition with dynamic route slugs
 export const FULL_PROVIDER_CATALOG: CatalogProviderItem[] = [
+  // --- Web Providers (Cookie Session - LEGACY) ---
+  {
+    id: "CHATGPT_WEB",
+    name: "ChatGPT Web",
+    slug: "chatgpt",
+    category: "WEB",
+    color: "#10a37f",
+    iconName: "Bot",
+    authType: "COOKIE",
+    description: "Akses akun ChatGPT Web via cookie session browser (Legacy / Chat Only).",
+    baseUrl: "https://chatgpt.com/backend-api",
+    defaultPrefix: "gptweb/",
+  },
+
   // --- OAuth Providers ---
   { id: "CLAUDE_CODE", name: "Claude Code", slug: "claude", category: "OAUTH", color: "#d97706", iconName: "Sparkles", authType: "OAUTH" },
   { id: "ANTIGRAVITY", name: "Antigravity", slug: "antigravity", category: "OAUTH", color: "#4285f4", iconName: "Rocket", authType: "OAUTH" },
@@ -317,12 +335,26 @@ export function findProviderBySlugOrId(slugOrId: string): CatalogProviderItem | 
   if (norm === "copilot" || norm === "githubcopilot" || norm === "github") {
     return FULL_PROVIDER_CATALOG.find((p) => p.id === "GITHUB_COPILOT") || null;
   }
+  if (norm === "chatgpt" || norm === "chatgptweb" || norm === "gptweb") {
+    return FULL_PROVIDER_CATALOG.find((p) => p.id === "CHATGPT_WEB") || null;
+  }
 
   return null;
 }
 
 // Shared Models Map across 9Router Providers with standardized prefixes
 export const SHARED_PROVIDER_MODELS: Record<string, { id: string; name: string }[]> = {
+  CHATGPT_WEB: [
+    { id: "gptweb/auto", name: "Auto" },
+    { id: "gptweb/gpt-5-5", name: "GPT 5.5" },
+    { id: "gptweb/gpt-5-6", name: "GPT 5.6 Luna" },
+    { id: "gptweb/gpt-5-3-mini", name: "GPT 5.3 Mini" },
+    { id: "gptweb/gpt-5-5-mini", name: "GPT 5.5 Mini" },
+    { id: "gptweb/gpt-5-6-mini", name: "GPT 5.6 Mini" },
+    { id: "gptweb/gpt-5-4-t-mini", name: "GPT 5.4 Thinking Mini" },
+    { id: "gptweb/gpt-5-6-t-mini", name: "GPT 5.6 Thinking Mini" },
+    { id: "gptweb/research", name: "Deep Research" },
+  ],
   OPENAI_CODEX: [
     { id: "cx/gpt-5.5", name: "GPT 5.5" },
     { id: "cx/gpt-5.5-review", name: "GPT 5.5 Review" },

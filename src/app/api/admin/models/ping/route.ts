@@ -86,15 +86,45 @@ export async function POST(req: NextRequest) {
           if (accountId) headers["ChatGPT-Account-Id"] = accountId;
         } catch {}
       }
+    } else if (providerName === "CHATGPT_WEB" || providerName === "CHATGPT") {
+      pingUrl = "https://chatgpt.com/backend-api/models";
+      headers["Authorization"] = `Bearer ${targetKey}`;
+      headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
+      headers["Accept"] = "application/json";
+      headers["Referer"] = "https://chatgpt.com/";
+      if (route.cookieString) {
+        headers["Cookie"] = route.cookieString;
+      }
     } else {
       if (targetKey) headers["Authorization"] = `Bearer ${targetKey}`;
     }
 
     try {
-      const res = await fetch(pingUrl, { headers });
+      let res = await fetch(pingUrl, { headers });
       const latencyMs = Date.now() - start;
 
-      const isHealthy = res.ok;
+      let isHealthy = res.ok;
+
+      // Fallback check for CHATGPT_WEB via /api/auth/session if /backend-api/models failed
+      if (!isHealthy && (providerName === "CHATGPT_WEB" || providerName === "CHATGPT") && route.cookieString) {
+        try {
+          const authRes = await fetch("https://chatgpt.com/api/auth/session", {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+              "Accept": "*/*",
+              "Referer": "https://chatgpt.com/",
+              "Cookie": route.cookieString,
+            },
+          });
+          if (authRes.ok) {
+            const authData = await authRes.json();
+            if (authData?.accessToken) {
+              isHealthy = true;
+            }
+          }
+        } catch {}
+      }
+
       const status = isHealthy
         ? "HEALTHY"
         : res.status === 429
@@ -104,7 +134,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: isHealthy,
         latencyMs,
-        statusCode: res.status,
+        statusCode: isHealthy ? (res.ok ? res.status : 200) : res.status,
         provider: providerName,
         connectionName,
         status,

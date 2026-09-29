@@ -7,6 +7,7 @@ import { adminLogger, extractProviderErrorMessage } from "@/lib/admin-logger";
 import { normalizeRequestBody } from "@/lib/model-normalizer";
 import { isAntigravityProvider, dispatchAntigravityChat } from "@/lib/adapters/antigravity";
 import { isCodexProvider, dispatchCodexChat, dispatchCodexResponsesDirect } from "@/lib/adapters/codex";
+import { isChatGptWebProvider, dispatchChatGptWebChat } from "@/lib/adapters/chatgpt-web";
 import { convertAnthropicToOpenAiMessages, transformChatResponseToAnthropic } from "@/lib/adapters/anthropic";
 import {
   convertResponsesToChatMessages,
@@ -495,7 +496,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
     if (subPath === "messages" && (activeProvider === "ANTHROPIC" || activeProvider === "CLAUDE_CODE") && targetKey) {
       try {
         const forwardHeaders = new Headers();
-        forwardHeaders.set("x-api-key", targetKey);
+        if (targetKey.startsWith("sk-ant-oat")) {
+          forwardHeaders.set("Authorization", `Bearer ${targetKey}`);
+        } else {
+          forwardHeaders.set("x-api-key", targetKey);
+        }
         forwardHeaders.set("anthropic-version", "2023-06-01");
         forwardHeaders.set("Content-Type", "application/json");
 
@@ -724,6 +729,95 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
         adminLogger.error({
           message: `Antigravity error: ${err.message}`,
+          durationMs: Date.now() - startTime,
+          model: clientRequestedModel,
+          upstreamModel: candidateModel,
+          account: userEmail,
+        });
+        throw err;
+      }
+    }
+
+    // Provider Dispatch 3b: ChatGPT Web (Cookie Session - LEGACY)
+    if (isChatGptWebProvider(activeProvider, resolvedRoute?.authType)) {
+      try {
+        const response = await dispatchChatGptWebChat({
+          rawBody: candidateChatBody || "{}",
+          parsedBody: parsedCandidateJson,
+          accessToken: targetKey,
+          cookieString: resolvedRoute?.cookieString || "",
+          connectionId: activeConnectionId || "",
+          model: candidateModel || "auto",
+          clientRequestedModel,
+          upstreamLogModel,
+          clientApiKeyId: apiKeyId,
+          clientUserId,
+          reqPath,
+          clientWantsStream,
+          tokensSavedRtk,
+        });
+
+        if ((response.status === 429 || response.status >= 500) && !isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `ChatGPT Web returned HTTP ${response.status}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+
+        if (!response.ok) {
+          logRequest({
+            apiKeyId,
+            path: reqPath,
+            method: "POST",
+            statusCode: response.status,
+            model: clientRequestedModel,
+            promptTokens: estimatedPromptTokens || 15,
+            completionTokens: 0,
+            totalTokens: estimatedPromptTokens || 15,
+            creditsCost: 0,
+            durationMs: Date.now() - startTime,
+          });
+          return response;
+        }
+
+        if (subPath === "messages") {
+          return await transformChatResponseToAnthropic(response, { model: clientRequestedModel, clientWantsStream });
+        } else if (subPath === "responses") {
+          return await transformChatResponseToResponses(response, {
+            model: clientRequestedModel,
+            upstreamModel: candidateModel,
+            provider: activeProvider,
+            clientWantsStream,
+            customToolNames,
+            hasTools: Boolean(parsedCandidateJson?.tools?.length),
+            logContext: {
+              apiKeyId,
+              clientUserId,
+              reqPath,
+              startTime,
+              estimatedPromptTokens,
+            },
+          });
+        }
+
+        return response;
+      } catch (err: any) {
+        if (!isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `ChatGPT Web exception: ${err.message}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+        adminLogger.error({
+          message: `ChatGPT Web error: ${err.message}`,
           durationMs: Date.now() - startTime,
           model: clientRequestedModel,
           upstreamModel: candidateModel,

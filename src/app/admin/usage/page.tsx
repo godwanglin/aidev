@@ -600,13 +600,10 @@ print(response.choices[0].message.content)`,
             {/* Clear Database Logs Button */}
             <button
               type="button"
-              className="control btn-inline text-xs"
+              className="control btn-inline text-xs btn-danger-subtle"
               onClick={() => setClearModalOpen(true)}
               title="Clear Telemetry Logs from Database"
               style={{
-                color: "#dc2626",
-                borderColor: "#fecaca",
-                backgroundColor: "#fef2f2",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "5px",
@@ -633,11 +630,11 @@ print(response.choices[0].message.content)`,
 
         {/* Storage Cleaned Alert Banner */}
         {actionMessage && (
-          <div className="banner-alert mb-3" style={{ background: "#ecfdf5", borderColor: "#a7f3d0" }}>
-            <CheckCircle2 size={16} style={{ color: "#059669", flexShrink: 0 }} />
+          <div className="banner-alert badge-emerald mb-3">
+            <CheckCircle2 size={16} style={{ color: "#10b981", flexShrink: 0 }} />
             <div className="banner-text">
-              <strong style={{ color: "#047857", fontSize: "13px" }}>Database Storage Optimized</strong>
-              <p style={{ color: "#065f46", fontSize: "12px", margin: "2px 0 0" }}>{actionMessage}</p>
+              <strong style={{ fontSize: "13px" }}>Database Storage Optimized</strong>
+              <p style={{ fontSize: "12px", margin: "2px 0 0" }}>{actionMessage}</p>
             </div>
           </div>
         )}
@@ -655,9 +652,9 @@ print(response.choices[0].message.content)`,
               <div
                 className="rtk-banner-icon"
                 style={{
-                  backgroundColor: rtkActive ? "#ecfdf5" : "#f1f5f9",
-                  color: rtkActive ? "#059669" : "#64748b",
-                  border: rtkActive ? "1px solid #a7f3d0" : "1px solid #e2e8f0",
+                  backgroundColor: rtkActive ? "rgba(16, 185, 129, 0.15)" : "var(--surface-hover)",
+                  color: rtkActive ? "#10b981" : "var(--muted)",
+                  border: rtkActive ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--line)",
                 }}
               >
                 <Zap size={16} strokeWidth={2.2} />
@@ -673,9 +670,9 @@ print(response.choices[0].message.content)`,
                       fontWeight: 600,
                       padding: "2px 8px",
                       borderRadius: "999px",
-                      backgroundColor: rtkActive ? "#ecfdf5" : "#f1f5f9",
-                      color: rtkActive ? "#047857" : "#64748b",
-                      border: rtkActive ? "1px solid #a7f3d0" : "1px solid #e2e8f0",
+                      backgroundColor: rtkActive ? "rgba(16, 185, 129, 0.15)" : "var(--surface-hover)",
+                      color: rtkActive ? "#10b981" : "var(--muted)",
+                      border: rtkActive ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--line)",
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "5px",
@@ -721,9 +718,9 @@ print(response.choices[0].message.content)`,
                   cursor: "pointer",
                   minWidth: "110px",
                   justifyContent: "center",
-                  backgroundColor: rtkActive ? "#059669" : "#f1f5f9",
+                  backgroundColor: rtkActive ? "#059669" : "var(--card)",
                   color: rtkActive ? "#ffffff" : "var(--ink)",
-                  border: rtkActive ? "1px solid #047857" : "1px solid #cbd5e1",
+                  border: rtkActive ? "1px solid #047857" : "1px solid var(--line)",
                   boxShadow: rtkActive ? "0 1px 2px rgba(5, 150, 105, 0.2)" : "none",
                   transition: "all 0.15s ease",
                 }}
@@ -736,10 +733,7 @@ print(response.choices[0].message.content)`,
           {/* 4-Column Feature Breakdown (Zero Emojis, Dedicated Icons, Aligned Spacing) */}
           <div className="rtk-grid">
             <div className="rtk-card">
-              <div
-                className="rtk-card-icon"
-                style={{ background: "#eff6ff", border: "1px solid #dbeafe", color: "#2563eb" }}
-              >
+              <div className="rtk-card-icon blue">
                 <FileArchive size={14} strokeWidth={2} />
               </div>
               <div className="rtk-card-body">
@@ -751,10 +745,7 @@ print(response.choices[0].message.content)`,
             </div>
 
             <div className="rtk-card">
-              <div
-                className="rtk-card-icon"
-                style={{ background: "#ecfdf5", border: "1px solid #d1fae5", color: "#059669" }}
-              >
+              <div className="rtk-card-icon emerald">
                 <FolderTree size={14} strokeWidth={2} />
               </div>
               <div className="rtk-card-body">
@@ -766,10 +757,7 @@ print(response.choices[0].message.content)`,
             </div>
 
             <div className="rtk-card">
-              <div
-                className="rtk-card-icon"
-                style={{ background: "#fffbeb", border: "1px solid #fef3c7", color: "#d97706" }}
-              >
+              <div className="rtk-card-icon amber">
                 <Terminal size={14} strokeWidth={2} />
               </div>
               <div className="rtk-card-body">
@@ -781,16 +769,13 @@ print(response.choices[0].message.content)`,
             </div>
 
             <div className="rtk-card">
-              <div
-                className="rtk-card-icon"
-                style={{ background: "#f5f3ff", border: "1px solid #ede9fe", color: "#7c3aed" }}
-              >
+              <div className="rtk-card-icon purple">
                 <SlidersHorizontal size={14} strokeWidth={2} />
               </div>
               <div className="rtk-card-body">
                 <div className="rtk-card-title">Client Override</div>
                 <div className="rtk-card-desc">
-                  Header <code style={{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "1px 4px", borderRadius: "3px", color: "var(--ink)" }}>x-rtk-token-saver: false</code>
+                  Header <code className="rtk-code-tag" style={{ fontFamily: "JetBrains Mono, monospace", fontSize: "10px", padding: "1px 4px", borderRadius: "3px" }}>x-rtk-token-saver: false</code>
                 </div>
               </div>
             </div>
@@ -930,7 +915,7 @@ print(response.choices[0].message.content)`,
                     size={18}
                     imgSize={14}
                     className="shrink-0 rounded"
-                    style={{ background: "#f1f5f9", borderColor: "#e2e8f0" }}
+                    style={{ background: "var(--surface-hover)", borderColor: "var(--line)" }}
                   />
                 ) : (
                   <DotsNineIcon size={14} style={{ color: "var(--blue, #2563eb)" }} />
@@ -1000,8 +985,8 @@ print(response.choices[0].message.content)`,
                                 imgSize={16}
                                 className="shrink-0 rounded-md overflow-hidden"
                                 style={{
-                                  backgroundColor: "#f8fafc",
-                                  borderColor: "#e2e8f0",
+                                  backgroundColor: "var(--surface-hover)",
+                                  borderColor: "var(--line)",
                                 }}
                               />
                               <span className="item-title">{p.name}</span>
@@ -1162,7 +1147,7 @@ print(response.choices[0].message.content)`,
                 <Activity size={15} strokeWidth={1.75} />
                 <span>Live Request Stream</span>
               </h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-[#f1f5f9] text-[#475569] font-medium">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
                 {filteredEvents.length} {filteredEvents.length === 1 ? "item" : "items"}
               </span>
             </div>
@@ -1293,7 +1278,7 @@ print(response.choices[0].message.content)`,
                   {paginatedEvents.map((ev) => (
                     <tr
                       key={ev.id}
-                      className="cursor-pointer transition hover:bg-[#f8fafc]"
+                      className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
                       onClick={() => setInspectEvent(ev)}
                     >
                       {/* Time */}
@@ -1311,8 +1296,8 @@ print(response.choices[0].message.content)`,
                             imgSize={14}
                             className="shrink-0 rounded"
                             style={{
-                              backgroundColor: "#f1f5f9",
-                              borderColor: "#e2e8f0",
+                              backgroundColor: "var(--surface-hover)",
+                              borderColor: "var(--line)",
                             }}
                           />
                           <span className="text-xs font-semibold">
@@ -1427,12 +1412,13 @@ print(response.choices[0].message.content)`,
                       <td>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span
-                            className="status-badge"
-                            style={{
-                              backgroundColor: ev.statusCode === 200 ? "#ecfdf5" : ev.statusCode === 429 ? "#fffbeb" : "#fef2f2",
-                              color: ev.statusCode === 200 ? "#065f46" : ev.statusCode === 429 ? "#92400e" : "#991b1b",
-                              borderColor: ev.statusCode === 200 ? "#a7f3d0" : ev.statusCode === 429 ? "#fde68a" : "#fecaca",
-                            }}
+                            className={`status-badge ${
+                              ev.statusCode === 200
+                                ? "status-200"
+                                : ev.statusCode === 429
+                                ? "status-429"
+                                : "status-error"
+                            }`}
                           >
                             {ev.statusCode}
                           </span>
@@ -1612,11 +1598,11 @@ print(response.choices[0].message.content)`,
 
                 {/* Failover Warning Alert (if applicable) */}
                 {inspectEvent.isFailover && (
-                  <div className="banner-alert" style={{ background: "#fffbeb", borderColor: "#fde68a", margin: 0 }}>
+                  <div className="banner-alert badge-amber" style={{ margin: 0 }}>
                     <Zap size={15} className="text-amber shrink-0" />
                     <div className="banner-text">
-                      <strong style={{ fontSize: "12px", color: "#92400e" }}>Automated Failover Triggered</strong>
-                      <p style={{ fontSize: "11.5px", color: "#b45309", margin: "2px 0 0" }}>
+                      <strong style={{ fontSize: "12px" }}>Automated Failover Triggered</strong>
+                      <p style={{ fontSize: "11.5px", margin: "2px 0 0" }}>
                         {inspectEvent.failoverReason || "Primary connection failed or rate limited; successfully rerouted to secondary."}
                       </p>
                     </div>
@@ -1648,9 +1634,9 @@ print(response.choices[0].message.content)`,
                     </span>
                   </div>
                   {Boolean(inspectEvent.tokensSavedRtk && inspectEvent.tokensSavedRtk > 0) && (
-                    <div className="inspector-metric-card" style={{ borderColor: "#a7f3d0", background: "#f0fdf4" }}>
-                      <span className="inspector-metric-label" style={{ color: "#047857" }}>Saved by RTK</span>
-                      <span className="inspector-metric-val" style={{ color: "#059669" }}>
+                    <div className="inspector-metric-card" style={{ borderColor: "rgba(16, 185, 129, 0.3)", background: "rgba(16, 185, 129, 0.1)" }}>
+                      <span className="inspector-metric-label" style={{ color: "#10b981" }}>Saved by RTK</span>
+                      <span className="inspector-metric-val" style={{ color: "#10b981" }}>
                         -{inspectEvent.tokensSavedRtk?.toLocaleString()}
                       </span>
                     </div>
@@ -1660,9 +1646,8 @@ print(response.choices[0].message.content)`,
                 {/* RTK Savings Formula Breakdown */}
                 {Boolean(inspectEvent.tokensSavedRtk && inspectEvent.tokensSavedRtk > 0) && (
                   <div
+                    className="rtk-formula-box"
                     style={{
-                      background: "#f0fdf4",
-                      border: "1px solid #bbf7d0",
                       borderRadius: "6px",
                       padding: "8px 12px",
                       display: "flex",
@@ -1674,7 +1659,7 @@ print(response.choices[0].message.content)`,
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, color: "#065f46" }}>RTK Formula:</span>
+                      <span style={{ fontWeight: 600, color: "#10b981" }}>RTK Formula:</span>
                       <span className="mono text-muted">
                         {(inspectEvent.totalTokens + (inspectEvent.tokensSavedRtk || 0)).toLocaleString()} (Asli)
                       </span>
@@ -1683,7 +1668,7 @@ print(response.choices[0].message.content)`,
                         {inspectEvent.totalTokens.toLocaleString()} (Kompres)
                       </span>
                       <span className="text-muted">/</span>
-                      <span className="mono" style={{ fontWeight: 700, color: "#059669" }}>
+                      <span className="mono" style={{ fontWeight: 700, color: "#10b981" }}>
                         -{inspectEvent.tokensSavedRtk?.toLocaleString()} (Hemat)
                       </span>
                     </div>
@@ -1764,7 +1749,7 @@ print(response.choices[0].message.content)`,
             <div className="modal-card" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <div className="flex items-center gap-2">
-                  <div style={{ padding: "6px", borderRadius: "6px", background: "#fef2f2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ padding: "6px", borderRadius: "6px", background: "rgba(239, 68, 68, 0.15)", color: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Trash2 size={16} />
                   </div>
                   <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700 }}>Clear Upstream Telemetry</h3>

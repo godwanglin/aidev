@@ -374,8 +374,8 @@ export default function BillingPage() {
           <div
             className={`flex items-center gap-2 p-3 rounded-lg text-xs font-medium mb-4 ${
               bonusNotification.type === "success"
-                ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                : "bg-red-50 text-red-800 border border-red-200"
+                ? "bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/80"
+                : "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/80"
             }`}
           >
             {bonusNotification.type === "success" ? (
@@ -399,7 +399,7 @@ export default function BillingPage() {
                   <strong className="text-amber-900 text-sm font-semibold">
                     Emergency Rescue Bonus Siap Diklaim!
                   </strong>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 dark:border dark:border-amber-800/70">
                     +{currentTier === "ULTRA" ? "50%" : "30%"} Bonus Kuota
                   </span>
                 </div>
@@ -600,7 +600,7 @@ export default function BillingPage() {
                       <span>{tier.name || tierKey}</span>
                     </span>
                     {isCurrent && (
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      <span className="tier-current-pill">
                         PAKET AKTIF
                       </span>
                     )}

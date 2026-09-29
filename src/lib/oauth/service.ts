@@ -154,36 +154,64 @@ export async function exchangeAndSaveOAuthToken({
   }
 
   // Prepare token exchange request body
-  const bodyParams = new URLSearchParams({
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: rUri,
-    client_id: config.defaultClientId,
-  });
+  const isAnthropic = provider.toUpperCase() === "CLAUDE_CODE" || config.tokenUrl.includes("claude.com");
 
-  if (config.usePkce && verifier) {
-    bodyParams.set("code_verifier", verifier);
+  let tokenRes: Response;
+
+  if (isAnthropic) {
+    const jsonPayload: Record<string, string> = {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: rUri,
+      client_id: config.defaultClientId,
+    };
+    if (state) jsonPayload.state = state;
+    if (config.usePkce && verifier) jsonPayload.code_verifier = verifier;
+
+    tokenRes = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(jsonPayload),
+    });
+  } else {
+    const bodyParams = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: rUri,
+      client_id: config.defaultClientId,
+    });
+
+    if (state) {
+      bodyParams.set("state", state);
+    }
+
+    if (config.usePkce && verifier) {
+      bodyParams.set("code_verifier", verifier);
+    }
+
+    if (config.defaultClientSecret) {
+      bodyParams.set("client_secret", config.defaultClientSecret);
+    }
+
+    tokenRes = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: bodyParams.toString(),
+    });
   }
-
-  if (config.defaultClientSecret) {
-    bodyParams.set("client_secret", config.defaultClientSecret);
-  }
-
-  const tokenRes = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
-    },
-    body: bodyParams.toString(),
-  });
 
   const tokenData = await tokenRes.json().catch(() => ({}));
 
   if (!tokenRes.ok || tokenData.error) {
     const errorMsg =
       tokenData.error_description ||
-      tokenData.error ||
+      (typeof tokenData.error === "object" ? tokenData.error?.message : tokenData.error) ||
       `Token exchange failed with status ${tokenRes.status}`;
     throw new Error(errorMsg);
   }

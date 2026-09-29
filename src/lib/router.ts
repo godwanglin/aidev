@@ -7,6 +7,7 @@ import { matchCustomProviderForModel } from '@/lib/custom-providers';
 export interface RouteResult {
   baseUrl: string;
   apiKey: string;
+  cookieString?: string;
   authType?: string;
   connectionId: string;
   provider: string;
@@ -100,6 +101,7 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
         targetProvider.toUpperCase(),
         ...(isCustom ? [customSlug, customSlug.toLowerCase(), 'CUSTOM'] : []),
         ...(targetProvider === 'OPENAI' || targetProvider === 'OPENAI_CODEX' || targetProvider === 'CODEX' ? ['OPENAI_CODEX', 'OPENAI', 'CODEX'] : []),
+        ...(targetProvider === 'CHATGPT_WEB' || targetProvider === 'CHATGPT' || targetProvider === 'GPTWEB' ? ['CHATGPT_WEB', 'CHATGPT', 'GPTWEB'] : []),
         ...(targetProvider === 'GOOGLE' || targetProvider === 'GEMINI' || targetProvider === 'GEMINI_CLI' ? ['GEMINI', 'GOOGLE', 'GEMINI_CLI'] : []),
         ...(targetProvider === 'ANTIGRAVITY' ? ['ANTIGRAVITY'] : []),
         ...(targetProvider === 'DEEPSEEK' ? ['DEEPSEEK'] : []),
@@ -235,6 +237,13 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
   }
 
   let apiKey = '';
+  let cookieString = '';
+
+  if (connection.apiKeyEncrypted) {
+    try {
+      cookieString = decryptCredential(connection.apiKeyEncrypted);
+    } catch {}
+  }
 
   if (connection.authType === 'OAUTH') {
     try {
@@ -248,15 +257,23 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
         } catch {}
       }
     }
+  } else if (connection.authType === 'COOKIE' || connection.provider === 'CHATGPT_WEB') {
+    if (connection.accessTokenEnc) {
+      try {
+        apiKey = decryptCredential(connection.accessTokenEnc);
+      } catch {}
+    }
+    if (!apiKey) {
+      apiKey = cookieString;
+    }
   } else if (connection.apiKeyEncrypted) {
-    try {
-      apiKey = decryptCredential(connection.apiKeyEncrypted);
-    } catch {}
+    apiKey = cookieString;
   }
 
   return {
     baseUrl,
     apiKey,
+    cookieString: cookieString || undefined,
     authType: connection.authType || 'API_KEY',
     connectionId: connection.id,
     provider: connection.provider,

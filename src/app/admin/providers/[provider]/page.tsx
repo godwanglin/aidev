@@ -27,6 +27,9 @@ import {
   Brain,
   KeyRound,
   Download,
+  Cookie,
+  Clock,
+  RotateCcw,
 } from "lucide-react";
 import {
   findProviderBySlugOrId,
@@ -36,7 +39,9 @@ import {
 import { getProviderPrefix } from "@/lib/model-normalizer";
 import { renderProviderIcon, ProviderAvatar } from "@/components/providers/ProviderIcons";
 import OAuthDarkModal from "@/components/providers/OAuthDarkModal";
+import WebCookieModal from "@/components/providers/WebCookieModal";
 import EditConnectionModal, { ConnectionItem } from "@/components/providers/EditConnectionModal";
+import CodexResetCreditsModal from "@/components/providers/CodexResetCreditsModal";
 import CustomDropdown from "@/components/CustomDropdown";
 
 export default function ProviderDetailPage() {
@@ -51,8 +56,15 @@ export default function ProviderDetailPage() {
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showWebCookieModal, setShowWebCookieModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingConn, setEditingConn] = useState<ConnectionItem | null>(null);
+
+  // Codex Reset Credits states
+  const [resetCreditCounts, setResetCreditCounts] = useState<Record<string, number>>({});
+  const [activeResetCreditsConn, setActiveResetCreditsConn] = useState<ConnectionItem | null>(null);
+  const [confirmConsumeConn, setConfirmConsumeConn] = useState<ConnectionItem | null>(null);
+  const [isConsumingReset, setIsConsumingReset] = useState(false);
 
   // Auto-ping states
   const [pingingId, setPingingId] = useState<string | null>(null);
@@ -107,6 +119,53 @@ export default function ProviderDetailPage() {
       authType: "API_KEY",
     };
   }, [catalogItem, providerSlug]);
+
+  const isCodexProvider = useMemo(() => {
+    const id = providerMeta.id.toUpperCase();
+    const slug = providerSlug.toLowerCase();
+    return id === "OPENAI_CODEX" || id === "CODEX" || slug.includes("codex");
+  }, [providerMeta, providerSlug]);
+
+  async function fetchResetCreditsForConn(connId: string) {
+    try {
+      const res = await fetch(`/api/admin/providers/${connId}/reset-credits`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setResetCreditCounts((prev) => ({
+          ...prev,
+          [connId]: json.data.availableCount ?? 0,
+        }));
+      }
+    } catch {}
+  }
+
+  async function handleQuickConsume(conn: ConnectionItem) {
+    if (isConsumingReset) return;
+    setIsConsumingReset(true);
+    try {
+      const res = await fetch(`/api/admin/providers/${conn.id}/reset-credits`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setSuccess(
+          `Berhasil menggunakan 1 Codex reset credit untuk ${conn.accountEmail || conn.name}! Kuota akun telah di-reset.`
+        );
+        setTimeout(() => setSuccess(""), 4000);
+        setConfirmConsumeConn(null);
+        fetchResetCreditsForConn(conn.id);
+        fetchConnections();
+      } else {
+        setError(json.message || json.error || "Gagal menggunakan reset credit.");
+        setTimeout(() => setError(""), 4000);
+      }
+    } catch {
+      setError("Kesalahan jaringan saat memproses reset credit.");
+      setTimeout(() => setError(""), 4000);
+    } finally {
+      setIsConsumingReset(false);
+    }
+  }
 
   // Custom Provider Specific States
   const [customProviderData, setCustomProviderData] = useState<{
@@ -176,9 +235,15 @@ export default function ProviderDetailPage() {
           (c: ConnectionItem) =>
             c.provider.toLowerCase() === providerMeta.id.toLowerCase() ||
             c.provider.toLowerCase() === providerMeta.name.toLowerCase() ||
-            (providerMeta.id === "OPENAI_CODEX" && c.provider.toLowerCase() === "openai")
+            (providerMeta.id === "OPENAI_CODEX" && c.provider.toLowerCase() === "openai") ||
+            (providerMeta.id === "CHATGPT_WEB" && (c.provider.toLowerCase() === "chatgpt" || c.provider.toLowerCase() === "chatgpt_web" || c.provider.toLowerCase() === "gptweb"))
         );
         setConnections(matching);
+        if (isCodexProvider) {
+          matching.forEach((c: ConnectionItem) => {
+            fetchResetCreditsForConn(c.id);
+          });
+        }
       }
     } catch {
       setError("Gagal memuat koneksi provider.");
@@ -257,6 +322,8 @@ export default function ProviderDetailPage() {
   function handleOpenAddModal() {
     if (providerMeta.authType === "OAUTH") {
       setShowAddModal(true);
+    } else if (providerMeta.authType === "COOKIE") {
+      setShowWebCookieModal(true);
     } else {
       setShowAddKeyModal(true);
     }
@@ -857,7 +924,7 @@ export default function ProviderDetailPage() {
                     onClick={handleOpenAddModal}
                   >
                     <Plus size={13} />
-                    <span>{providerMeta.authType === "OAUTH" ? "Connect Account" : "Add API Key"}</span>
+                    <span>{providerMeta.authType === "OAUTH" ? "Connect Account" : providerMeta.authType === "COOKIE" ? "Connect Cookie" : "Add API Key"}</span>
                   </button>
                 </div>
               ) : (
@@ -889,6 +956,8 @@ export default function ProviderDetailPage() {
 
                         {conn.authType === "API_KEY" || isCustomProvider ? (
                           <KeyRound size={13} className="text-[#a1a1aa] shrink-0 ml-1" />
+                        ) : conn.authType === "COOKIE" ? (
+                          <Cookie size={13} className="text-emerald-500 shrink-0 ml-1" />
                         ) : (
                           <Lock size={13} className="text-[#a1a1aa] shrink-0 ml-1" />
                         )}
@@ -913,7 +982,11 @@ export default function ProviderDetailPage() {
                               ● {conn.isActive ? "active" : "disabled"}
                             </span>
                             <span className="type-chip">
-                              {conn.authType === "OAUTH" ? "OAuth" : "API Key"}
+                              {conn.authType === "OAUTH"
+                                ? "OAuth"
+                                : conn.authType === "COOKIE"
+                                ? "Cookie"
+                                : "API Key"}
                             </span>
                             <span className="priority-chip">
                               #{conn.priority || idx + 1}
@@ -923,6 +996,43 @@ export default function ProviderDetailPage() {
                       </div>
 
                       <div className="conn-right-actions">
+                        {isCodexProvider && (
+                          <>
+                            <button
+                              type="button"
+                              className={`btn-reset-credits ${(resetCreditCounts[conn.id] ?? 0) > 0 ? "has-credits" : ""}`}
+                              onClick={() => {
+                                if ((resetCreditCounts[conn.id] ?? 0) > 0) {
+                                  setConfirmConsumeConn(conn);
+                                }
+                              }}
+                              disabled={(resetCreditCounts[conn.id] ?? 0) <= 0 || isConsumingReset}
+                              title={
+                                (resetCreditCounts[conn.id] ?? 0) > 0
+                                  ? `Use one Codex reset credit. ${resetCreditCounts[conn.id]} available.`
+                                  : "No Codex reset credits available"
+                              }
+                              aria-label="Codex reset credits"
+                            >
+                              <RotateCcw
+                                size={13}
+                                className={isConsumingReset && confirmConsumeConn?.id === conn.id ? "animate-spin" : ""}
+                              />
+                              <span>{resetCreditCounts[conn.id] ?? 0}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn-reset-clock"
+                              onClick={() => setActiveResetCreditsConn(conn)}
+                              title="View Codex reset credit expiry"
+                              aria-label="View Codex reset credit expiry"
+                            >
+                              <Clock size={14} />
+                            </button>
+                          </>
+                        )}
+
                         <button
                           type="button"
                           className="btn-auto-ping"
@@ -981,7 +1091,7 @@ export default function ProviderDetailPage() {
                   onClick={handleOpenAddModal}
                 >
                   <Plus size={13} />
-                  <span>{providerMeta.authType === "OAUTH" ? "Add Account" : "Add API Key"}</span>
+                  <span>{providerMeta.authType === "OAUTH" ? "Add Account" : providerMeta.authType === "COOKIE" ? "Add Cookie" : "Add API Key"}</span>
                 </button>
               </div>
             </div>
@@ -1216,6 +1326,22 @@ export default function ProviderDetailPage() {
           />
         )}
 
+        {showWebCookieModal && (
+          <WebCookieModal
+            provider={providerMeta}
+            onClose={() => setShowWebCookieModal(false)}
+            onSuccess={(msg) => {
+              setSuccess(msg);
+              setTimeout(() => setSuccess(""), 4000);
+              fetchConnections();
+            }}
+            onError={(msg) => {
+              setError(msg);
+              setTimeout(() => setError(""), 4000);
+            }}
+          />
+        )}
+
         {showEditModal && editingConn && (
           <EditConnectionModal
             connection={editingConn}
@@ -1233,6 +1359,78 @@ export default function ProviderDetailPage() {
               setTimeout(() => setError(""), 4000);
             }}
           />
+        )}
+
+        {/* Modal: Codex Reset Credit Expiry */}
+        {activeResetCreditsConn && (
+          <CodexResetCreditsModal
+            connection={activeResetCreditsConn}
+            isOpen={Boolean(activeResetCreditsConn)}
+            onClose={() => setActiveResetCreditsConn(null)}
+            onSuccess={(msg) => {
+              setSuccess(msg);
+              setTimeout(() => setSuccess(""), 4000);
+              fetchConnections();
+            }}
+            onCreditsUpdated={(id, count) => {
+              setResetCreditCounts((prev) => ({ ...prev, [id]: count }));
+            }}
+          />
+        )}
+
+        {/* Modal: Confirm Quick Consume */}
+        {confirmConsumeConn && (
+          <div
+            className="codex-expiry-overlay"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isConsumingReset) {
+                setConfirmConsumeConn(null);
+              }
+            }}
+          >
+            <div className="codex-confirm-card">
+              <div className="codex-confirm-header">
+                <h3 className="codex-confirm-title">Reset Codex limit?</h3>
+              </div>
+
+              <div className="codex-confirm-body">
+                <p>
+                  Use 1 Codex reset credit for{" "}
+                  <strong style={{ color: "#0f172a" }}>
+                    {confirmConsumeConn.accountEmail || confirmConsumeConn.name}
+                  </strong>
+                  . This cannot be undone. Remaining credits:{" "}
+                  {resetCreditCounts[confirmConsumeConn.id] ?? 0}.
+                </p>
+              </div>
+
+              <div className="codex-confirm-footer">
+                <button
+                  type="button"
+                  onClick={() => setConfirmConsumeConn(null)}
+                  disabled={isConsumingReset}
+                  className="codex-confirm-cancel-btn"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickConsume(confirmConsumeConn)}
+                  disabled={isConsumingReset}
+                  className="codex-confirm-danger-btn"
+                >
+                  {isConsumingReset ? (
+                    <>
+                      <RotateCcw size={13} className="animate-spin" />
+                      <span>Resetting...</span>
+                    </>
+                  ) : (
+                    <span>Reset limit</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ===================================================================

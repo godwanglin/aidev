@@ -125,6 +125,74 @@ export async function GET(req: NextRequest) {
         }
 
         // Fetch models from live upstream for preset providers
+        if (providerKey === "CHATGPT_WEB" || providerKey === "CHATGPT") {
+          let accessToken = token;
+          let cookieString = "";
+          if (conn?.apiKeyEncrypted) {
+            try {
+              cookieString = decryptCredential(conn.apiKeyEncrypted);
+            } catch {}
+          }
+          if (conn?.accessTokenEnc) {
+            try {
+              accessToken = decryptCredential(conn.accessTokenEnc);
+            } catch {}
+          }
+
+          if (accessToken) {
+            const res = await fetch("https://chatgpt.com/backend-api/models", {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                Accept: "application/json",
+                Referer: "https://chatgpt.com/",
+                ...(cookieString ? { Cookie: cookieString } : {}),
+              },
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data.models)) {
+                const prefix = "gptweb/";
+                const liveModels = data.models
+                  .map((m: any) => ({
+                    id: !m.slug.includes("/") ? `${prefix}${m.slug}` : m.slug,
+                    name: m.title || m.slug,
+                  }))
+                  .sort((a: any, b: any) => a.id.localeCompare(b.id));
+
+                for (const m of liveModels) {
+                  await prisma.aiModel.upsert({
+                    where: { modelId: m.id },
+                    create: {
+                      modelId: m.id,
+                      name: m.name,
+                      provider: providerKey,
+                      promptCost: 0,
+                      completionCost: 0,
+                      contextWindow: "128k",
+                      isActive: true,
+                    },
+                    update: {
+                      name: m.name,
+                      provider: providerKey,
+                      isActive: true,
+                    },
+                  }).catch(() => null);
+                }
+
+                return NextResponse.json({
+                  success: true,
+                  provider: providerKey,
+                  models: liveModels,
+                  source: "LIVE_UPSTREAM",
+                  count: liveModels.length,
+                });
+              }
+            }
+          }
+        }
+
         if (providerKey === "OPENAI" || providerKey === "OPENAI_CODEX") {
           if (token) {
             const res = await fetch("https://api.openai.com/v1/models", {

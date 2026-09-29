@@ -31,6 +31,9 @@ export const PROVIDER_LOGO_MAP: Record<string, string> = {
   codex: "codex.png",
   openai_codex: "codex.png",
   openai: "openai.png",
+  chatgpt: "openai.png",
+  chatgpt_web: "openai.png",
+  gptweb: "openai.png",
   qoder: "qoder.png",
   copilot: "copilot.png",
   github_copilot: "copilot.png",
@@ -84,6 +87,7 @@ export function getProviderDisplayName(providerKey: string): string {
   const p = providerKey.toUpperCase().trim();
   if (p === "ANTIGRAVITY") return "Antigravity";
   if (p === "OPENAI_CODEX" || p === "CODEX") return "OpenAI Codex";
+  if (p === "CHATGPT_WEB" || p === "CHATGPT" || p === "GPTWEB") return "ChatGPT Web";
   if (p === "GEMINI" || p === "GEMINI_CLI" || p === "GEMINI-CLI") return "Gemini-Cli";
   if (p === "GOOGLE") return "Google Gemini";
   if (p === "DEEPSEEK") return "DeepSeek";
@@ -105,6 +109,7 @@ export function getProviderSlug(provKey: string): string {
   if (!provKey) return "";
   const k = provKey.toLowerCase();
   if (k === "combo") return "combo";
+  if (k.includes("chatgpt") || k === "gptweb") return "chatgpt";
   if (k.includes("openai") && k.includes("codex")) return "codex";
   if (k.includes("openai")) return "openai";
   if (k.includes("anthropic") || k.includes("claude")) return "claude";

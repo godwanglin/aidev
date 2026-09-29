@@ -554,7 +554,7 @@ export default function AdminUsersPage() {
             padding: 0,
             overflow: "hidden",
             width: "100%",
-            background: "#ffffff",
+            background: "var(--card)",
             border: "1px solid var(--line)",
             borderRadius: "var(--radius-lg)",
             boxShadow: "var(--shadow-sm)",
@@ -589,7 +589,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -604,7 +603,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -619,7 +617,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -634,7 +631,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -649,7 +645,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -664,7 +659,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                     }}
                   >
@@ -679,7 +673,6 @@ export default function AdminUsersPage() {
                       color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
-                      background: "#f8fafc",
                       borderBottom: "1px solid var(--line)",
                       textAlign: "right",
                     }}
@@ -718,27 +711,13 @@ export default function AdminUsersPage() {
                     const isPlus = tier === "PLUS";
                     const isFree = tier === "FREE";
 
-                    const tierBg = isUltra
-                      ? "#fef3c7"
+                    const tierClass = isUltra
+                      ? "tier-ultra"
                       : isPro
-                      ? "#f3e8ff"
+                      ? "tier-pro"
                       : isPlus
-                      ? "#eff6ff"
-                      : "#f1f5f9";
-                    const tierFg = isUltra
-                      ? "#b45309"
-                      : isPro
-                      ? "#7e22ce"
-                      : isPlus
-                      ? "#1d4ed8"
-                      : "#475569";
-                    const tierBorder = isUltra
-                      ? "#fde68a"
-                      : isPro
-                      ? "#e9d5ff"
-                      : isPlus
-                      ? "#bfdbfe"
-                      : "#cbd5e1";
+                      ? "tier-plus"
+                      : "tier-free";
 
                     return (
                       <tr key={u.id} style={{ borderBottom: "1px solid var(--line-subtle)" }}>
@@ -757,8 +736,9 @@ export default function AdminUsersPage() {
                                   ? "linear-gradient(135deg, #8b5cf6, #6d28d9)"
                                   : isPlus
                                   ? "linear-gradient(135deg, #3b82f6, #1d4ed8)"
-                                  : "#e2e8f0",
-                                color: isFree ? "#475569" : "#ffffff",
+                                  : "var(--surface-hover)",
+                                color: isFree ? "var(--muted)" : "#ffffff",
+                                border: isFree ? "1px solid var(--line)" : "none",
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
@@ -824,38 +804,12 @@ export default function AdminUsersPage() {
                         {/* 2. Role */}
                         <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
                           {u.role === "ADMIN" ? (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "3px",
-                                background: "#fef3c7",
-                                color: "#b45309",
-                                border: "1px solid #fde68a",
-                                padding: "2px 7px",
-                                borderRadius: "4px",
-                                fontSize: "11px",
-                                fontWeight: 600,
-                              }}
-                            >
+                            <span className="badge-role-admin">
                               <ShieldCheck size={11} />
                               ADMIN
                             </span>
                           ) : (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "3px",
-                                background: "#f1f5f9",
-                                color: "#475569",
-                                border: "1px solid #e2e8f0",
-                                padding: "2px 7px",
-                                borderRadius: "4px",
-                                fontSize: "11px",
-                                fontWeight: 500,
-                              }}
-                            >
+                            <span className="badge-role-user">
                               USER
                             </span>
                           )}
@@ -864,20 +818,7 @@ export default function AdminUsersPage() {
                         {/* 3. Subscription Tier */}
                         <td style={{ padding: "12px 14px", verticalAlign: "middle" }}>
                           <div className="space-y-1">
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                background: tierBg,
-                                color: tierFg,
-                                border: `1px solid ${tierBorder}`,
-                                padding: "2px 8px",
-                                borderRadius: "5px",
-                                fontSize: "11.5px",
-                                fontWeight: 700,
-                              }}
-                            >
+                            <span className={`badge-tier-pill ${tierClass}`}>
                               {!isFree && <Crown size={12} />}
                               {tier} TIER
                             </span>
@@ -1029,7 +970,7 @@ export default function AdminUsersPage() {
                 justifyContent: "space-between",
                 padding: "12px 18px",
                 borderTop: "1px solid var(--line)",
-                background: "#ffffff",
+                background: "var(--card)",
                 fontSize: "12px",
                 color: "var(--muted)",
                 flexWrap: "wrap",
@@ -1059,7 +1000,7 @@ export default function AdminUsersPage() {
                     fontWeight: 500,
                     borderRadius: "6px",
                     border: "1px solid var(--line)",
-                    background: page <= 1 ? "var(--surface-hover)" : "#ffffff",
+                    background: page <= 1 ? "var(--surface-hover)" : "var(--card)",
                     color: page <= 1 ? "var(--muted)" : "var(--ink)",
                     cursor: page <= 1 ? "not-allowed" : "pointer",
                     opacity: page <= 1 ? 0.5 : 1,
@@ -1097,7 +1038,7 @@ export default function AdminUsersPage() {
                     fontWeight: 500,
                     borderRadius: "6px",
                     border: "1px solid var(--line)",
-                    background: page >= totalPages ? "var(--surface-hover)" : "#ffffff",
+                    background: page >= totalPages ? "var(--surface-hover)" : "var(--card)",
                     color: page >= totalPages ? "var(--muted)" : "var(--ink)",
                     cursor: page >= totalPages ? "not-allowed" : "pointer",
                     opacity: page >= totalPages ? 0.5 : 1,
@@ -1144,18 +1085,7 @@ export default function AdminUsersPage() {
               {/* Modal Header */}
               <div className="flex items-center justify-between" style={{ marginBottom: "16px" }}>
                 <div className="flex items-center gap-2">
-                  <div
-                    style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "8px",
-                      background: "#f5f3ff",
-                      color: "#7c3aed",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
+                  <div className="users-modal-icon-crown">
                     <Crown size={18} />
                   </div>
                   <div>
@@ -1288,16 +1218,7 @@ export default function AdminUsersPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span style={{ fontWeight: 700, fontSize: "13px" }}>{t.name}</span>
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    fontWeight: 700,
-                                    background: "#ecfdf5",
-                                    color: "#059669",
-                                    padding: "1px 5px",
-                                    borderRadius: "3px",
-                                  }}
-                                >
+                                <span className="users-tier-bonus-pill">
                                   +{t.monthlyCredits.toLocaleString("id-ID")} CR
                                 </span>
                               </div>
@@ -1316,14 +1237,7 @@ export default function AdminUsersPage() {
 
                 {/* Auto Add Credits Option */}
                 {selectedTierId !== "FREE" && selectedTierConfig && (
-                  <div
-                    style={{
-                      background: "#f0fdf4",
-                      border: "1px solid #bbf7d0",
-                      borderRadius: "8px",
-                      padding: "12px 14px",
-                    }}
-                  >
+                  <div className="users-modal-auto-box">
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1332,11 +1246,11 @@ export default function AdminUsersPage() {
                         style={{ marginTop: "2px" }}
                       />
                       <div style={{ fontSize: "12px" }}>
-                        <strong style={{ color: "#166534" }}>
+                        <strong>
                           Tambahkan kuota paket (+{selectedTierConfig.monthlyCredits.toLocaleString()}{" "}
                           CR) otomatis ke saldo akun
                         </strong>
-                        <p style={{ margin: "2px 0 0 0", fontSize: "11px", color: "#15803d" }}>
+                        <p style={{ margin: "2px 0 0 0", fontSize: "11px" }}>
                           Paket akan otomatis aktif 30 hari ke depan dan kredit langsung dapat
                           digunakan oleh user.
                         </p>
@@ -1412,18 +1326,7 @@ export default function AdminUsersPage() {
               {/* Header */}
               <div className="flex items-center justify-between" style={{ marginBottom: "16px" }}>
                 <div className="flex items-center gap-2">
-                  <div
-                    style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "8px",
-                      background: "#ecfdf5",
-                      color: "#059669",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
+                  <div className="users-modal-icon-coins">
                     <Coins size={18} />
                   </div>
                   <div>
@@ -1501,7 +1404,7 @@ export default function AdminUsersPage() {
                             height: "32px",
                             fontSize: "11.5px",
                             padding: "0 6px",
-                            background: isSel ? "var(--blue-soft)" : "#ffffff",
+                            background: isSel ? "var(--blue-soft)" : "var(--card)",
                             borderColor: isSel ? "var(--blue)" : "var(--line)",
                             color: isSel ? "var(--blue)" : "var(--ink)",
                             fontWeight: isSel ? 700 : 500,
@@ -1759,17 +1662,7 @@ export default function AdminUsersPage() {
               </p>
 
               {targetRole === "ADMIN" && (
-                <div
-                  style={{
-                    background: "#fef3c7",
-                    border: "1px solid #fde68a",
-                    borderRadius: "6px",
-                    padding: "8px 12px",
-                    fontSize: "11px",
-                    color: "#92400e",
-                    marginTop: "10px",
-                  }}
-                >
+                <div className="users-role-warning-box">
                   Perhatian: Pengguna berstatus ADMIN dapat mengelola semua pengaturan gateway,
                   saldo, model, dan kuota.
                 </div>

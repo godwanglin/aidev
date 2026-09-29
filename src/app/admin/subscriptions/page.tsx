@@ -485,7 +485,7 @@ export default function SubscriptionsAdminPage() {
                           size={16}
                           imgSize={12}
                           className="shrink-0 rounded"
-                          style={{ background: "#f1f5f9", borderColor: "#e2e8f0" }}
+                          style={{ background: "var(--surface-hover)", borderColor: "var(--line)" }}
                         />
                       ),
                     };
@@ -537,8 +537,7 @@ export default function SubscriptionsAdminPage() {
                               )}
                               {m.rateInPer1k !== undefined && (
                                 <span
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                                  style={{ background: "#f8fafc", color: "#334155", border: "1px solid #e2e8f0" }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/60"
                                   title="Biaya konsumsi kredit per 1.000 tokens (Input / Output)"
                                 >
                                   <Coins size={10} className="text-amber-500 shrink-0" />
@@ -565,7 +564,7 @@ export default function SubscriptionsAdminPage() {
                               size={16}
                               imgSize={12}
                               className="shrink-0 rounded"
-                              style={{ background: "#f1f5f9", borderColor: "#e2e8f0" }}
+                              style={{ background: "var(--surface-hover)", borderColor: "var(--line)" }}
                             />
                             <span>{getProviderDisplayName(m.provider)}</span>
                           </span>
@@ -747,10 +746,10 @@ export default function SubscriptionsAdminPage() {
                 </p>
               </div>
 
-              <div className="border-t pt-3 space-y-3" style={{ borderColor: "#f1f5f9" }}>
+              <div className="border-t pt-3 space-y-3" style={{ borderColor: "var(--line)" }}>
                 <strong className="text-xs block text-ink">Kategori Notifikasi yang Dikirim:</strong>
 
-                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
+                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
                   <input
                     type="checkbox"
                     checked={settings.discordAlertMoneyIn}
@@ -758,12 +757,12 @@ export default function SubscriptionsAdminPage() {
                     className="matrix-checkbox mt-0.5"
                   />
                   <div>
-                    <strong className="text-xs block text-emerald-700">💰 Uang Masuk (Midtrans Payment Success)</strong>
+                    <strong className="text-xs block text-emerald-700 dark:text-emerald-400">💰 Uang Masuk (Midtrans Payment Success)</strong>
                     <p className="text-[11px] text-muted">Notifikasi instan setiap kali user top-up ketengan atau berlangganan paket.</p>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
+                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
                   <input
                     type="checkbox"
                     checked={settings.discordAlertProviderDown}
@@ -771,12 +770,12 @@ export default function SubscriptionsAdminPage() {
                     className="matrix-checkbox mt-0.5"
                   />
                   <div>
-                    <strong className="text-xs block text-red-700">🚨 Akun Provider Down / Quota Exhausted</strong>
+                    <strong className="text-xs block text-red-700 dark:text-red-400">🚨 Akun Provider Down / Quota Exhausted</strong>
                     <p className="text-[11px] text-muted">Peringatan darurat saat akun OpenAI, Claude, atau Google dinonaktifkan otomatis karena 429/401.</p>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
+                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
                   <input
                     type="checkbox"
                     checked={settings.discordAlertSupportTicket}
@@ -784,12 +783,12 @@ export default function SubscriptionsAdminPage() {
                     className="matrix-checkbox mt-0.5"
                   />
                   <div>
-                    <strong className="text-xs block text-amber-700">🎫 Tiket Bantuan Baru (Support Ticket)</strong>
+                    <strong className="text-xs block text-amber-700 dark:text-amber-400">🎫 Tiket Bantuan Baru (Support Ticket)</strong>
                     <p className="text-[11px] text-muted">Pemberitahuan saat ada customer yang mengirim tiket pertanyaan atau komplain.</p>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
+                <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
                   <input
                     type="checkbox"
                     checked={settings.discordAlertLowBalance}
@@ -797,7 +796,7 @@ export default function SubscriptionsAdminPage() {
                     className="matrix-checkbox mt-0.5"
                   />
                   <div>
-                    <strong className="text-xs block text-blue-700">⚠️ Saldo Pengguna Menipis (&lt; 10%)</strong>
+                    <strong className="text-xs block text-blue-700 dark:text-blue-400">⚠️ Saldo Pengguna Menipis (&lt; 10%)</strong>
                     <p className="text-[11px] text-muted">Pemantauan saat sisa kredit user mendekati habis untuk memicu pengingat perpanjangan.</p>
                   </div>
                 </label>
