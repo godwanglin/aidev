@@ -61,6 +61,7 @@ async function callUpstreamRefreshToken(
 ): Promise<{
   accessToken: string;
   refreshToken?: string;
+  idToken?: string;
   expiresIn: number;
 }> {
   const p = provider.toUpperCase();
@@ -154,6 +155,7 @@ async function callUpstreamRefreshToken(
     return {
       accessToken: data.access_token,
       refreshToken: data.refresh_token || refreshToken,
+      idToken: data.id_token,
       expiresIn: Number(data.expires_in) || 3600,
     };
   }
@@ -264,11 +266,12 @@ export async function refreshConnectionToken(
         details: { connectionId, name: conn.name, provider: conn.provider, force },
       });
 
-      const { accessToken, refreshToken: newRefreshToken, expiresIn } =
+      const { accessToken, refreshToken: newRefreshToken, idToken, expiresIn } =
         await callUpstreamRefreshToken(conn.provider, rawRefreshToken, config);
 
       const accessTokenEnc = encryptCredential(accessToken);
       const refreshTokenEnc = encryptCredential(newRefreshToken || rawRefreshToken);
+      const idTokenEnc = idToken ? encryptCredential(idToken) : undefined;
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
 
       await prisma.providerConnection.update({
@@ -276,6 +279,7 @@ export async function refreshConnectionToken(
         data: {
           accessTokenEnc,
           refreshTokenEnc,
+          ...(idTokenEnc ? { idTokenEnc } : {}),
           tokenExpiresAt,
           syncStatus: "NORMAL",
           lastSyncedAt: new Date(),

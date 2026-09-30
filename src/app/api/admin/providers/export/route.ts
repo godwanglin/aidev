@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { decryptCredential } from "@/lib/crypto";
+import { decryptCredential, encryptCredential } from "@/lib/crypto";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
 
 async function verifyAdmin() {
@@ -22,6 +22,139 @@ function extractChatGptAccountId(token: string): string | null {
     }
   } catch {}
   return null;
+}
+
+async function processConnectionsForExport(connections: any[]) {
+  return await Promise.all(
+    connections.map(async (conn) => {
+      const apiKey = conn.apiKeyEncrypted ? decryptCredential(conn.apiKeyEncrypted) : null;
+      let accessToken = conn.accessTokenEnc ? decryptCredential(conn.accessTokenEnc) : null;
+      let refreshToken = conn.refreshTokenEnc ? decryptCredential(conn.refreshTokenEnc) : null;
+      let idToken = conn.idTokenEnc ? decryptCredential(conn.idTokenEnc) : null;
+
+      // If idToken is missing for OpenAI Codex, fetch it on-demand via refresh token
+      const isCodex =
+        conn.provider === "OPENAI_CODEX" ||
+        conn.provider === "OPENAI" ||
+        conn.provider === "CODEX";
+
+      if (!idToken && isCodex && refreshToken) {
+        try {
+          const body = new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+          });
+
+          const refRes = await fetch("https://auth.openai.com/oauth/token", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Accept: "application/json",
+            },
+            body: body.toString(),
+            signal: AbortSignal.timeout(6000),
+          });
+
+          if (refRes.ok) {
+            const refData = await refRes.json();
+            if (refData.id_token) {
+              idToken = refData.id_token;
+              if (refData.access_token) accessToken = refData.access_token;
+              if (refData.refresh_token) refreshToken = refData.refresh_token;
+
+              // Save to database so subsequent exports and requests already have it!
+              prisma.providerConnection
+                .update({
+                  where: { id: conn.id },
+                  data: {
+                    idTokenEnc: encryptCredential(refData.id_token),
+                    ...(refData.access_token
+                      ? { accessTokenEnc: encryptCredential(refData.access_token) }
+                      : {}),
+                    ...(refData.refresh_token
+                      ? { refreshTokenEnc: encryptCredential(refData.refresh_token) }
+                      : {}),
+                    lastSyncedAt: new Date(),
+                  },
+                })
+                .catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn(`Could not fetch id_token via refresh for connection ${conn.id}:`, e);
+        }
+      }
+
+      const chatgptAccountId = accessToken ? extractChatGptAccountId(accessToken) : null;
+
+      let customHeadersParsed: any = null;
+      if (conn.customHeaders) {
+        try {
+          customHeadersParsed = JSON.parse(conn.customHeaders);
+        } catch {
+          customHeadersParsed = conn.customHeaders;
+        }
+      }
+
+      const codexAuthJson =
+        conn.authType === "OAUTH" && (accessToken || refreshToken)
+          ? {
+              auth_mode: "chatgpt",
+              tokens: {
+                access_token: accessToken,
+                refresh_token: refreshToken,
+                id_token: idToken || null,
+                account_id: chatgptAccountId || null,
+              },
+            }
+          : null;
+
+      return {
+        id: conn.id,
+        name: conn.name,
+        provider: conn.provider,
+        authType: conn.authType,
+        accountEmail: conn.accountEmail || null,
+        tier: conn.tier || null,
+        isActive: conn.isActive,
+        priority: conn.priority,
+        weight: conn.weight,
+        baseUrl: conn.baseUrl || null,
+        customHeaders: customHeadersParsed,
+        tokenExpiresAt: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
+        // Decrypted credentials
+        apiKey,
+        accessToken,
+        refreshToken,
+        idToken: idToken || null,
+        id_token: idToken || null,
+        credentials: {
+          ...(apiKey ? { apiKey } : {}),
+          ...(accessToken ? { accessToken } : {}),
+          ...(refreshToken ? { refreshToken } : {}),
+          ...(idToken ? { idToken, id_token: idToken } : {}),
+          ...(conn.tokenExpiresAt ? { tokenExpiresAt: conn.tokenExpiresAt.toISOString() } : {}),
+          ...(chatgptAccountId ? { chatgptAccountId } : {}),
+        },
+        // OAuth standard format
+        ...(conn.authType === "OAUTH" && (accessToken || refreshToken)
+          ? {
+              oauth: {
+                access_token: accessToken,
+                refresh_token: refreshToken,
+                id_token: idToken || null,
+                account_id: chatgptAccountId,
+                email: conn.accountEmail || null,
+                expires_at: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
+              },
+            }
+          : {}),
+        // Exact ~/.codex/auth.json format for drop-in use
+        ...(codexAuthJson ? { codex_auth_json: codexAuthJson } : {}),
+      };
+    })
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -74,59 +207,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const exportedAccounts = connections.map((conn) => {
-      const apiKey = conn.apiKeyEncrypted ? decryptCredential(conn.apiKeyEncrypted) : null;
-      const accessToken = conn.accessTokenEnc ? decryptCredential(conn.accessTokenEnc) : null;
-      const refreshToken = conn.refreshTokenEnc ? decryptCredential(conn.refreshTokenEnc) : null;
-      const chatgptAccountId = accessToken ? extractChatGptAccountId(accessToken) : null;
-
-      let customHeadersParsed: any = null;
-      if (conn.customHeaders) {
-        try {
-          customHeadersParsed = JSON.parse(conn.customHeaders);
-        } catch {
-          customHeadersParsed = conn.customHeaders;
-        }
-      }
-
-      return {
-        id: conn.id,
-        name: conn.name,
-        provider: conn.provider,
-        authType: conn.authType,
-        accountEmail: conn.accountEmail || null,
-        tier: conn.tier || null,
-        isActive: conn.isActive,
-        priority: conn.priority,
-        weight: conn.weight,
-        baseUrl: conn.baseUrl || null,
-        customHeaders: customHeadersParsed,
-        tokenExpiresAt: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
-        // Decrypted credentials
-        apiKey,
-        accessToken,
-        refreshToken,
-        credentials: {
-          ...(apiKey ? { apiKey } : {}),
-          ...(accessToken ? { accessToken } : {}),
-          ...(refreshToken ? { refreshToken } : {}),
-          ...(conn.tokenExpiresAt ? { tokenExpiresAt: conn.tokenExpiresAt.toISOString() } : {}),
-          ...(chatgptAccountId ? { chatgptAccountId } : {}),
-        },
-        // Codex / ChatGPT CLI compatibility format
-        ...(conn.authType === "OAUTH" && (accessToken || refreshToken)
-          ? {
-              oauth: {
-                access_token: accessToken,
-                refresh_token: refreshToken,
-                account_id: chatgptAccountId,
-                email: conn.accountEmail || null,
-                expires_at: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
-              },
-            }
-          : {}),
-      };
-    });
+    const exportedAccounts = await processConnectionsForExport(connections);
 
     const exportPayload = {
       success: true,
@@ -208,57 +289,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const exportedAccounts = connections.map((conn) => {
-      const apiKey = conn.apiKeyEncrypted ? decryptCredential(conn.apiKeyEncrypted) : null;
-      const accessToken = conn.accessTokenEnc ? decryptCredential(conn.accessTokenEnc) : null;
-      const refreshToken = conn.refreshTokenEnc ? decryptCredential(conn.refreshTokenEnc) : null;
-      const chatgptAccountId = accessToken ? extractChatGptAccountId(accessToken) : null;
-
-      let customHeadersParsed: any = null;
-      if (conn.customHeaders) {
-        try {
-          customHeadersParsed = JSON.parse(conn.customHeaders);
-        } catch {
-          customHeadersParsed = conn.customHeaders;
-        }
-      }
-
-      return {
-        id: conn.id,
-        name: conn.name,
-        provider: conn.provider,
-        authType: conn.authType,
-        accountEmail: conn.accountEmail || null,
-        tier: conn.tier || null,
-        isActive: conn.isActive,
-        priority: conn.priority,
-        weight: conn.weight,
-        baseUrl: conn.baseUrl || null,
-        customHeaders: customHeadersParsed,
-        tokenExpiresAt: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
-        apiKey,
-        accessToken,
-        refreshToken,
-        credentials: {
-          ...(apiKey ? { apiKey } : {}),
-          ...(accessToken ? { accessToken } : {}),
-          ...(refreshToken ? { refreshToken } : {}),
-          ...(conn.tokenExpiresAt ? { tokenExpiresAt: conn.tokenExpiresAt.toISOString() } : {}),
-          ...(chatgptAccountId ? { chatgptAccountId } : {}),
-        },
-        ...(conn.authType === "OAUTH" && (accessToken || refreshToken)
-          ? {
-              oauth: {
-                access_token: accessToken,
-                refresh_token: refreshToken,
-                account_id: chatgptAccountId,
-                email: conn.accountEmail || null,
-                expires_at: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
-              },
-            }
-          : {}),
-      };
-    });
+    const exportedAccounts = await processConnectionsForExport(connections);
 
     return NextResponse.json({
       success: true,

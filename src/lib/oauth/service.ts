@@ -254,6 +254,7 @@ export async function exchangeAndSaveOAuthToken({
   // Encrypt tokens using AES-256-GCM
   const accessTokenEnc = encryptCredential(accessToken);
   const refreshTokenEnc = refreshToken ? encryptCredential(refreshToken) : null;
+  const idTokenEnc = tokenData.id_token ? encryptCredential(tokenData.id_token) : null;
 
   // Persist into database
   const connection = await prisma.providerConnection.create({
@@ -263,6 +264,7 @@ export async function exchangeAndSaveOAuthToken({
       authType: "OAUTH",
       accessTokenEnc,
       refreshTokenEnc,
+      idTokenEnc,
       tokenExpiresAt,
       accountEmail,
       priority,

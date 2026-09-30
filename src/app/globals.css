@@ -5851,6 +5851,41 @@ select.control {
   flex-shrink: 0;
 }
 
+.export-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.export-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.export-tab-btn:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.export-tab-btn.active {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: var(--blue-border);
+  font-weight: 600;
+}
+
 .export-json-container {
   border: 1px solid var(--line);
   border-radius: 8px;

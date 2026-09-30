@@ -207,6 +207,7 @@ model ProviderConnection {
   apiKeyEncrypted String?   @db.Text
   accessTokenEnc  String?   @db.Text
   refreshTokenEnc String?   @db.Text
+  idTokenEnc      String?   @db.Text
   tokenExpiresAt  DateTime?
 
   // Custom Provider Specific
