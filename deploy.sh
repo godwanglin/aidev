@@ -41,11 +41,6 @@ echo "[3/6] Generating Prisma client & syncing database..."
 npx prisma generate
 npx prisma db push
 
-# Seed subscription tiers & pricing configs
-if [ -f prisma/seed-tiers.js ]; then
-    echo "Checking subscription tiers and pricing seed..."
-    node prisma/seed-tiers.js || echo "Seed executed with warnings, continuing..."
-fi
 
 # 5. Build Next.js application
 echo "[4/6] Building Next.js production bundle..."

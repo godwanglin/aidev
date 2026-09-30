@@ -220,9 +220,11 @@ async function fetchCodexAccountQuota(accessToken: string): Promise<QuotaBucketI
 
         const parseWindow = (win: any, defaultId: string, fallbackName: string) => {
           if (!win) return;
-          const usedPct = typeof win.used_percent === "number" ? win.used_percent : 0;
-          let remainingPct = isLimitReached ? 0 : Math.max(0, 100 - usedPct);
-          if (usedPct >= 100) remainingPct = 0;
+          const winUsedPct = typeof win.used_percent === "number" ? win.used_percent : 0;
+          const isThisWindowLimit = win.limit_reached === true || winUsedPct >= 100;
+
+          const usedAmount = isThisWindowLimit ? 100 : Math.min(100, Math.max(0, Math.round(winUsedPct)));
+          const remainingPct = isThisWindowLimit ? 0 : Math.max(0, 100 - usedAmount);
 
           const sec = win.limit_window_seconds || 0;
           let name = fallbackName;
@@ -246,14 +248,14 @@ async function fetchCodexAccountQuota(accessToken: string): Promise<QuotaBucketI
             resetHuman = formatResetRemaining(resetIso);
           }
 
-          const isExhausted = remainingPct <= 1 || isLimitReached;
+          const isExhausted = remainingPct <= 1 || isThisWindowLimit;
           const status = isExhausted ? "EMPTY" : remainingPct <= 25 ? "LOW" : "HEALTHY";
 
           quotas.push({
             id: defaultId,
             name,
             remainingFraction: remainingPct / 100,
-            usedAmount: Math.round((1 - remainingPct / 100) * 100),
+            usedAmount,
             totalAmount: 100,
             percentage: remainingPct,
             resetTime: resetIso,
@@ -264,6 +266,15 @@ async function fetchCodexAccountQuota(accessToken: string): Promise<QuotaBucketI
 
         parseWindow(rl.primary_window, "codex-primary", "Primary Window");
         parseWindow(rl.secondary_window, "codex-secondary", "Secondary Window");
+
+        // If root rate limit says limit reached, but neither window reflected 100% used,
+        // mark the primary window as exhausted.
+        if (isLimitReached && quotas.length > 0 && !quotas.some((q) => q.status === "EMPTY")) {
+          quotas[0].status = "EMPTY";
+          quotas[0].percentage = 0;
+          quotas[0].remainingFraction = 0;
+          quotas[0].usedAmount = 100;
+        }
       }
     }
   } catch (err) {
