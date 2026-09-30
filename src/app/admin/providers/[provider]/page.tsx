@@ -42,6 +42,7 @@ import OAuthDarkModal from "@/components/providers/OAuthDarkModal";
 import WebCookieModal from "@/components/providers/WebCookieModal";
 import EditConnectionModal, { ConnectionItem } from "@/components/providers/EditConnectionModal";
 import CodexResetCreditsModal from "@/components/providers/CodexResetCreditsModal";
+import ExportCredentialsModal from "@/components/providers/ExportCredentialsModal";
 import CustomDropdown from "@/components/CustomDropdown";
 
 export default function ProviderDetailPage() {
@@ -59,6 +60,13 @@ export default function ProviderDetailPage() {
   const [showWebCookieModal, setShowWebCookieModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingConn, setEditingConn] = useState<ConnectionItem | null>(null);
+
+  // Export Credentials states
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportData, setExportData] = useState<any | null>(null);
+  const [selectedConnIds, setSelectedConnIds] = useState<Set<string>>(new Set());
 
   // Codex Reset Credits states
   const [resetCreditCounts, setResetCreditCounts] = useState<Record<string, number>>({});
@@ -660,11 +668,69 @@ export default function ProviderDetailPage() {
       if (json.success) {
         setSuccess("Koneksi berhasil dihapus.");
         setTimeout(() => setSuccess(""), 3000);
+        setSelectedConnIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
         fetchConnections();
       }
     } catch {
       setError("Gagal menghapus koneksi.");
     }
+  }
+
+  // Export credentials to JSON
+  async function handleExportJson(specificId?: string) {
+    setShowExportModal(true);
+    setExportLoading(true);
+    setExportError(null);
+    setExportData(null);
+
+    try {
+      const body: any = { provider: providerMeta.id };
+      if (specificId) {
+        body.id = specificId;
+      } else if (selectedConnIds.size > 0) {
+        body.ids = Array.from(selectedConnIds);
+      }
+
+      const res = await fetch("/api/admin/providers/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setExportData(json);
+      } else {
+        setExportError(json.error || "Gagal mengekspor kredensial provider.");
+      }
+    } catch (err: any) {
+      setExportError(err.message || "Gagal menghubungi server untuk export.");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  // Selection handlers
+  const isAllSelected = connections.length > 0 && selectedConnIds.size === connections.length;
+  function handleToggleSelectAll() {
+    if (isAllSelected) {
+      setSelectedConnIds(new Set());
+    } else {
+      setSelectedConnIds(new Set(connections.map((c) => c.id)));
+    }
+  }
+
+  function handleToggleSelectConn(id: string) {
+    setSelectedConnIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   // Auto-ping connection
@@ -875,6 +941,21 @@ export default function ProviderDetailPage() {
               <div className="detail-header-actions">
                 <button
                   type="button"
+                  className="btn-export-json"
+                  disabled={connections.length === 0}
+                  onClick={() => handleExportJson()}
+                  title="Export kredensial (API Key / OAuth) ke format JSON"
+                >
+                  <Download size={12} />
+                  <span>
+                    {selectedConnIds.size > 0
+                      ? `Export Selected (${selectedConnIds.size})`
+                      : "Export JSON"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   className="btn-test-one-by-one"
                   disabled={isTestingOneByOne || connections.length === 0}
                   onClick={handleTestOneByOne}
@@ -905,8 +986,15 @@ export default function ProviderDetailPage() {
 
             <div className="connections-card-body">
               <div className="select-all-row">
-                <input type="checkbox" id="selectAllConns" />
-                <label htmlFor="selectAllConns">Select All</label>
+                <input
+                  type="checkbox"
+                  id="selectAllConns"
+                  checked={isAllSelected}
+                  onChange={handleToggleSelectAll}
+                />
+                <label htmlFor="selectAllConns" style={{ cursor: "pointer" }}>
+                  Select All {selectedConnIds.size > 0 ? `(${selectedConnIds.size}/${connections.length})` : ""}
+                </label>
               </div>
 
               {loading ? (
@@ -932,7 +1020,11 @@ export default function ProviderDetailPage() {
                   {connections.map((conn, idx) => (
                     <div key={conn.id} className="conn-item-row">
                       <div className="conn-left-col">
-                        <input type="checkbox" />
+                        <input
+                          type="checkbox"
+                          checked={selectedConnIds.has(conn.id)}
+                          onChange={() => handleToggleSelectConn(conn.id)}
+                        />
                         <div className="priority-arrows-col">
                           <button
                             type="button"
@@ -1047,6 +1139,16 @@ export default function ProviderDetailPage() {
                               ? `${pingResult[conn.id].latency}ms`
                               : "Auto-ping"}
                           </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="icon-action-btn"
+                          onClick={() => handleExportJson(conn.id)}
+                          title="Export Akun Ini (JSON)"
+                          aria-label="Export Akun Ini (JSON)"
+                        >
+                          <Download size={13} />
                         </button>
 
                         <button
@@ -1432,6 +1534,17 @@ export default function ProviderDetailPage() {
             </div>
           </div>
         )}
+
+        {/* Modal: Export Credentials */}
+        <ExportCredentialsModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          providerName={providerMeta.name}
+          providerSlug={providerSlug}
+          exportData={exportData}
+          loading={exportLoading}
+          error={exportError}
+        />
 
         {/* ===================================================================
             MODAL: ADD MODEL MANUALLY
