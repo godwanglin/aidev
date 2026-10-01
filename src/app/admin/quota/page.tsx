@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar, getProviderDisplayName } from "@/components/providers/ProviderIcons";
 import EditConnectionModal from "@/components/providers/EditConnectionModal";
+import { findProviderBySlugOrId } from "@/lib/oauth/config";
 import {
   Gauge,
   RefreshCw,
@@ -25,20 +27,23 @@ import {
   Boxes,
   PieChart,
   ArrowRight,
+  ExternalLink,
 } from "lucide-react";
 
 function getProviderSlug(providerKey: string): string {
+  const item = findProviderBySlugOrId(providerKey);
+  if (item?.slug) return item.slug;
   const p = (providerKey || "").toLowerCase().trim();
-  if (p === "gemini" || p === "gemini_cli" || p === "gemini-cli") return "gemini-cli";
+  if (p === "gemini" || p === "gemini_cli" || p === "gemini-cli") return "gemini";
   if (p === "openai_codex" || p === "codex") return "codex";
   if (p === "ollama_cloud" || p === "ollama") return "ollama";
   if (p === "antigravity") return "antigravity";
   if (p === "deepseek") return "deepseek";
   if (p === "openrouter") return "openrouter";
   if (p === "google") return "google";
-  if (p === "openai") return "openai";
+  if (p === "openai") return "codex";
   if (p === "anthropic" || p === "claude" || p === "claude_code") return "claude";
-  return p;
+  return p.replace(/_/g, "-");
 }
 
 export interface QuotaBucketItem {
@@ -809,7 +814,7 @@ export default function AdminQuotaTrackerPage() {
             {viewMode === "account" ? (
               filteredAccounts.map((card) => {
               const isToggling = togglingIds.has(card.id);
-              const providerSlug = card.provider.toLowerCase();
+              const providerSlug = getProviderSlug(card.provider);
 
               return (
                 <article
@@ -819,16 +824,28 @@ export default function AdminQuotaTrackerPage() {
                   {/* Card Header */}
                   <div className="quota-card-header">
                     <div className="quota-card-account-info">
-                      <ProviderAvatar
-                        slugOrId={providerSlug}
-                        name={card.provider}
-                        size={30}
-                        imgSize={18}
-                      />
+                      <Link
+                        href={`/admin/providers/${providerSlug}`}
+                        title={`Buka detail provider ${formatProviderName(card.provider)} (/admin/providers/${providerSlug})`}
+                        className="transition-opacity hover:opacity-80 flex-shrink-0"
+                      >
+                        <ProviderAvatar
+                          slugOrId={providerSlug}
+                          name={card.provider}
+                          size={30}
+                          imgSize={18}
+                        />
+                      </Link>
                       <div className="quota-card-account-text">
-                        <div className="flex items-center gap-1.5">
-                          <strong className="quota-account-name">{formatProviderName(card.provider)}</strong>
-                          <span className="text-muted text-[11px] font-normal">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Link
+                            href={`/admin/providers/${providerSlug}`}
+                            className="quota-account-name hover:text-blue hover:underline transition-colors flex items-center gap-1"
+                            title={`Buka detail provider ${formatProviderName(card.provider)} (/admin/providers/${providerSlug})`}
+                          >
+                            <span>{formatProviderName(card.provider)}</span>
+                          </Link>
+                          <span className="text-muted text-[11px] font-normal truncate">
                             ({card.name})
                           </span>
                         </div>
@@ -923,6 +940,23 @@ export default function AdminQuotaTrackerPage() {
                       >
                         <Edit2 size={11} strokeWidth={1.75} />
                       </button>
+
+                      {/* Shortcut to Provider Page */}
+                      <Link
+                        href={`/admin/providers/${providerSlug}`}
+                        className="control btn-icon-only text-muted hover:text-blue"
+                        style={{
+                          width: "24px",
+                          height: "24px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                        title={`Buka manajemen provider ${formatProviderName(card.provider)} (/admin/providers/${providerSlug})`}
+                      >
+                        <ExternalLink size={11} strokeWidth={1.75} />
+                      </Link>
 
                       {/* Delete button */}
                       <button
@@ -1087,17 +1121,27 @@ export default function AdminQuotaTrackerPage() {
                   {/* Provider Card Header */}
                   <div className="quota-card-header">
                     <div className="quota-card-account-info">
-                      <ProviderAvatar
-                        slugOrId={pCard.providerSlug}
-                        name={pCard.displayName}
-                        size={32}
-                        imgSize={20}
-                      />
+                      <Link
+                        href={`/admin/providers/${pCard.providerSlug}`}
+                        title={`Buka manajemen provider ${pCard.displayName} (/admin/providers/${pCard.providerSlug})`}
+                        className="transition-opacity hover:opacity-80 flex-shrink-0"
+                      >
+                        <ProviderAvatar
+                          slugOrId={pCard.providerSlug}
+                          name={pCard.displayName}
+                          size={32}
+                          imgSize={20}
+                        />
+                      </Link>
                       <div className="quota-card-account-text">
                         <div className="flex items-center gap-1.5">
-                          <strong className="quota-account-name text-sm">
+                          <Link
+                            href={`/admin/providers/${pCard.providerSlug}`}
+                            className="quota-account-name text-sm font-semibold hover:text-blue hover:underline transition-colors"
+                            title={`Buka manajemen provider ${pCard.displayName} (/admin/providers/${pCard.providerSlug})`}
+                          >
                             {pCard.displayName}
-                          </strong>
+                          </Link>
                           <span className="text-[11px] text-muted font-normal">
                             ({pCard.totalAccounts} Akun)
                           </span>
@@ -1157,6 +1201,23 @@ export default function AdminQuotaTrackerPage() {
                           className={isAnySyncing ? "animate-spin text-blue" : ""}
                         />
                       </button>
+
+                      {/* Shortcut to Provider Page */}
+                      <Link
+                        href={`/admin/providers/${pCard.providerSlug}`}
+                        className="control btn-icon-only text-muted hover:text-blue"
+                        style={{
+                          width: "24px",
+                          height: "24px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                        title={`Buka manajemen provider ${pCard.displayName} (/admin/providers/${pCard.providerSlug})`}
+                      >
+                        <ExternalLink size={11} strokeWidth={1.75} />
+                      </Link>
 
                       {/* Switch to detailed per-account view filtered by this provider */}
                       <button
