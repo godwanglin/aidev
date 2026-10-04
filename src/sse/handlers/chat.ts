@@ -20,10 +20,49 @@ import { isComboModel, resolveComboCandidates, markComboModelCooldown } from "@/
 import { isRtkEnabled } from "@/lib/rtk/config";
 import { compressMessages, compressResponsesInput } from "@/lib/rtk/compressor";
 import { createKeepAliveTransform, SSE_HEADERS } from "@/sse/utils/keepalive";
+import zlib from "zlib";
+import * as fzstd from "fzstd";
 
 const UPSTREAM_BASE = (process.env.UPSTREAM_BASE_URL || "").replace(/\/$/, "");
 const UPSTREAM_KEY = process.env.UPSTREAM_API_KEY || "";
 const MIN_REASONING_HEADROOM = 16384;
+
+async function readAndDecompressRequestBody(req: NextRequest): Promise<string> {
+  const contentEncoding = (req.headers.get("content-encoding") || "").toLowerCase().trim();
+  const arrayBuffer = await req.arrayBuffer();
+  if (arrayBuffer.byteLength === 0) return "";
+  const buffer = Buffer.from(arrayBuffer);
+
+  // 1. Explicit Content-Encoding header
+  if (contentEncoding === "zstd") {
+    return Buffer.from(fzstd.decompress(buffer)).toString("utf-8");
+  }
+  if (contentEncoding === "gzip") {
+    return zlib.gunzipSync(buffer).toString("utf-8");
+  }
+  if (contentEncoding === "deflate") {
+    return zlib.inflateSync(buffer).toString("utf-8");
+  }
+  if (contentEncoding === "br") {
+    return zlib.brotliDecompressSync(buffer).toString("utf-8");
+  }
+
+  // 2. Magic byte sniffing (in case client or proxy omitted/stripped Content-Encoding)
+  // Zstandard magic header: 0x28 0xB5 0x2F 0xFD
+  if (buffer.length >= 4 && buffer[0] === 0x28 && buffer[1] === 0xb5 && buffer[2] === 0x2f && buffer[3] === 0xfd) {
+    try {
+      return Buffer.from(fzstd.decompress(buffer)).toString("utf-8");
+    } catch {}
+  }
+  // Gzip magic header: 0x1F 0x8B
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    try {
+      return zlib.gunzipSync(buffer).toString("utf-8");
+    } catch {}
+  }
+
+  return buffer.toString("utf-8");
+}
 
 function estimateTokens(text: string): number {
   if (!text) return 0;
@@ -68,7 +107,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   }
 
   try {
-    const rawText = await req.text();
+    const rawText = await readAndDecompressRequestBody(req);
     if (rawText) {
       rawBody = rawText;
       estimatedPromptTokens = estimateTokens(rawText);
@@ -358,6 +397,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         } else {
           delete chatPayload.tools;
           delete chatPayload.tool_choice;
+        }
+
+        // Forward reasoning_effort if client specified reasoning configuration
+        if (parsedCandidateJson.reasoning && typeof parsedCandidateJson.reasoning === "object") {
+          const effort = parsedCandidateJson.reasoning.effort;
+          if (effort && effort !== "none") {
+            chatPayload.reasoning_effort = effort;
+          }
         }
 
         delete chatPayload.input;
