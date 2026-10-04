@@ -229,6 +229,7 @@ class AdminLogger {
     upstreamModel?: string;
     status?: number;
     account?: string;
+    reasoningEffort?: string | null;
     rawError?: any;
   }): AdminLogItem {
     let msg = `🔴 ERROR`;
@@ -237,6 +238,9 @@ class AdminLogger {
     }
     if (params.model) {
       msg += ` · Model: ${params.model}`;
+    }
+    if (params.reasoningEffort) {
+      msg += ` · REASONING:${params.reasoningEffort.toUpperCase()}`;
     }
     let body = params.message;
     if (params.rawError) {

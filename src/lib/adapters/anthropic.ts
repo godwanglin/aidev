@@ -9,6 +9,9 @@ export interface AnthropicDispatchParams {
   activeConnectionId?: string | null;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: Record<string, string> | null;
   reqPath: string;
   clientWantsStream: boolean;
 }
@@ -212,6 +215,11 @@ export async function dispatchAnthropicMessages(params: AnthropicDispatchParams)
           model: modelName,
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
+          clientUserEmail: params.clientUserEmail,
+          reasoningEffort: params.reasoningEffort || null,
+          rawHeaders: params.rawHeaders,
+          rawBody: params.parsedBody || params.rawBody,
+          rawResponse: accumulatedText,
           promptTokens,
           completionTokens,
           totalTokens: promptTokens + completionTokens,
@@ -244,6 +252,11 @@ export async function dispatchAnthropicMessages(params: AnthropicDispatchParams)
     model: modelName,
     clientApiKeyId: params.clientApiKeyId,
     clientUserId: params.clientUserId,
+    clientUserEmail: params.clientUserEmail,
+    reasoningEffort: params.reasoningEffort || null,
+    rawHeaders: params.rawHeaders,
+    rawBody: params.parsedBody || params.rawBody,
+    rawResponse: chatJson,
     promptTokens,
     completionTokens,
     totalTokens: promptTokens + completionTokens,

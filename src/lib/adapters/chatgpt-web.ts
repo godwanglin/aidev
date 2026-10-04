@@ -151,6 +151,9 @@ export interface ChatGptWebDispatchParams {
   upstreamLogModel?: string;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: Record<string, string> | null;
   reqPath: string;
   clientWantsStream: boolean;
   tokensSavedRtk?: number;
@@ -488,6 +491,11 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
       model: logModel,
       clientApiKeyId: params.clientApiKeyId,
       clientUserId: params.clientUserId,
+      clientUserEmail: params.clientUserEmail,
+      reasoningEffort: params.reasoningEffort || null,
+      rawHeaders: params.rawHeaders,
+      rawBody: params.parsedBody || params.rawBody,
+      rawResponse: errText,
       promptTokens: 15,
       completionTokens: 0,
       totalTokens: 15,
@@ -750,6 +758,11 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           model: logModel,
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
+          clientUserEmail: params.clientUserEmail,
+          reasoningEffort: params.reasoningEffort || null,
+          rawHeaders: params.rawHeaders,
+          rawBody: params.parsedBody || params.rawBody,
+          rawResponse: accumulatedText,
           promptTokens,
           completionTokens,
           totalTokens: promptTokens + completionTokens,
@@ -845,6 +858,11 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     model: logModel,
     clientApiKeyId: params.clientApiKeyId,
     clientUserId: params.clientUserId,
+    clientUserEmail: params.clientUserEmail,
+    reasoningEffort: params.reasoningEffort || null,
+    rawHeaders: params.rawHeaders,
+    rawBody: params.parsedBody || params.rawBody,
+    rawResponse: accumulatedText,
     promptTokens,
     completionTokens,
     totalTokens,

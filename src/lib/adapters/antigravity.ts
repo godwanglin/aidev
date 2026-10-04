@@ -31,6 +31,9 @@ export interface AntigravityDispatchParams {
   upstreamLogModel?: string;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: Record<string, string> | null;
   reqPath: string;
   clientWantsStream: boolean;
   tokensSavedRtk?: number;
@@ -510,12 +513,37 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
   const isClaude = wireModel.includes("claude");
   const { contents, systemInstruction } = convertOpenAiMessagesToGemini(params.parsedBody.messages || [], wireModel);
 
+  // Resolve reasoning effort from explicit parameter, nested Codex responses format, or standard chat format
+  const rawEffort = params.reasoningEffort ||
+    (params.parsedBody?.reasoning && typeof params.parsedBody.reasoning === "object" ? params.parsedBody.reasoning.effort : undefined) ||
+    params.parsedBody?.reasoning_effort;
+  const effortStr = rawEffort ? String(rawEffort).toLowerCase() : "";
+
+  let thinkingBudget = 4096;
+  if (effortStr === "low" || effortStr === "minimal") {
+    thinkingBudget = 1024;
+  } else if (effortStr === "medium") {
+    thinkingBudget = 4096;
+  } else if (effortStr === "high") {
+    thinkingBudget = 8192;
+  } else if (effortStr === "xhigh" || effortStr === "ultra") {
+    thinkingBudget = 16384;
+  } else if (effortStr === "max") {
+    thinkingBudget = 24576;
+  } else if (effortStr === "none") {
+    thinkingBudget = 0;
+  } else if (wireModel.includes("high")) {
+    thinkingBudget = 8192;
+  } else if (wireModel.includes("low")) {
+    thinkingBudget = 1024;
+  }
+
   const generationConfig: any = {};
   if (params.parsedBody.max_tokens) {
     const requestedMax = Number(params.parsedBody.max_tokens);
-    generationConfig.maxOutputTokens = isClaude ? Math.min(requestedMax, 8192) : requestedMax;
+    generationConfig.maxOutputTokens = isClaude ? Math.min(requestedMax, 8192) : Math.max(requestedMax, thinkingBudget > 0 ? thinkingBudget + 2048 : 4096);
   } else {
-    generationConfig.maxOutputTokens = isClaude ? 8192 : wireModel.includes("thinking") ? 16384 : 4096;
+    generationConfig.maxOutputTokens = isClaude ? 8192 : Math.max(wireModel.includes("thinking") ? 16384 : 4096, thinkingBudget > 0 ? thinkingBudget + 4096 : 4096);
   }
   if (params.parsedBody.temperature !== undefined) {
     generationConfig.temperature = Number(params.parsedBody.temperature);
@@ -523,17 +551,18 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
   if (params.parsedBody.top_p !== undefined) {
     generationConfig.topP = Number(params.parsedBody.top_p);
   }
-  const reasoningEffort = params.parsedBody.reasoning_effort;
-  let thinkingBudget = 4096;
-  if (reasoningEffort === "high") thinkingBudget = 8192;
-  if (reasoningEffort === "low") thinkingBudget = 1024;
-  if (wireModel.includes("high")) thinkingBudget = 8192;
-  if (wireModel.includes("low")) thinkingBudget = 1024;
 
-  generationConfig.thinkingConfig = {
-    includeThoughts: true,
-    thinkingBudget,
-  };
+  if (thinkingBudget === 0) {
+    generationConfig.thinkingConfig = {
+      includeThoughts: false,
+      thinkingBudget: 0,
+    };
+  } else {
+    generationConfig.thinkingConfig = {
+      includeThoughts: true,
+      thinkingBudget,
+    };
+  }
 
   let geminiTools: any[] | undefined = undefined;
   if (Array.isArray(params.parsedBody.tools) && params.parsedBody.tools.length > 0) {
@@ -662,6 +691,8 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
       model: responseModel,
       upstreamModel: logModel,
       status: errStatus,
+      reasoningEffort: rawEffort || undefined,
+      account: params.clientUserEmail || undefined,
     });
 
     logUpstreamRequest({
@@ -670,6 +701,11 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
       model: logModel,
       clientApiKeyId: params.clientApiKeyId,
       clientUserId: params.clientUserId,
+      clientUserEmail: params.clientUserEmail,
+      reasoningEffort: rawEffort || null,
+      rawHeaders: params.rawHeaders,
+      rawBody: params.parsedBody || params.rawBody,
+      rawResponse: lastError,
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
@@ -840,9 +876,15 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
       } catch {}
     };
 
+    let accumulatedRawResponse = "";
+
     const transformStream = new TransformStream({
       transform(chunk, controller) {
-        sseBuffer += new TextDecoder().decode(chunk);
+        const decoded = new TextDecoder().decode(chunk);
+        if (accumulatedRawResponse.length < 50000) {
+          accumulatedRawResponse += decoded;
+        }
+        sseBuffer += decoded;
         const lines = sseBuffer.split("\n");
         sseBuffer = lines.pop() || "";
 
@@ -887,6 +929,8 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
           rtkSavings: rtkSaved,
           model: responseModel,
           upstreamModel: logModel,
+          reasoningEffort: rawEffort || undefined,
+          account: params.clientUserEmail || undefined,
         });
 
         logUpstreamRequest({
@@ -895,6 +939,11 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
           model: logModel,
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
+          clientUserEmail: params.clientUserEmail,
+          reasoningEffort: rawEffort || null,
+          rawHeaders: params.rawHeaders,
+          rawBody: params.parsedBody || params.rawBody,
+          rawResponse: accumulatedRawResponse || sseBuffer,
           promptTokens: promptTokens || 15,
           completionTokens: completionTokens || 25,
           totalTokens: totalTokens || (promptTokens + completionTokens) || 40,
@@ -990,6 +1039,11 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     model: logModel,
     clientApiKeyId: params.clientApiKeyId,
     clientUserId: params.clientUserId,
+    clientUserEmail: params.clientUserEmail,
+    reasoningEffort: rawEffort || null,
+    rawHeaders: params.rawHeaders,
+    rawBody: params.parsedBody || params.rawBody,
+    rawResponse: rawText,
     promptTokens: upstreamPrompt,
     completionTokens: completionTokens || 25,
     totalTokens: upstreamTotal,
@@ -1051,6 +1105,8 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     rtkSavings: rtkSaved,
     model: responseModel,
     upstreamModel: logModel,
+    reasoningEffort: rawEffort || undefined,
+    account: params.clientUserEmail || undefined,
   });
 
   return new Response(JSON.stringify(openAiResponse), {
