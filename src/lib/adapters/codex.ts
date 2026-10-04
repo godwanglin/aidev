@@ -4,6 +4,9 @@ import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
 
 export const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+export const CODEX_CLIENT_VERSION = "0.200.0";
+export const CODEX_USER_AGENT = `codex_cli_rs/${CODEX_CLIENT_VERSION}`;
+export const CODEX_ORIGINATOR = "codex_cli_rs";
 
 export function isCodexProvider(provider?: string, authType?: string): boolean {
   if (!provider) return false;
@@ -43,14 +46,29 @@ function extractAccountId(token: string): string | null {
 
 /**
  * Normalizes OpenAI model name for Codex backend.
- * Codex backend supports gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, etc.
+ * Codex backend supports gpt-6.1-sol, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, etc.
  */
 function resolveCodexModel(rawModel: string): string {
-  let clean = rawModel.replace(/^cx\//i, "").replace(/^codex\//i, "").trim();
+  let clean = rawModel
+    .replace(/^cx\//i, "")
+    .replace(/^codex\//i, "")
+    .replace(/^openai-codex\//i, "")
+    .trim();
   const lower = clean.toLowerCase();
   
   if (lower === "default" || lower === "default-model" || !clean) {
     return "gpt-5.5";
+  }
+  if (
+    lower === "gpt-6.1" ||
+    lower === "codex-6.1" ||
+    lower === "codex-6.1-sol" ||
+    lower === "codex 6.1 sol" ||
+    lower === "codex 6.1" ||
+    lower === "6.1-sol" ||
+    lower === "6.1 sol"
+  ) {
+    return "gpt-6.1-sol";
   }
   return clean;
 }
@@ -196,11 +214,11 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   const getHeaders = (token: string): Record<string, string> => {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      originator: "codex_cli_rs",
+      originator: CODEX_ORIGINATOR,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
-      "User-Agent": "codex_cli_rs/0.155.0",
-      version: "0.155.0",
+      "User-Agent": CODEX_USER_AGENT,
+      version: CODEX_CLIENT_VERSION,
     };
     if (accountId) {
       headers["ChatGPT-Account-Id"] = accountId;
@@ -820,10 +838,11 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   const getHeaders = (token: string): Record<string, string> => {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      originator: "codex_cli_rs",
+      originator: CODEX_ORIGINATOR,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
-      "User-Agent": "codex_cli_rs/0.154.0",
+      "User-Agent": CODEX_USER_AGENT,
+      version: CODEX_CLIENT_VERSION,
     };
     if (accountId) {
       headers["ChatGPT-Account-Id"] = accountId;
@@ -1201,11 +1220,11 @@ export async function dispatchCodexImage(params: CodexImageParams): Promise<{ cr
 
   const getHeaders = (token: string): Record<string, string> => ({
     Authorization: `Bearer ${token}`,
-    originator: "codex_cli_rs",
+    originator: CODEX_ORIGINATOR,
     "Content-Type": "application/json",
     Accept: "text/event-stream",
-    "User-Agent": "codex_cli_rs/0.155.0",
-    version: "0.155.0",
+    "User-Agent": CODEX_USER_AGENT,
+    version: CODEX_CLIENT_VERSION,
     session_id: crypto.randomUUID(),
     "x-client-request-id": crypto.randomUUID(),
     ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),

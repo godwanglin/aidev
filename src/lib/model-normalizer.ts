@@ -63,6 +63,13 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "OpenAI Codex",
     aliases: ["codex/", "openai-codex/"],
     defaultUpstreamModel: "gpt-5.5",
+    virtualModelMap: {
+      "gpt-6.1-sol": "gpt-6.1-sol",
+      "codex-6.1-sol": "gpt-6.1-sol",
+      "codex-6.1": "gpt-6.1-sol",
+      "6.1-sol": "gpt-6.1-sol",
+      "6.1": "gpt-6.1-sol",
+    },
   },
   {
     prefix: "gptweb/",
@@ -294,10 +301,22 @@ if (
     lower.startsWith("o1") ||
     lower.startsWith("o3") ||
     lower.startsWith("chatgpt-") ||
-    lower.startsWith("text-embedding")
+    lower.startsWith("text-embedding") ||
+    lower.startsWith("codex-") ||
+    lower.startsWith("codex ")
   ) {
     inferredProvider = "OPENAI";
     inferredName = "OpenAI";
+    if (
+      lower === "codex-6.1-sol" ||
+      lower === "codex-6.1" ||
+      lower === "codex 6.1 sol" ||
+      lower === "codex 6.1" ||
+      lower === "6.1-sol" ||
+      lower.includes("6.1")
+    ) {
+      inferredUpstream = "gpt-6.1-sol";
+    }
   } else if (lower.startsWith("claude-")) {
     inferredProvider = "CLAUDE_CODE";
     inferredName = "Claude Code";

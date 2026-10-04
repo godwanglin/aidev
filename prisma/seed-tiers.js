@@ -77,6 +77,8 @@ async function seed() {
       allowedModelIds: JSON.stringify([
         "deepseek-v4-pro",
         "gpt-5.5",
+        "gpt-6.1-sol",
+        "cx/gpt-6.1-sol",
         "ag/gemini-2.5-flash",
         "gem/gemini-2.5-flash",
         "gem/gemini-2.5-flash-lite",
@@ -111,6 +113,8 @@ async function seed() {
       allowedModelIds: JSON.stringify([
         "deepseek-v4-pro",
         "gpt-5.5",
+        "gpt-6.1-sol",
+        "cx/gpt-6.1-sol",
         "ag/gemini-2.5-flash",
         "gem/gemini-2.5-flash",
         "gem/gemini-2.5-pro",

@@ -356,6 +356,7 @@ export const SHARED_PROVIDER_MODELS: Record<string, { id: string; name: string }
     { id: "gptweb/research", name: "Deep Research" },
   ],
   OPENAI_CODEX: [
+    { id: "cx/gpt-6.1-sol", name: "GPT 6.1 Sol" },
     { id: "cx/gpt-5.5", name: "GPT 5.5" },
     { id: "cx/gpt-5.5-review", name: "GPT 5.5 Review" },
     { id: "cx/gpt-5.6-luna", name: "GPT 5.6 Luna" },
