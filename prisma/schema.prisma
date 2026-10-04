@@ -246,6 +246,11 @@ model UpstreamLog {
   model            String
   clientApiKeyId   String?
   clientUserId     String?
+  clientUserEmail  String?
+  reasoningEffort  String?
+  rawHeaders       String?             @db.Text
+  rawBody          String?             @db.LongText
+  rawResponse      String?             @db.LongText
   promptTokens     Int                 @default(0)
   completionTokens Int                 @default(0)
   totalTokens      Int                 @default(0)

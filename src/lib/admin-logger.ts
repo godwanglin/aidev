@@ -147,9 +147,13 @@ class AdminLogger {
     msgCount: number;
     toolCount: number;
     account: string;
+    reasoningEffort?: string | null;
+    clientUser?: string | null;
   }): AdminLogItem {
     const typeStr = params.stream ? "STREAM" : "SYNC";
-    const msg = `${params.model} → ${params.upstreamModel} · FMT: ${params.fromFormat}→${params.toFormat} · ${typeStr} · ${params.msgCount} MSG · ${params.toolCount} TOOL · ACCOUNT:${params.account}`;
+    const reasoningStr = params.reasoningEffort ? ` · REASONING:${params.reasoningEffort.toUpperCase()}` : "";
+    const clientStr = params.clientUser ? ` · CLIENT:${params.clientUser}` : "";
+    const msg = `${params.model} → ${params.upstreamModel} · FMT: ${params.fromFormat}→${params.toFormat} · ${typeStr} · ${params.msgCount} MSG · ${params.toolCount} TOOL${reasoningStr}${clientStr} · ACCOUNT:${params.account}`;
     return this.log({
       scope: "POST",
       level: "info",
@@ -167,6 +171,7 @@ class AdminLogger {
     model?: string;
     upstreamModel?: string;
     account?: string;
+    reasoningEffort?: string | null;
   }): AdminLogItem {
     let msg = `🟢 DONE ${params.durationMs}ms`;
     if (params.ttftMs !== undefined) {
@@ -175,6 +180,9 @@ class AdminLogger {
     msg += ` · IN ${params.promptTokens} · OUT ${params.completionTokens}`;
     if (params.rtkSavings && params.rtkSavings > 0) {
       msg += ` · RTK SAVED ${params.rtkSavings}`;
+    }
+    if (params.reasoningEffort) {
+      msg += ` · REASONING:${params.reasoningEffort.toUpperCase()}`;
     }
     return this.log({
       scope: "DONE",

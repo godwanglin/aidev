@@ -108,6 +108,20 @@ interface UpstreamEvent {
   model: string;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  clientUser?: {
+    id?: string | null;
+    email: string;
+    name?: string | null;
+    role?: string;
+    tier?: string;
+    keyPrefix?: string | null;
+    keyName?: string | null;
+  } | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: any;
+  rawBody?: any;
+  rawResponse?: any;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -203,6 +217,8 @@ export default function AdminUsagePage() {
   // Inspector Modal
   const [inspectEvent, setInspectEvent] = useState<UpstreamEvent | null>(null);
   const [copiedJson, setCopiedJson] = useState(false);
+  const [activeRawTab, setActiveRawTab] = useState<"body" | "headers" | "response" | "telemetry">("body");
+  const [copiedTab, setCopiedTab] = useState(false);
 
   // Clear Database Telemetry Modal State
   const [clearModalOpen, setClearModalOpen] = useState(false);
@@ -1306,53 +1322,105 @@ print(response.choices[0].message.content)`,
                         </span>
                       </td>
 
-                      {/* Account / Connection */}
+                      {/* Account / Connection & Client Requester */}
                       <td>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-medium" style={{ color: "var(--ink)" }}>
-                            {ev.connection?.name || "Direct Upstream"}
-                          </span>
-                          {ev.connection?.accountEmail && (
-                            <span className="text-muted" style={{ fontSize: "11px" }}>
-                              {ev.connection.accountEmail}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-semibold" style={{ color: "var(--ink)" }}>
+                              {ev.connection?.name || "Direct Upstream"}
                             </span>
+                            {ev.connection?.accountEmail && (
+                              <span className="text-muted" style={{ fontSize: "11px" }}>
+                                {ev.connection.accountEmail}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Client Requester Account */}
+                          {(ev.clientUser?.email || ev.clientUserEmail) && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[10.5px] font-medium mono"
+                                style={{
+                                  backgroundColor: "rgba(59, 130, 246, 0.1)",
+                                  color: "#3b82f6",
+                                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                                }}
+                                title={`Client Requester User: ${ev.clientUser?.email || ev.clientUserEmail} (${ev.clientUser?.tier || "FREE"})`}
+                              >
+                                👤 {ev.clientUser?.email || ev.clientUserEmail}
+                              </span>
+                            </div>
                           )}
                         </div>
                       </td>
 
-                      {/* Model */}
+                      {/* Model & Reasoning Effort */}
                       <td>
-                        {ev.model?.includes(" -> ") ? (
-                          (() => {
-                            const [comboName, originalModel] = ev.model.split(" -> ");
-                            return (
-                              <div className="flex items-center gap-1.5 mono text-xs font-medium">
-                                <span
-                                  className="px-1.5 py-0.5 rounded text-[11px] font-semibold"
-                                  style={{
-                                    backgroundColor: "rgba(147, 51, 234, 0.1)",
-                                    color: "#9333ea",
-                                    border: "1px solid rgba(147, 51, 234, 0.25)",
-                                  }}
-                                  title={`Combo Model: ${comboName}`}
-                                >
-                                  {comboName}
-                                </span>
-                                <span className="text-muted text-[11px] font-bold">→</span>
-                                <span
-                                  className="text-blue font-medium"
-                                  title={`Target Model: ${originalModel}`}
-                                >
-                                  {originalModel}
-                                </span>
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          <span className="mono text-xs font-medium text-blue">
-                            {ev.model}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {ev.model?.includes(" -> ") ? (
+                            (() => {
+                              const [comboName, originalModel] = ev.model.split(" -> ");
+                              return (
+                                <div className="flex items-center gap-1.5 mono text-xs font-medium">
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[11px] font-semibold"
+                                    style={{
+                                      backgroundColor: "rgba(147, 51, 234, 0.1)",
+                                      color: "#9333ea",
+                                      border: "1px solid rgba(147, 51, 234, 0.25)",
+                                    }}
+                                    title={`Combo Model: ${comboName}`}
+                                  >
+                                    {comboName}
+                                  </span>
+                                  <span className="text-muted text-[11px] font-bold">→</span>
+                                  <span
+                                    className="text-blue font-medium"
+                                    title={`Target Model: ${originalModel}`}
+                                  >
+                                    {originalModel}
+                                  </span>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <span className="mono text-xs font-medium text-blue">
+                              {ev.model}
+                            </span>
+                          )}
+
+                          {/* Reasoning Effort Badge */}
+                          {ev.reasoningEffort && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase mono tracking-wider"
+                              style={{
+                                backgroundColor:
+                                  ev.reasoningEffort.toLowerCase() === "high"
+                                    ? "rgba(244, 63, 94, 0.15)"
+                                    : ev.reasoningEffort.toLowerCase() === "medium"
+                                    ? "rgba(245, 158, 11, 0.15)"
+                                    : "rgba(56, 189, 248, 0.15)",
+                                color:
+                                  ev.reasoningEffort.toLowerCase() === "high"
+                                    ? "#f43f5e"
+                                    : ev.reasoningEffort.toLowerCase() === "medium"
+                                    ? "#f59e0b"
+                                    : "#38bdf8",
+                                border: `1px solid ${
+                                  ev.reasoningEffort.toLowerCase() === "high"
+                                    ? "rgba(244, 63, 94, 0.3)"
+                                    : ev.reasoningEffort.toLowerCase() === "medium"
+                                    ? "rgba(245, 158, 11, 0.3)"
+                                    : "rgba(56, 189, 248, 0.3)"
+                                }`,
+                              }}
+                              title={`Reasoning Effort: ${ev.reasoningEffort}`}
+                            >
+                              ⚡ {ev.reasoningEffort}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Tokens (In / Out) */}
@@ -1680,10 +1748,35 @@ print(response.choices[0].message.content)`,
 
                 {/* Connection & Routing Meta */}
                 <div className="inspector-meta-box">
+                  {/* Client Requester Account Card */}
+                  <div className="inspector-meta-item" style={{ gridColumn: "1 / -1", background: "rgba(59, 130, 246, 0.08)", padding: "10px 14px", borderRadius: "8px", border: "1px solid rgba(59, 130, 246, 0.25)" }}>
+                    <div className="flex items-center justify-between w-full flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <User size={15} style={{ color: "#3b82f6" }} />
+                        <span style={{ fontWeight: 600, color: "var(--ink)", fontSize: "12.5px" }}>Akun Pengirim (Client Account):</span>
+                        <span className="mono font-bold" style={{ color: "#3b82f6", fontSize: "13px" }}>
+                          {inspectEvent.clientUser?.email || inspectEvent.clientUserEmail || "Direct Gateway API"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {inspectEvent.clientUser?.tier && (
+                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold" style={{ background: "rgba(147, 51, 234, 0.15)", color: "#a855f7", border: "1px solid rgba(147, 51, 234, 0.3)" }}>
+                            PAKET: {inspectEvent.clientUser.tier}
+                          </span>
+                        )}
+                        {inspectEvent.clientUser?.keyPrefix && (
+                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold mono" style={{ background: "rgba(100, 116, 139, 0.15)", color: "#94a3b8", border: "1px solid rgba(100, 116, 139, 0.3)" }}>
+                            KEY: {inspectEvent.clientUser.keyPrefix}...
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="inspector-meta-item">
                     <span className="inspector-meta-label">
                       <Network size={13} style={{ color: "var(--muted)" }} />
-                      <span>Connection Name:</span>
+                      <span>Target Upstream:</span>
                     </span>
                     <span className="inspector-meta-val">
                       {inspectEvent.connection?.name || "Default Gateway Environment"}
@@ -1693,9 +1786,20 @@ print(response.choices[0].message.content)`,
                     <div className="inspector-meta-item">
                       <span className="inspector-meta-label">
                         <User size={13} style={{ color: "var(--muted)" }} />
-                        <span>Account Email:</span>
+                        <span>Upstream Account:</span>
                       </span>
                       <span className="inspector-meta-val">{inspectEvent.connection.accountEmail}</span>
+                    </div>
+                  )}
+                  {inspectEvent.reasoningEffort && (
+                    <div className="inspector-meta-item">
+                      <span className="inspector-meta-label">
+                        <Zap size={13} style={{ color: "#38bdf8" }} />
+                        <span>Reasoning Effort:</span>
+                      </span>
+                      <span className="inspector-meta-val font-bold uppercase mono" style={{ color: "#38bdf8" }}>
+                        ⚡ {inspectEvent.reasoningEffort}
+                      </span>
                     </div>
                   )}
                   <div className="inspector-meta-item">
@@ -1718,25 +1822,128 @@ print(response.choices[0].message.content)`,
                   )}
                 </div>
 
-                {/* Raw JSON Telemetry */}
-                <div className="inspector-code-box">
-                  <div className="inspector-code-header">
-                    <span className="inspector-code-header-title">
-                      <Code2 size={13} />
-                      <span>Raw Event Telemetry JSON</span>
-                    </span>
+                {/* Raw Telemetry Inspector Tabs */}
+                <div style={{ marginTop: "18px" }}>
+                  <div className="flex items-center justify-between border-b" style={{ borderColor: "var(--border)", paddingBottom: "10px", gap: "8px", flexWrap: "wrap" }}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setActiveRawTab("body")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                          activeRawTab === "body"
+                            ? "bg-blue text-white shadow-sm"
+                            : "text-muted hover:text-ink hover:bg-slate-800/40"
+                        }`}
+                        style={{
+                          background: activeRawTab === "body" ? "#3b82f6" : "transparent",
+                          color: activeRawTab === "body" ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        Request Body
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveRawTab("headers")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                          activeRawTab === "headers"
+                            ? "bg-blue text-white shadow-sm"
+                            : "text-muted hover:text-ink hover:bg-slate-800/40"
+                        }`}
+                        style={{
+                          background: activeRawTab === "headers" ? "#3b82f6" : "transparent",
+                          color: activeRawTab === "headers" ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        Request Headers
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveRawTab("response")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                          activeRawTab === "response"
+                            ? "bg-blue text-white shadow-sm"
+                            : "text-muted hover:text-ink hover:bg-slate-800/40"
+                        }`}
+                        style={{
+                          background: activeRawTab === "response" ? "#3b82f6" : "transparent",
+                          color: activeRawTab === "response" ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        Raw Response
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveRawTab("telemetry")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                          activeRawTab === "telemetry"
+                            ? "bg-blue text-white shadow-sm"
+                            : "text-muted hover:text-ink hover:bg-slate-800/40"
+                        }`}
+                        style={{
+                          background: activeRawTab === "telemetry" ? "#3b82f6" : "transparent",
+                          color: activeRawTab === "telemetry" ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        Full Telemetry JSON
+                      </button>
+                    </div>
+
                     <button
                       className="inspector-copy-btn"
-                      onClick={copyEventJson}
+                      onClick={() => {
+                        let textToCopy = "";
+                        if (activeRawTab === "body") {
+                          textToCopy = typeof inspectEvent.rawBody === "string" ? inspectEvent.rawBody : JSON.stringify(inspectEvent.rawBody || {}, null, 2);
+                        } else if (activeRawTab === "headers") {
+                          textToCopy = typeof inspectEvent.rawHeaders === "string" ? inspectEvent.rawHeaders : JSON.stringify(inspectEvent.rawHeaders || {}, null, 2);
+                        } else if (activeRawTab === "response") {
+                          textToCopy = typeof inspectEvent.rawResponse === "string" ? inspectEvent.rawResponse : JSON.stringify(inspectEvent.rawResponse || {}, null, 2);
+                        } else {
+                          textToCopy = JSON.stringify(inspectEvent, null, 2);
+                        }
+                        navigator.clipboard.writeText(textToCopy);
+                        setCopiedTab(true);
+                        setTimeout(() => setCopiedTab(false), 2000);
+                      }}
                       type="button"
+                      style={{ padding: "4px 8px", fontSize: "11.5px" }}
                     >
-                      {copiedJson ? <Check size={11} className="text-green" /> : <Copy size={11} />}
-                      <span>{copiedJson ? "Copied" : "Copy JSON"}</span>
+                      {copiedTab ? <Check size={12} className="text-green" /> : <Copy size={12} />}
+                      <span>{copiedTab ? "Copied!" : "Copy"}</span>
                     </button>
                   </div>
-                  <pre className="inspector-pre">
-                    <code>{JSON.stringify(inspectEvent, null, 2)}</code>
-                  </pre>
+
+                  {/* Tab Contents Code Box */}
+                  <div className="inspector-code-box" style={{ marginTop: "10px" }}>
+                    <pre className="inspector-pre" style={{ maxHeight: "400px", overflowY: "auto" }}>
+                      <code>
+                        {activeRawTab === "body" && (
+                          inspectEvent.rawBody
+                            ? (typeof inspectEvent.rawBody === "string"
+                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawBody), null, 2); } catch { return inspectEvent.rawBody; } })()
+                                : JSON.stringify(inspectEvent.rawBody, null, 2))
+                            : "// Tidak ada data raw body yang tersimpan untuk request ini."
+                        )}
+                        {activeRawTab === "headers" && (
+                          inspectEvent.rawHeaders
+                            ? (typeof inspectEvent.rawHeaders === "string"
+                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawHeaders), null, 2); } catch { return inspectEvent.rawHeaders; } })()
+                                : JSON.stringify(inspectEvent.rawHeaders, null, 2))
+                            : "// Tidak ada data raw headers yang tersimpan untuk request ini."
+                        )}
+                        {activeRawTab === "response" && (
+                          inspectEvent.rawResponse
+                            ? (typeof inspectEvent.rawResponse === "string"
+                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawResponse), null, 2); } catch { return inspectEvent.rawResponse; } })()
+                                : JSON.stringify(inspectEvent.rawResponse, null, 2))
+                            : "// Tidak ada data raw response yang tersimpan untuk request ini."
+                        )}
+                        {activeRawTab === "telemetry" && (
+                          JSON.stringify(inspectEvent, null, 2)
+                        )}
+                      </code>
+                    </pre>
+                  </div>
                 </div>
               </div>
             </div>

@@ -301,12 +301,19 @@ export async function markConnectionCooldown(connectionId: string, durationSecon
   } catch {}
 }
 
+import { telemetryStore } from "./telemetry-store";
+
 export async function logUpstreamRequest(data: {
   connectionId?: string | null;
   provider: string;
   model: string;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: string | Record<string, any> | null;
+  rawBody?: string | Record<string, any> | null;
+  rawResponse?: string | null;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -318,12 +325,22 @@ export async function logUpstreamRequest(data: {
 }): Promise<void> {
   const rtkSaved = Number(data.tokensSavedRtk) || 0;
   const safeConnectionId = (data.connectionId && !data.connectionId.startsWith("default-")) ? data.connectionId : null;
-  const safeData = {
+  const rawHeadersStr = data.rawHeaders ? (typeof data.rawHeaders === "object" ? JSON.stringify(data.rawHeaders) : String(data.rawHeaders)) : null;
+  const rawBodyStr = data.rawBody ? (typeof data.rawBody === "object" ? JSON.stringify(data.rawBody) : String(data.rawBody)) : null;
+  const rawResponseStr = data.rawResponse ? (typeof data.rawResponse === "object" ? JSON.stringify(data.rawResponse) : String(data.rawResponse)) : null;
+
+  const safeData: any = {
     ...data,
     model: String(data.model || "default").slice(0, 190),
     connectionId: safeConnectionId,
+    clientUserEmail: data.clientUserEmail ? String(data.clientUserEmail).slice(0, 190) : null,
+    reasoningEffort: data.reasoningEffort ? String(data.reasoningEffort).slice(0, 50) : null,
+    rawHeaders: rawHeadersStr,
+    rawBody: rawBodyStr,
+    rawResponse: rawResponseStr,
     failoverReason: data.failoverReason ? String(data.failoverReason).slice(0, 180) : null,
   };
+
   try {
     const created = await prisma.upstreamLog.create({
       data: {
@@ -331,6 +348,20 @@ export async function logUpstreamRequest(data: {
         tokensSavedRtk: rtkSaved,
       }
     });
+
+    telemetryStore.set(created.id, {
+      id: created.id,
+      timestamp: new Date().toISOString(),
+      clientAccount: {
+        userId: data.clientUserId,
+        email: data.clientUserEmail,
+      },
+      reasoningEffort: data.reasoningEffort,
+      rawHeaders: data.rawHeaders,
+      rawBody: data.rawBody,
+      rawResponse: data.rawResponse,
+    });
+
     if (rtkSaved > 0) {
       try {
         await prisma.$executeRawUnsafe(
@@ -340,10 +371,24 @@ export async function logUpstreamRequest(data: {
     }
   } catch {
     try {
-      const { tokensSavedRtk, ...rest } = safeData;
+      const { tokensSavedRtk, rawHeaders, rawBody, rawResponse, clientUserEmail, reasoningEffort, ...rest } = safeData;
       const created = await prisma.upstreamLog.create({
         data: rest,
       });
+
+      telemetryStore.set(created.id, {
+        id: created.id,
+        timestamp: new Date().toISOString(),
+        clientAccount: {
+          userId: data.clientUserId,
+          email: data.clientUserEmail,
+        },
+        reasoningEffort: data.reasoningEffort,
+        rawHeaders: data.rawHeaders,
+        rawBody: data.rawBody,
+        rawResponse: data.rawResponse,
+      });
+
       if (rtkSaved > 0) {
         try {
           await prisma.$executeRawUnsafe(

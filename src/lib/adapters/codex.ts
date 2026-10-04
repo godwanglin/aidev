@@ -25,6 +25,9 @@ export interface CodexDispatchParams {
   upstreamLogModel?: string;
   clientApiKeyId?: string | null;
   clientUserId?: string | null;
+  clientUserEmail?: string | null;
+  reasoningEffort?: string | null;
+  rawHeaders?: any;
   reqPath: string;
   clientWantsStream: boolean;
 }
@@ -958,12 +961,17 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     let completionTokens = 0;
     let totalTokens = 0;
     let buffer = "";
+    let accumulatedChunks = "";
     let firstTokenTime: number | null = null;
 
     const responseModel = params.clientRequestedModel || params.model;
     const transformStream = new TransformStream({
       transform(chunk, controller) {
-        buffer += new TextDecoder().decode(chunk);
+        const decoded = new TextDecoder().decode(chunk);
+        if (accumulatedChunks.length < 50000) {
+          accumulatedChunks += decoded;
+        }
+        buffer += decoded;
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
@@ -1012,6 +1020,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
             completionTokens: hasTokens ? completionTokens : 0,
             model: responseModel,
             upstreamModel: logModel,
+            reasoningEffort: params.reasoningEffort,
           });
         } else {
           adminLogger.error({
@@ -1028,6 +1037,11 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
           model: logModel,
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
+          clientUserEmail: params.clientUserEmail,
+          reasoningEffort: params.reasoningEffort,
+          rawHeaders: params.rawHeaders,
+          rawBody: params.rawBody,
+          rawResponse: accumulatedChunks,
           promptTokens: promptTokens || 15,
           completionTokens: hasTokens ? completionTokens : 0,
           totalTokens: hasTokens ? (promptTokens + completionTokens) : (promptTokens || 15),
@@ -1103,6 +1117,11 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     model: logModel,
     clientApiKeyId: params.clientApiKeyId,
     clientUserId: params.clientUserId,
+    clientUserEmail: params.clientUserEmail,
+    reasoningEffort: params.reasoningEffort,
+    rawHeaders: params.rawHeaders,
+    rawBody: params.rawBody,
+    rawResponse: accumulatedContent,
     promptTokens: promptTokens || 15,
     completionTokens: hasTokens ? (completionTokens || 20) : 0,
     totalTokens: hasTokens ? (totalTokens || (promptTokens + completionTokens) || 35) : (promptTokens || 15),

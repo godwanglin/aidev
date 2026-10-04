@@ -91,6 +91,60 @@ export async function GET(req: NextRequest) {
           }
         } catch {}
       }
+
+      // Enrich logs with clientUser, clientApiKey, and raw telemetry
+      try {
+        const userIds = [...new Set(logs.map((l: any) => l.clientUserId).filter(Boolean))] as string[];
+        const keyIds = [...new Set(logs.map((l: any) => l.clientApiKeyId).filter(Boolean))] as string[];
+
+        const [users, apiKeys] = await Promise.all([
+          userIds.length > 0
+            ? prisma.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, email: true, name: true, role: true, subscriptionTier: true },
+              })
+            : [],
+          keyIds.length > 0
+            ? prisma.apiKey.findMany({
+                where: { id: { in: keyIds } },
+                select: { id: true, name: true, prefix: true, user: { select: { email: true, name: true } } },
+              })
+            : [],
+        ]);
+
+        const userMap = new Map(users.map((u) => [u.id, u]));
+        const keyMap = new Map(apiKeys.map((k) => [k.id, k]));
+        const { telemetryStore } = await import("@/lib/telemetry-store");
+
+        for (const log of logs as any[]) {
+          const cached = telemetryStore.get(log.id);
+          const user = log.clientUserId ? userMap.get(log.clientUserId) : null;
+          const key = log.clientApiKeyId ? keyMap.get(log.clientApiKeyId) : null;
+
+          log.clientUser = {
+            id: user?.id || log.clientUserId || null,
+            email: user?.email || log.clientUserEmail || key?.user?.email || cached?.clientAccount?.email || "Direct API",
+            name: user?.name || key?.user?.name || cached?.clientAccount?.name || null,
+            role: user?.role || "USER",
+            tier: user?.subscriptionTier || "FREE",
+            keyPrefix: key?.prefix || null,
+            keyName: key?.name || null,
+          };
+
+          if (!log.reasoningEffort && cached?.reasoningEffort) {
+            log.reasoningEffort = cached.reasoningEffort;
+          }
+          if (!log.rawHeaders && cached?.rawHeaders) {
+            log.rawHeaders = cached.rawHeaders;
+          }
+          if (!log.rawBody && cached?.rawBody) {
+            log.rawBody = cached.rawBody;
+          }
+          if (!log.rawResponse && cached?.rawResponse) {
+            log.rawResponse = cached.rawResponse;
+          }
+        }
+      } catch {}
     }
 
     return NextResponse.json({

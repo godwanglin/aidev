@@ -69,6 +69,17 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 3.5));
 }
 
+function extractReasoningEffort(body: any): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  if (body.reasoning && typeof body.reasoning === "object" && typeof body.reasoning.effort === "string") {
+    return body.reasoning.effort;
+  }
+  if (typeof body.reasoning_effort === "string") {
+    return body.reasoning_effort;
+  }
+  return undefined;
+}
+
 /**
  * For direct model requests (non-combo), respects the client's requested model strictly
  * without silent cross-provider hijacking. Multi-model failovers are handled via explicit Combos.
@@ -90,6 +101,15 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   const startTime = Date.now();
   const subPath = options.subPath;
   const reqPath = `/v1/${subPath}`;
+
+  const rawHeadersObj: Record<string, string> = {};
+  req.headers.forEach((v, k) => {
+    if (k.toLowerCase() === "authorization") {
+      rawHeadersObj[k] = v.length > 20 ? `${v.slice(0, 15)}...${v.slice(-6)}` : v;
+    } else {
+      rawHeadersObj[k] = v;
+    }
+  });
 
   let rawBody: string | undefined;
   let parsedModel: string | undefined;
@@ -215,7 +235,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
     }
   }
 
-  const userEmail = (auth.apiKey as any)?.user?.email || auth.apiKey.name || "client";
+  const clientUserEmail = (auth.apiKey as any)?.user?.email || null;
+  const userEmail = clientUserEmail || auth.apiKey.name || "client";
   const formattedBalance = new Intl.NumberFormat("id-ID").format(Math.round(clientUserBalanceUsd));
   adminLogger.clientRequest({
     account: userEmail,
@@ -333,6 +354,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       ? candidateModel
       : (resolvedRoute?.upstreamModel || candidateModel);
 
+    const candidateReasoningEffort = extractReasoningEffort(parsedCandidateJson);
+
     adminLogger.post({
       model: clientRequestedModel,
       upstreamModel: displayTargetModel,
@@ -342,6 +365,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       msgCount,
       toolCount,
       account: upstreamAccount,
+      reasoningEffort: candidateReasoningEffort,
+      clientUser: userEmail,
     });
 
     if (subPath === "messages") {
@@ -464,6 +489,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           upstreamLogModel,
           clientApiKeyId: apiKeyId,
           clientUserId,
+          clientUserEmail,
+          reasoningEffort: candidateReasoningEffort,
+          rawHeaders: rawHeadersObj,
           reqPath,
           clientWantsStream,
         });
@@ -1043,12 +1071,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         let totalTokens = 0;
         let generatedChars = 0;
         let firstTokenTime: number | null = null;
+        let accumulatedResponseText = "";
 
         const transformStream = new TransformStream({
           transform(chunk, controller) {
             let chunkToEnqueue = chunk;
             try {
               const text = new TextDecoder().decode(chunk);
+              if (accumulatedResponseText.length < 50000) {
+                accumulatedResponseText += text;
+              }
               const lines = text.split("\n");
               let modified = false;
               const newLines = lines.map((line) => {
@@ -1118,6 +1150,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 model: clientRequestedModel,
                 upstreamModel: upstreamLogModel,
                 account: userEmail,
+                reasoningEffort: candidateReasoningEffort,
               });
             } else {
               adminLogger.error({
@@ -1135,6 +1168,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               model: upstreamLogModel,
               clientApiKeyId: apiKeyId,
               clientUserId,
+              clientUserEmail,
+              reasoningEffort: candidateReasoningEffort,
+              rawHeaders: rawHeadersObj,
+              rawBody: parsedCandidateJson || candidateRawBody,
+              rawResponse: accumulatedResponseText,
               promptTokens: upstreamPromptTokens,
               completionTokens: upstreamCompletionTokens,
               totalTokens: upstreamTotalTokens,
@@ -1228,6 +1266,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         model: upstreamLogModel,
         clientApiKeyId: apiKeyId,
         clientUserId,
+        clientUserEmail,
+        reasoningEffort: candidateReasoningEffort,
+        rawHeaders: rawHeadersObj,
+        rawBody: parsedCandidateJson || candidateRawBody,
+        rawResponse: rawResponseText,
         promptTokens: upstreamPromptTokens,
         completionTokens: upstreamCompletionTokens,
         totalTokens: upstreamTotalTokens,
@@ -1260,6 +1303,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           model: clientRequestedModel,
           upstreamModel: upstreamLogModel,
           account: userEmail,
+          reasoningEffort: candidateReasoningEffort,
         });
       }
 

@@ -247,6 +247,7 @@ export default function AdminLogsPage() {
             else if (p.startsWith("IN")) color = "#38bdf8";
             else if (p.startsWith("OUT")) color = "#4ade80";
             else if (p.startsWith("RTK")) color = "#c084fc";
+            else if (p.startsWith("REASONING:")) color = "#38bdf8";
             return (
               <span key={i}>
                 <span style={{ color: "#475569", margin: "0 6px" }}>·</span>
@@ -281,6 +282,17 @@ export default function AdminLogsPage() {
 
             if (p.startsWith("FMT:")) {
               color = "#c084fc";
+            } else if (p.startsWith("REASONING:")) {
+              const val = p.replace("REASONING:", "").toLowerCase();
+              color = val === "high" ? "#f43f5e" : val === "medium" ? "#fbbf24" : "#38bdf8";
+              bg = val === "high" ? "rgba(244, 63, 94, 0.15)" : val === "medium" ? "rgba(251, 191, 36, 0.15)" : "rgba(56, 189, 248, 0.15)";
+              border = `1px solid ${color}40`;
+              padding = "1px 6px";
+            } else if (p.startsWith("CLIENT:")) {
+              color = "#34d399";
+              bg = "rgba(52, 211, 153, 0.12)";
+              border = "1px solid rgba(52, 211, 153, 0.25)";
+              padding = "1px 6px";
             } else if (p === "STREAM" || p === "SYNC") {
               color = p === "STREAM" ? "#38bdf8" : "#94a3b8";
               bg = p === "STREAM" ? "rgba(56, 189, 248, 0.12)" : "rgba(148, 163, 184, 0.1)";
