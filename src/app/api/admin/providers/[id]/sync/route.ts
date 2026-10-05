@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { syncConnectionQuota } from "@/lib/quota-sync";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -10,64 +10,34 @@ async function verifyAdmin() {
   return user;
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const admin = await verifyAdmin();
     if (!admin) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({}));
-    const category = body.category || "ALL"; // "OAUTH" | "FREE_TIER" | "ALL"
-
-    const connections = await prisma.providerConnection.findMany({
-      where: { isActive: true },
-    });
-
-    const results: any[] = [];
-
-    for (const conn of connections) {
-      // Simulate/measure ping latency
-      const start = Date.now();
-      let status = "NORMAL";
-      let error = null;
-
-      try {
-        // Quick latency check
-        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 80) + 40));
-        status = "NORMAL";
-      } catch (err: any) {
-        status = "ERROR";
-        error = err.message;
-      }
-
-      const latencyMs = Date.now() - start;
-
-      // Update syncStatus & lastSyncedAt
-      await prisma.providerConnection.update({
-        where: { id: conn.id },
-        data: {
-          syncStatus: status,
-          lastSyncedAt: new Date(),
-        },
-      });
-
-      results.push({
-        id: conn.id,
-        name: conn.name,
-        provider: conn.provider,
-        authType: conn.authType,
-        latencyMs,
-        status,
-        error,
-      });
+    const { id } = await params;
+    if (!id) {
+      return NextResponse.json({ error: "Connection ID is required" }, { status: 400 });
     }
 
+    const result = await syncConnectionQuota(id);
+
     return NextResponse.json({
-      success: true,
-      message: `Tested ${results.length} active connection(s).`,
-      testedCount: results.length,
-      results,
+      success: result.status !== "ERROR",
+      connection: {
+        id: result.connectionId,
+        provider: result.provider,
+        syncStatus: result.status,
+        quotaLimitTokens: result.quotaLimitTokens ? String(result.quotaLimitTokens) : null,
+        quotaUsedTokens: result.quotaUsedTokens ? String(result.quotaUsedTokens) : null,
+        quotaRemainingUsd: result.quotaRemainingUsd,
+      },
+      ...result,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

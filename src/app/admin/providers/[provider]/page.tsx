@@ -248,9 +248,11 @@ export default function ProviderDetailPage() {
         );
         setConnections(matching);
         if (isCodexProvider) {
-          matching.forEach((c: ConnectionItem) => {
-            fetchResetCreditsForConn(c.id);
-          });
+          (async () => {
+            for (const c of matching) {
+              await fetchResetCreditsForConn(c.id);
+            }
+          })();
         }
       }
     } catch {

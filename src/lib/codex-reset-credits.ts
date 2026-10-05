@@ -45,6 +45,13 @@ function toFiniteNumber(value: any, fallback = 0): number {
   return fallback;
 }
 
+interface CachedResetCredits {
+  data: CodexResetCreditsResult;
+  timestamp: number;
+}
+const resetCreditsCache = new Map<string, CachedResetCredits>();
+const RESET_CREDITS_CACHE_TTL = 60 * 1000; // 60 seconds
+
 /**
  * Fetch available Codex reset credits and expiry dates for a connection
  */
@@ -54,6 +61,13 @@ export async function getCodexRateLimitResetCredits(
 ): Promise<CodexResetCreditsResult> {
   if (!accessToken) {
     throw new Error("No Codex access token available. Please re-authorize the connection.");
+  }
+
+  const cacheKey = `${accessToken.slice(0, 30)}_${chatgptAccountId || ""}`;
+  const cached = resetCreditsCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < RESET_CREDITS_CACHE_TTL) {
+    return cached.data;
   }
 
   const headers: Record<string, string> = {
@@ -66,10 +80,18 @@ export async function getCodexRateLimitResetCredits(
     headers["ChatGPT-Account-ID"] = chatgptAccountId;
   }
 
-  const response = await fetch(CODEX_RESET_CREDITS_URL, {
-    method: "GET",
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(CODEX_RESET_CREDITS_URL, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(5000), // 5 seconds max timeout
+    });
+  } catch (netErr: any) {
+    // If timeout or network failure, return last cached if available or fallback safely
+    if (cached) return cached.data;
+    throw new Error(`Codex reset credits network error: ${netErr.message || "Request timed out"}`);
+  }
 
   let data: any = null;
   try {
@@ -101,10 +123,17 @@ export async function getCodexRateLimitResetCredits(
     return aTime - bTime;
   });
 
-  return {
+  const result: CodexResetCreditsResult = {
     availableCount: Math.max(0, toFiniteNumber(data?.available_count ?? data?.availableCount, 0)),
     credits,
   };
+
+  resetCreditsCache.set(cacheKey, {
+    data: result,
+    timestamp: Date.now(),
+  });
+
+  return result;
 }
 
 /**
