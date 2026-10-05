@@ -40,9 +40,10 @@ export function getModelCapabilities(modelId: string, provider: string): {
     reasoning = lower.includes("o1") || lower.includes("o3");
     ownedBy = "chatgpt_web";
   } else if (lower.includes("claude")) {
-    contextWindow = 200000;
-    maxOutput = 64000;
-    reasoning = lower.includes("thinking") || lower.includes("3-7");
+    const isAgClaude = lower.startsWith("ag/") || lower.includes("5-5") || lower.includes("5.5");
+    contextWindow = isAgClaude ? 1000000 : 200000;
+    maxOutput = isAgClaude ? 128000 : 64000;
+    reasoning = lower.includes("thinking") || lower.includes("3-7") || lower.includes("opus") || isAgClaude;
     ownedBy = "anthropic";
   } else if (lower.startsWith("ag/") || lower.includes("gemini")) {
     contextWindow = 1000000;

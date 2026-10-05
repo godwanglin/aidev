@@ -463,11 +463,36 @@ const ANTIGRAVITY_PROMPT_REWRITES = [
 /**
  * Maps model alias to internal Antigravity wire model name
  */
-function mapToWireModel(model: string): string {
-  const lower = model.toLowerCase().replace(/^(ag\/|antigravity\/|google-ag\/|gem\/|gemini\/|gcli\/|gemini-cli\/|google\/)/i, "");
-  if (lower.startsWith("claude-opus-4-6-thinking")) return "claude-opus-4-6-thinking";
-  if (lower.startsWith("claude-sonnet-4-6")) return "claude-sonnet-4-6";
+function mapToWireModel(model: string, effortStr?: string): string {
+  let lower = model.toLowerCase().replace(/^(ag\/|antigravity\/|google-ag\/|gem\/|gemini\/|gcli\/|gemini-cli\/|google\/)/i, "");
+  // Normalize dot version notation, e.g. 5.5 -> 5-5
+  lower = lower.replace(/\./g, "-");
+
+  // --- Claude Opus Handling ---
+  if (lower.includes("claude") && (lower.includes("opus") || lower.includes("opus-5-5") || lower.includes("opus-4-6"))) {
+    if (lower.endsWith("-low")) return "claude-opus-5-5-low";
+    if (lower.endsWith("-medium")) return "claude-opus-5-5-medium";
+    if (lower.endsWith("-high")) return "claude-opus-5-5-high";
+
+    if (effortStr === "low" || effortStr === "minimal") return "claude-opus-5-5-low";
+    if (effortStr === "medium") return "claude-opus-5-5-medium";
+    return "claude-opus-5-5-high";
+  }
+
+  // --- Claude Sonnet Handling ---
+  if (lower.includes("claude") && (lower.includes("sonnet") || lower.includes("3-7-sonnet"))) {
+    if (lower.endsWith("-low")) return "claude-sonnet-5-5-low";
+    if (lower.endsWith("-medium")) return "claude-sonnet-5-5-medium";
+    if (lower.endsWith("-high")) return "claude-sonnet-5-5-high";
+
+    if (effortStr === "low" || effortStr === "minimal") return "claude-sonnet-5-5-low";
+    if (effortStr === "medium") return "claude-sonnet-5-5-medium";
+    return "claude-sonnet-5-5-high";
+  }
+
+  // Generic Claude fallback
   if (lower.startsWith("claude-")) return lower;
+
   if (lower.startsWith("gemini-3.8-flash-high")) return "gemini-3.8-flash-high";
   if (lower.startsWith("gemini-3.8-flash-medium")) return "gemini-3.8-flash-medium";
   if (lower.startsWith("gemini-3.8-flash-low")) return "gemini-3.8-flash-low";
@@ -505,19 +530,20 @@ function mapToWireModel(model: string): string {
 export async function dispatchAntigravityChat(params: AntigravityDispatchParams): Promise<Response> {
   const startTime = Date.now();
   let currentToken = params.accessToken;
-  const wireModel = mapToWireModel(params.model);
-  const responseModel = params.clientRequestedModel || params.model;
-  const logModel = params.upstreamLogModel || params.model;
-  const projectId = await getEffectiveProjectId(currentToken);
-
-  const isClaude = wireModel.includes("claude");
-  const { contents, systemInstruction } = convertOpenAiMessagesToGemini(params.parsedBody.messages || [], wireModel);
 
   // Resolve reasoning effort from explicit parameter, nested Codex responses format, or standard chat format
   const rawEffort = params.reasoningEffort ||
     (params.parsedBody?.reasoning && typeof params.parsedBody.reasoning === "object" ? params.parsedBody.reasoning.effort : undefined) ||
     params.parsedBody?.reasoning_effort;
   const effortStr = rawEffort ? String(rawEffort).toLowerCase() : "";
+
+  const wireModel = mapToWireModel(params.model, effortStr);
+  const responseModel = params.clientRequestedModel || params.model;
+  const logModel = params.upstreamLogModel || params.model;
+  const projectId = await getEffectiveProjectId(currentToken);
+
+  const isClaude = wireModel.includes("claude");
+  const { contents, systemInstruction } = convertOpenAiMessagesToGemini(params.parsedBody.messages || [], wireModel);
 
   let thinkingBudget = 4096;
   if (effortStr === "low" || effortStr === "minimal") {
@@ -541,9 +567,9 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
   const generationConfig: any = {};
   if (params.parsedBody.max_tokens) {
     const requestedMax = Number(params.parsedBody.max_tokens);
-    generationConfig.maxOutputTokens = isClaude ? Math.min(requestedMax, 8192) : Math.max(requestedMax, thinkingBudget > 0 ? thinkingBudget + 2048 : 4096);
+    generationConfig.maxOutputTokens = isClaude ? Math.min(requestedMax, 64000) : Math.max(requestedMax, thinkingBudget > 0 ? thinkingBudget + 2048 : 4096);
   } else {
-    generationConfig.maxOutputTokens = isClaude ? 8192 : Math.max(wireModel.includes("thinking") ? 16384 : 4096, thinkingBudget > 0 ? thinkingBudget + 4096 : 4096);
+    generationConfig.maxOutputTokens = isClaude ? 16384 : Math.max(wireModel.includes("thinking") ? 16384 : 4096, thinkingBudget > 0 ? thinkingBudget + 4096 : 4096);
   }
   if (params.parsedBody.temperature !== undefined) {
     generationConfig.temperature = Number(params.parsedBody.temperature);
