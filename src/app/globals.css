@@ -5435,7 +5435,8 @@ select.control {
   opacity: 0.5;
 }
 
-.codex-expiry-overlay {
+.codex-expiry-overlay,
+.codex-confirm-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -10734,6 +10735,7 @@ html[data-theme="dark"] .modal-backdrop,
 html[data-theme="dark"] .mobile-drawer-backdrop,
 html[data-theme="dark"] .oauth-modal-overlay,
 html[data-theme="dark"] .codex-expiry-overlay,
+html[data-theme="dark"] .codex-confirm-overlay,
 html[data-theme="dark"] .dark-modal-overlay,
 html[data-theme="dark"] .admin-log-modal-backdrop {
   background: var(--overlay-backdrop) !important;

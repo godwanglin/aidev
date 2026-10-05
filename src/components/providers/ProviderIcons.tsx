@@ -127,8 +127,8 @@ export function getProviderSlug(provKey: string): string {
   return k;
 }
 
-export function getProviderLogoUrl(slugOrId: string): string {
-  if (!slugOrId) return "/assets/providers/default.png";
+export function getProviderLogoUrl(slugOrId: string): string | null {
+  if (!slugOrId) return null;
   const raw = slugOrId.toLowerCase().trim();
   if (PROVIDER_LOGO_MAP[raw]) {
     return `/assets/providers/${PROVIDER_LOGO_MAP[raw]}`;
@@ -137,7 +137,7 @@ export function getProviderLogoUrl(slugOrId: string): string {
   if (PROVIDER_LOGO_MAP[norm]) {
     return `/assets/providers/${PROVIDER_LOGO_MAP[norm]}`;
   }
-  return `/assets/providers/${norm}.png`;
+  return null;
 }
 
 export function renderProviderIcon(iconName: string, size = 16) {

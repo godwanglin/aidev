@@ -29,8 +29,25 @@ export async function GET(req: NextRequest) {
               createdAt: { gt: lastTimestamp },
             },
             orderBy: { createdAt: "asc" },
-            take: 20,
-            include: {
+            select: {
+              id: true,
+              connectionId: true,
+              provider: true,
+              model: true,
+              clientApiKeyId: true,
+              clientUserId: true,
+              clientUserEmail: true,
+              reasoningEffort: true,
+              rawHeaders: true,
+              promptTokens: true,
+              completionTokens: true,
+              totalTokens: true,
+              tokensSavedRtk: true,
+              latencyMs: true,
+              statusCode: true,
+              isFailover: true,
+              failoverReason: true,
+              createdAt: true,
               connection: {
                 select: { name: true, accountEmail: true },
               },
@@ -131,6 +148,7 @@ export async function GET(req: NextRequest) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

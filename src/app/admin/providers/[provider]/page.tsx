@@ -218,20 +218,22 @@ export default function ProviderDetailPage() {
   async function fetchConnections() {
     setLoading(true);
     try {
-      // First check if this slug is a custom provider
-      const cpRes = await fetch(`/api/admin/providers/custom/${providerSlug}`);
-      if (cpRes.ok) {
-        const cpJson = await cpRes.json();
-        if (cpJson.success && cpJson.provider) {
-          setIsCustomProvider(true);
-          setCustomProviderData(cpJson.provider);
-          setConnections(cpJson.connections || []);
-          setEditName(cpJson.provider.name);
-          setEditPrefix(cpJson.provider.prefix);
-          setEditApiType(cpJson.provider.apiType);
-          setEditBaseUrl(cpJson.provider.baseUrl);
-          setLoading(false);
-          return;
+      // Only check custom provider if this slug is NOT in the built-in catalog (avoids unnecessary 404 for codex, antigravity, etc.)
+      if (!catalogItem) {
+        const cpRes = await fetch(`/api/admin/providers/custom/${providerSlug}`);
+        if (cpRes.ok) {
+          const cpJson = await cpRes.json();
+          if (cpJson.success && cpJson.provider) {
+            setIsCustomProvider(true);
+            setCustomProviderData(cpJson.provider);
+            setConnections(cpJson.connections || []);
+            setEditName(cpJson.provider.name);
+            setEditPrefix(cpJson.provider.prefix);
+            setEditApiType(cpJson.provider.apiType);
+            setEditBaseUrl(cpJson.provider.baseUrl);
+            setLoading(false);
+            return;
+          }
         }
       }
 

@@ -7,6 +7,7 @@ import PageHead from "@/components/PageHead";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar, getProviderDisplayName } from "@/components/providers/ProviderIcons";
 import EditConnectionModal from "@/components/providers/EditConnectionModal";
+import CodexResetCreditsModal from "@/components/providers/CodexResetCreditsModal";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
 import {
   Gauge,
@@ -18,6 +19,7 @@ import {
   Trash2,
   Edit2,
   Clock,
+  RotateCcw,
   Search,
   AlertCircle,
   Layers,
@@ -115,6 +117,53 @@ export default function AdminQuotaTrackerPage() {
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [revealedEmailIds, setRevealedEmailIds] = useState<Set<string>>(new Set());
   const [loadingQuotaIds, setLoadingQuotaIds] = useState<Set<string>>(new Set());
+
+  // Codex Reset Credits state
+  const [resetCreditCounts, setResetCreditCounts] = useState<Record<string, number>>({});
+  const [activeResetCreditsConn, setActiveResetCreditsConn] = useState<AccountQuotaCardData | null>(null);
+  const [confirmConsumeConn, setConfirmConsumeConn] = useState<AccountQuotaCardData | null>(null);
+  const [isConsumingReset, setIsConsumingReset] = useState(false);
+
+  const fetchResetCreditsForConn = useCallback(async (connId: string) => {
+    try {
+      const res = await fetch(`/api/admin/providers/${connId}/reset-credits`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setResetCreditCounts((prev) => ({
+          ...prev,
+          [connId]: json.data.availableCount ?? 0,
+        }));
+      }
+    } catch {}
+  }, []);
+
+  async function handleQuickConsume(conn: AccountQuotaCardData) {
+    if (isConsumingReset) return;
+    setIsConsumingReset(true);
+    try {
+      const res = await fetch(`/api/admin/providers/${conn.id}/reset-credits`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setSuccessMsg(
+          `Berhasil menggunakan 1 Codex reset credit untuk ${conn.accountEmail || conn.name}! Kuota akun telah di-reset.`
+        );
+        setTimeout(() => setSuccessMsg(""), 4000);
+        setConfirmConsumeConn(null);
+        fetchResetCreditsForConn(conn.id);
+        fetchSingleAccountQuota(conn.id, true);
+      } else {
+        setErrorMsg(json.message || json.error || "Gagal menggunakan reset credit.");
+        setTimeout(() => setErrorMsg(""), 4000);
+      }
+    } catch {
+      setErrorMsg("Terjadi kesalahan saat menggunakan reset credit.");
+      setTimeout(() => setErrorMsg(""), 4000);
+    } finally {
+      setIsConsumingReset(false);
+    }
+  }
 
   const autoRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -230,6 +279,40 @@ export default function AdminQuotaTrackerPage() {
       }
     };
   }, [autoRefresh, fetchQuotas]);
+
+  // Fetch reset credits for Codex accounts (once per account, avoiding re-fetch on quota polling)
+  const codexAccountIds = useMemo(() => {
+    return accounts
+      .filter(
+        (a) => a.provider === "OPENAI_CODEX" || a.provider === "CODEX" || a.provider?.toLowerCase().includes("codex")
+      )
+      .map((a) => a.id)
+      .sort()
+      .join(",");
+  }, [accounts]);
+
+  const fetchedCreditsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!codexAccountIds) return;
+    const ids = codexAccountIds.split(",").filter(Boolean);
+    const pendingIds = ids.filter((id) => !fetchedCreditsRef.current.has(id));
+    if (pendingIds.length === 0) return;
+
+    let cancelled = false;
+    async function loadAllCredits() {
+      for (const id of pendingIds) {
+        if (cancelled) break;
+        fetchedCreditsRef.current.add(id);
+        await fetchResetCreditsForConn(id);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    }
+    loadAllCredits();
+    return () => {
+      cancelled = true;
+    };
+  }, [codexAccountIds, fetchResetCreditsForConn]);
 
   // Toggle active single account
   async function handleToggleActive(account: AccountQuotaCardData) {
@@ -815,6 +898,10 @@ export default function AdminQuotaTrackerPage() {
               filteredAccounts.map((card) => {
               const isToggling = togglingIds.has(card.id);
               const providerSlug = getProviderSlug(card.provider);
+              const isCodexCard =
+                card.provider === "OPENAI_CODEX" ||
+                card.provider === "CODEX" ||
+                card.provider?.toLowerCase().includes("codex");
 
               return (
                 <article
@@ -931,32 +1018,107 @@ export default function AdminQuotaTrackerPage() {
                         />
                       </button>
 
-                      {/* Edit button */}
-                      <button
-                        className="control btn-icon-only text-muted hover:text-ink"
-                        style={{ width: "24px", height: "24px", padding: 0 }}
-                        onClick={() => setEditingConnection(card)}
-                        title="Edit koneksi akun"
-                      >
-                        <Edit2 size={11} strokeWidth={1.75} />
-                      </button>
+                      {isCodexCard ? (
+                        <>
+                          {/* Quick Reset Credit Button */}
+                          <button
+                            type="button"
+                            className={`control btn-icon-only text-muted hover:text-ink ${
+                              (resetCreditCounts[card.id] ?? 0) > 0
+                                ? "text-emerald-500 hover:text-emerald-400 font-semibold"
+                                : ""
+                            }`}
+                            style={{
+                              width: "24px",
+                              height: "24px",
+                              padding: 0,
+                              position: "relative",
+                            }}
+                            onClick={() => {
+                              if ((resetCreditCounts[card.id] ?? 0) > 0) {
+                                setConfirmConsumeConn(card);
+                              } else {
+                                setActiveResetCreditsConn(card);
+                              }
+                            }}
+                            title={
+                              (resetCreditCounts[card.id] ?? 0) > 0
+                                ? `Gunakan 1 Codex reset credit (${resetCreditCounts[card.id]} tersedia). Klik untuk reset kuota.`
+                                : "Tidak ada Codex reset credit tersedia (klik untuk cek status)."
+                            }
+                          >
+                            <RotateCcw
+                              size={11}
+                              strokeWidth={1.75}
+                              className={
+                                isConsumingReset && confirmConsumeConn?.id === card.id
+                                  ? "animate-spin"
+                                  : ""
+                              }
+                            />
+                            {(resetCreditCounts[card.id] ?? 0) > 0 && (
+                              <span
+                                style={{
+                                  position: "absolute",
+                                  top: "-3px",
+                                  right: "-3px",
+                                  fontSize: "8px",
+                                  lineHeight: "10px",
+                                  fontWeight: 700,
+                                  background: "#10b981",
+                                  color: "#fff",
+                                  borderRadius: "999px",
+                                  padding: "0 3px",
+                                  minWidth: "10px",
+                                  textAlign: "center",
+                                }}
+                              >
+                                {resetCreditCounts[card.id]}
+                              </span>
+                            )}
+                          </button>
 
-                      {/* Shortcut to Provider Page */}
-                      <Link
-                        href={`/admin/providers/${providerSlug}`}
-                        className="control btn-icon-only text-muted hover:text-blue"
-                        style={{
-                          width: "24px",
-                          height: "24px",
-                          padding: 0,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        title={`Buka manajemen provider ${formatProviderName(card.provider)} (/admin/providers/${providerSlug})`}
-                      >
-                        <ExternalLink size={11} strokeWidth={1.75} />
-                      </Link>
+                          {/* Codex Reset Credit Expiry & History Button */}
+                          <button
+                            type="button"
+                            className="control btn-icon-only text-muted hover:text-ink"
+                            style={{ width: "24px", height: "24px", padding: 0 }}
+                            onClick={() => setActiveResetCreditsConn(card)}
+                            title="Lihat history & masa berlaku Codex reset credits"
+                          >
+                            <Clock size={11} strokeWidth={1.75} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {/* Edit button */}
+                          <button
+                            className="control btn-icon-only text-muted hover:text-ink"
+                            style={{ width: "24px", height: "24px", padding: 0 }}
+                            onClick={() => setEditingConnection(card)}
+                            title="Edit koneksi akun"
+                          >
+                            <Edit2 size={11} strokeWidth={1.75} />
+                          </button>
+
+                          {/* Shortcut to Provider Page */}
+                          <Link
+                            href={`/admin/providers/${providerSlug}`}
+                            className="control btn-icon-only text-muted hover:text-blue"
+                            style={{
+                              width: "24px",
+                              height: "24px",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            title={`Buka manajemen provider ${formatProviderName(card.provider)} (/admin/providers/${providerSlug})`}
+                          >
+                            <ExternalLink size={11} strokeWidth={1.75} />
+                          </Link>
+                        </>
+                      )}
 
                       {/* Delete button */}
                       <button
@@ -1419,6 +1581,78 @@ export default function AdminQuotaTrackerPage() {
                     <span>{isDeleting ? "Menghapus..." : "Hapus Akun"}</span>
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Codex Reset Credits Expiry & History */}
+        {activeResetCreditsConn && (
+          <CodexResetCreditsModal
+            connection={activeResetCreditsConn as any}
+            isOpen={Boolean(activeResetCreditsConn)}
+            onClose={() => setActiveResetCreditsConn(null)}
+            onCreditsUpdated={(connId, count) => {
+              setResetCreditCounts((prev) => ({ ...prev, [connId]: count }));
+            }}
+          />
+        )}
+
+        {/* Modal: Confirm Quick Consume Reset Credit */}
+        {confirmConsumeConn && (
+          <div
+            className="codex-expiry-overlay"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isConsumingReset) {
+                setConfirmConsumeConn(null);
+              }
+            }}
+          >
+            <div className="codex-confirm-card">
+              <div className="codex-confirm-header">
+                <h3 className="codex-confirm-title">Reset Kuota OpenAI Codex?</h3>
+              </div>
+
+              <div className="codex-confirm-body">
+                <p>
+                  Gunakan 1 Codex reset credit untuk akun{" "}
+                  <strong style={{ color: "var(--ink-heading)" }}>
+                    {confirmConsumeConn.accountEmail || confirmConsumeConn.name}
+                  </strong>
+                  . Kuota 5 jam dan batas mingguan akun ini akan di-reset langsung. Tindakan ini tidak dapat dibatalkan.
+                </p>
+                <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--muted)" }}>
+                  Sisa credit saat ini:{" "}
+                  <strong style={{ color: "#10b981" }}>
+                    {resetCreditCounts[confirmConsumeConn.id] ?? 0} credit
+                  </strong>
+                </div>
+              </div>
+
+              <div className="codex-confirm-footer">
+                <button
+                  type="button"
+                  onClick={() => setConfirmConsumeConn(null)}
+                  disabled={isConsumingReset}
+                  className="codex-confirm-cancel-btn"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickConsume(confirmConsumeConn)}
+                  disabled={isConsumingReset}
+                  className="codex-confirm-danger-btn"
+                >
+                  {isConsumingReset ? (
+                    <>
+                      <RotateCcw size={13} className="animate-spin" />
+                      <span>Mereset...</span>
+                    </>
+                  ) : (
+                    <span>Gunakan Credit & Reset</span>
+                  )}
+                </button>
               </div>
             </div>
           </div>

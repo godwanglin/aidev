@@ -18,14 +18,78 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
+
+    // Support single log detail on-demand (keeps list lightweight and ultra-fast)
+    const logId = searchParams.get("logId") || searchParams.get("id");
+    if (logId) {
+      const singleLog = await prisma.upstreamLog.findUnique({
+        where: { id: logId },
+        include: {
+          connection: {
+            select: { name: true, accountEmail: true },
+          },
+        },
+      });
+
+      if (!singleLog) {
+        return NextResponse.json({ error: "Log not found" }, { status: 404 });
+      }
+
+      // Enrich single log with user details if available
+      let clientUser: any = null;
+      if (singleLog.clientUserId) {
+        const u = await prisma.user.findUnique({
+          where: { id: singleLog.clientUserId },
+          select: { id: true, email: true, name: true, role: true, subscriptionTier: true },
+        });
+        if (u) {
+          clientUser = {
+            id: u.id,
+            email: u.email,
+            name: u.name,
+            role: u.role,
+            tier: u.subscriptionTier,
+          };
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          log: {
+            ...singleLog,
+            clientUser,
+          },
+        },
+      });
+    }
+
+    const page = Math.max(1, Number(searchParams.get("page")) || 1);
+    const limit = Math.max(1, Math.min(Number(searchParams.get("limit")) || 50, 100));
+    const skip = (page - 1) * limit;
+
     const provider = searchParams.get("provider") || "ALL";
+    const connectionId = searchParams.get("connectionId") || searchParams.get("accountId");
     const model = searchParams.get("model") || "";
     const status = searchParams.get("status") || "ALL";
-    const limit = Math.min(Number(searchParams.get("limit")) || 50, 200);
 
     const where: any = {};
     if (provider !== "ALL") {
-      where.provider = provider.toUpperCase();
+      const p = provider.toUpperCase();
+      if (p === "OPENAI_CODEX" || p === "CODEX") {
+        where.provider = { in: ["OPENAI_CODEX", "CODEX", "OPENAI"] };
+      } else if (p === "GEMINI" || p === "GEMINI_CLI" || p === "GOOGLE") {
+        where.provider = { in: ["GEMINI", "GEMINI_CLI", "GOOGLE"] };
+      } else if (p === "OLLAMA" || p === "OLLAMA_CLOUD") {
+        where.provider = { in: ["OLLAMA", "OLLAMA_CLOUD"] };
+      } else if (p === "ANTHROPIC" || p === "CLAUDE") {
+        where.provider = { in: ["ANTHROPIC", "CLAUDE"] };
+      } else {
+        where.provider = p;
+      }
+    }
+    if (connectionId && connectionId !== "ALL") {
+      where.connectionId = connectionId;
     }
     if (model) {
       where.model = { contains: model };
@@ -41,12 +105,34 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
+    // CRITICAL PERFORMANCE OPTIMIZATION:
+    // Exclude rawBody and rawResponse (which can be 100MB+ in total!) from the list query projection.
+    // Full payload is loaded on-demand when inspecting a specific log item.
     const [logs, stats24h, totalCount] = await Promise.all([
       prisma.upstreamLog.findMany({
         where,
         orderBy: { createdAt: "desc" },
+        skip,
         take: limit,
-        include: {
+        select: {
+          id: true,
+          connectionId: true,
+          provider: true,
+          model: true,
+          clientApiKeyId: true,
+          clientUserId: true,
+          clientUserEmail: true,
+          reasoningEffort: true,
+          rawHeaders: true,
+          promptTokens: true,
+          completionTokens: true,
+          totalTokens: true,
+          tokensSavedRtk: true,
+          latencyMs: true,
+          statusCode: true,
+          isFailover: true,
+          failoverReason: true,
+          createdAt: true,
           connection: {
             select: { name: true, accountEmail: true },
           },
@@ -76,23 +162,8 @@ export async function GET(req: NextRequest) {
 
     const successRate = stats24h._count > 0 ? (success24h / stats24h._count) * 100 : 100;
 
-    // Ensure tokensSavedRtk is properly populated even if in-memory Prisma client omitted it
     if (logs.length > 0) {
-      const needsRtk = logs.some((l: any) => l.tokensSavedRtk === undefined);
-      if (needsRtk) {
-        try {
-          const ids = logs.map((l: any) => `'${l.id}'`).join(",");
-          const rawSavings: any[] = await prisma.$queryRawUnsafe(
-            `SELECT id, tokensSavedRtk FROM UpstreamLog WHERE id IN (${ids})`
-          );
-          const map = new Map(rawSavings.map((r: any) => [r.id, Number(r.tokensSavedRtk) || 0]));
-          for (const log of logs as any[]) {
-            log.tokensSavedRtk = map.get(log.id) || 0;
-          }
-        } catch {}
-      }
-
-      // Enrich logs with clientUser, clientApiKey, and raw telemetry
+      // Enrich logs with clientUser, clientApiKey, and cached telemetry if present
       try {
         const userIds = [...new Set(logs.map((l: any) => l.clientUserId).filter(Boolean))] as string[];
         const keyIds = [...new Set(logs.map((l: any) => l.clientApiKeyId).filter(Boolean))] as string[];
@@ -137,21 +208,32 @@ export async function GET(req: NextRequest) {
           if (!log.rawHeaders && cached?.rawHeaders) {
             log.rawHeaders = cached.rawHeaders;
           }
-          if (!log.rawBody && cached?.rawBody) {
+          // If recent item is in fast cache, attach its bounded preview
+          if (cached?.rawBody) {
             log.rawBody = cached.rawBody;
           }
-          if (!log.rawResponse && cached?.rawResponse) {
+          if (cached?.rawResponse) {
             log.rawResponse = cached.rawResponse;
           }
         }
       } catch {}
     }
 
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
     return NextResponse.json({
       success: true,
       data: {
         logs,
         totalCount,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
         stats: {
           totalRequests24h: stats24h._count,
           totalPromptTokens24h: stats24h._sum.promptTokens || 0,

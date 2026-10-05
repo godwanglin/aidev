@@ -1,11 +1,16 @@
 import { prisma } from "@/lib/prisma";
 import { decryptCredential } from "@/lib/crypto";
 import { refreshConnectionToken } from "@/lib/oauth/refresh-manager";
+import crypto from "crypto";
 
 export interface CodexResetCreditItem {
+  id?: string;
   status: string;
   grantedAt: string | null;
   expiresAt: string | null;
+  redeemedAt?: string | null;
+  title?: string | null;
+  description?: string | null;
 }
 
 export interface CodexResetCreditsResult {
@@ -50,23 +55,43 @@ interface CachedResetCredits {
   timestamp: number;
 }
 const resetCreditsCache = new Map<string, CachedResetCredits>();
-const RESET_CREDITS_CACHE_TTL = 60 * 1000; // 60 seconds
+const RESET_CREDITS_CACHE_TTL = 30 * 1000; // 30 seconds
+
+function getCacheKey(accessToken: string, chatgptAccountId?: string | null): string {
+  // Use SHA-256 hash of the entire access token to ensure 100% uniqueness per account
+  const tokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
+  return `${tokenHash}_${chatgptAccountId || ""}`;
+}
+
+export function invalidateCodexResetCreditsCache(accessToken?: string) {
+  if (!accessToken) {
+    resetCreditsCache.clear();
+    return;
+  }
+  const tokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
+  for (const key of resetCreditsCache.keys()) {
+    if (key.startsWith(tokenHash)) {
+      resetCreditsCache.delete(key);
+    }
+  }
+}
 
 /**
  * Fetch available Codex reset credits and expiry dates for a connection
  */
 export async function getCodexRateLimitResetCredits(
   accessToken: string,
-  chatgptAccountId?: string | null
+  chatgptAccountId?: string | null,
+  forceFresh = false
 ): Promise<CodexResetCreditsResult> {
   if (!accessToken) {
     throw new Error("No Codex access token available. Please re-authorize the connection.");
   }
 
-  const cacheKey = `${accessToken.slice(0, 30)}_${chatgptAccountId || ""}`;
+  const cacheKey = getCacheKey(accessToken, chatgptAccountId);
   const cached = resetCreditsCache.get(cacheKey);
   const now = Date.now();
-  if (cached && now - cached.timestamp < RESET_CREDITS_CACHE_TTL) {
+  if (!forceFresh && cached && now - cached.timestamp < RESET_CREDITS_CACHE_TTL) {
     return cached.data;
   }
 
@@ -85,7 +110,7 @@ export async function getCodexRateLimitResetCredits(
     response = await fetch(CODEX_RESET_CREDITS_URL, {
       method: "GET",
       headers,
-      signal: AbortSignal.timeout(5000), // 5 seconds max timeout
+      signal: AbortSignal.timeout(8000), // 8 seconds max timeout
     });
   } catch (netErr: any) {
     // If timeout or network failure, return last cached if available or fallback safely
@@ -111,9 +136,13 @@ export async function getCodexRateLimitResetCredits(
 
   const creditsRaw = Array.isArray(data?.credits) ? data.credits : [];
   const credits: CodexResetCreditItem[] = creditsRaw.map((credit: any) => ({
+    id: credit?.id,
     status: String(credit?.status || "unknown"),
     grantedAt: toIsoDate(credit?.granted_at ?? credit?.grantedAt),
     expiresAt: toIsoDate(credit?.expires_at ?? credit?.expiresAt),
+    redeemedAt: toIsoDate(credit?.redeemed_at ?? credit?.redeemedAt),
+    title: credit?.title,
+    description: credit?.description,
   }));
 
   // Sort by expiration ascending
@@ -158,6 +187,9 @@ export async function consumeCodexRateLimitResetCredit(
     },
     body: JSON.stringify({ redeem_request_id: reqId }),
   });
+
+  // Invalidate cache immediately upon consume
+  invalidateCodexResetCreditsCache(accessToken);
 
   let data: any = null;
   try {

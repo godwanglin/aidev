@@ -203,6 +203,28 @@ export default function AdminUsagePage() {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
+  const [totalCount, setTotalCount] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState(searchModel);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchModel);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchModel]);
+
+  const hasActiveFilters =
+    providerFilter !== "ALL" ||
+    accountFilter !== "ALL" ||
+    statusFilter !== "ALL" ||
+    debouncedSearch.trim() !== "";
+
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  const pageSizeRef = useRef(pageSize);
+  pageSizeRef.current = pageSize;
+  const hasActiveFiltersRef = useRef(hasActiveFilters);
+  hasActiveFiltersRef.current = hasActiveFilters;
 
   // Dropdown popover states
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
@@ -216,9 +238,25 @@ export default function AdminUsagePage() {
 
   // Inspector Modal
   const [inspectEvent, setInspectEvent] = useState<UpstreamEvent | null>(null);
+  const [loadingInspectDetail, setLoadingInspectDetail] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
   const [activeRawTab, setActiveRawTab] = useState<"body" | "headers" | "response" | "telemetry">("body");
   const [copiedTab, setCopiedTab] = useState(false);
+
+  async function openInspect(ev: UpstreamEvent) {
+    setInspectEvent(ev);
+    if (!ev.rawBody && !ev.rawResponse) {
+      setLoadingInspectDetail(true);
+      try {
+        const res = await fetch(`/api/admin/usage/history?logId=${ev.id}`);
+        const json = await res.json();
+        if (json.success && json.data?.log) {
+          setInspectEvent((prev) => (prev?.id === ev.id ? { ...prev, ...json.data.log } : prev));
+        }
+      } catch {}
+      setLoadingInspectDetail(false);
+    }
+  }
 
   // Clear Database Telemetry Modal State
   const [clearModalOpen, setClearModalOpen] = useState(false);
@@ -251,14 +289,31 @@ export default function AdminUsagePage() {
     };
   }, []);
 
-  // 1. Fetch initial historical logs & stats
-  async function fetchHistory() {
+  // 1. Fetch historical logs & stats with server-side pagination & filtering
+  async function fetchHistory(
+    page = currentPage,
+    size = pageSize,
+    provider = providerFilter,
+    account = accountFilter,
+    status = statusFilter,
+    model = debouncedSearch
+  ) {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/usage/history?limit=100");
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(size),
+      });
+      if (provider !== "ALL") params.set("provider", provider);
+      if (account !== "ALL") params.set("connectionId", account);
+      if (status !== "ALL") params.set("status", status);
+      if (model.trim()) params.set("model", model.trim());
+
+      const res = await fetch(`/api/admin/usage/history?${params.toString()}`);
       const json = await res.json();
-      if (json.success) {
+      if (json.success && json.data) {
         setEvents(json.data.logs || []);
+        setTotalCount(json.data.totalCount ?? 0);
         if (json.data.stats) {
           setStats(json.data.stats);
         }
@@ -325,10 +380,29 @@ export default function AdminUsagePage() {
   }
 
   useEffect(() => {
-    fetchHistory();
     fetchProviders();
     fetchRtkStatus();
   }, []);
+
+  // Reset to page 1 whenever filters change
+  const prevFilterState = useRef({ providerFilter, accountFilter, statusFilter, debouncedSearch });
+  useEffect(() => {
+    const prev = prevFilterState.current;
+    if (
+      prev.providerFilter !== providerFilter ||
+      prev.accountFilter !== accountFilter ||
+      prev.statusFilter !== statusFilter ||
+      prev.debouncedSearch !== debouncedSearch
+    ) {
+      prevFilterState.current = { providerFilter, accountFilter, statusFilter, debouncedSearch };
+      setCurrentPage(1);
+    }
+  }, [providerFilter, accountFilter, statusFilter, debouncedSearch]);
+
+  // Fetch when page, size, or filters change
+  useEffect(() => {
+    fetchHistory(currentPage, pageSize, providerFilter, accountFilter, statusFilter, debouncedSearch);
+  }, [currentPage, pageSize, providerFilter, accountFilter, statusFilter, debouncedSearch]);
 
   // Only display providers that actually have connected accounts!
   const connectedProviders = useMemo(() => {
@@ -416,11 +490,6 @@ export default function AdminUsagePage() {
     es.addEventListener("request", (event: MessageEvent) => {
       try {
         const newLog: UpstreamEvent = JSON.parse(event.data);
-        setEvents((prev) => {
-          // Avoid duplicate events
-          if (prev.some((e) => e.id === newLog.id)) return prev;
-          return [newLog, ...prev.slice(0, 199)]; // Keep last 200
-        });
         setStats((prev) => ({
           ...prev,
           totalRequests24h: prev.totalRequests24h + 1,
@@ -428,6 +497,15 @@ export default function AdminUsagePage() {
           totalCompletionTokens24h: prev.totalCompletionTokens24h + newLog.completionTokens,
           totalTokens24h: prev.totalTokens24h + newLog.totalTokens,
         }));
+        setTotalCount((prev) => prev + 1);
+
+        // Prepend new live event only if currently on page 1 without active search/filters
+        if (currentPageRef.current === 1 && !hasActiveFiltersRef.current) {
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === newLog.id)) return prev;
+            return [newLog, ...prev.slice(0, pageSizeRef.current - 1)];
+          });
+        }
       } catch {}
     });
 
@@ -442,69 +520,13 @@ export default function AdminUsagePage() {
     };
   }, [isPaused]);
 
-  // Filter events
-  const filteredEvents = events.filter((ev) => {
-    // 1. Provider filter
-    if (providerFilter !== "ALL") {
-      const normEv = (ev.provider || "").toUpperCase();
-      const normFilter = providerFilter.toUpperCase();
-      let match = normEv === normFilter;
-      if (!match) {
-        if ((normFilter === "OPENAI_CODEX" || normFilter === "CODEX") && (normEv === "OPENAI_CODEX" || normEv === "CODEX")) {
-          match = true;
-        } else if ((normFilter === "GEMINI" || normFilter === "GEMINI_CLI" || normFilter === "GOOGLE") && (normEv === "GEMINI" || normEv === "GEMINI_CLI" || normEv === "GOOGLE")) {
-          match = true;
-        } else if ((normFilter === "OLLAMA" || normFilter === "OLLAMA_CLOUD") && (normEv === "OLLAMA" || normEv === "OLLAMA_CLOUD")) {
-          match = true;
-        } else if ((normFilter === "ANTHROPIC" || normFilter === "CLAUDE") && (normEv === "ANTHROPIC" || normEv === "CLAUDE")) {
-          match = true;
-        }
-      }
-      if (!match) return false;
-    }
-
-    // 2. Account filter
-    if (accountFilter !== "ALL") {
-      const targetConn = connections.find((c) => c.id === accountFilter);
-      if (targetConn) {
-        const matchConn =
-          (ev as any).connectionId === targetConn.id ||
-          ev.connection?.name === targetConn.name ||
-          (targetConn.accountEmail && ev.connection?.accountEmail === targetConn.accountEmail);
-        if (!matchConn) return false;
-      }
-    }
-
-    // 3. Search model
-    if (searchModel.trim() && !ev.model.toLowerCase().includes(searchModel.toLowerCase().trim())) return false;
-
-    // 4. Status filter
-    if (statusFilter === "SUCCESS" && (ev.statusCode < 200 || ev.statusCode >= 300)) return false;
-    if (statusFilter === "429" && ev.statusCode !== 429) return false;
-    if (statusFilter === "ERROR" && ev.statusCode < 400) return false;
-
-    return true;
-  });
-
-  const hasActiveFilters =
-    providerFilter !== "ALL" ||
-    accountFilter !== "ALL" ||
-    statusFilter !== "ALL" ||
-    searchModel.trim() !== "";
-
-  // Reset to page 1 whenever filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [providerFilter, accountFilter, statusFilter, searchModel]);
+  // Events are already filtered and paginated server-side!
+  const filteredEvents = events;
 
   // Pagination calculations
-  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-
-  const paginatedEvents = useMemo(() => {
-    const startIndex = (safePage - 1) * pageSize;
-    return filteredEvents.slice(startIndex, startIndex + pageSize);
-  }, [filteredEvents, safePage, pageSize]);
+  const paginatedEvents = events;
 
   // Latency styling helper
   const getLatencyClass = (ms: number) => {
@@ -1164,7 +1186,7 @@ print(response.choices[0].message.content)`,
                 <span>Live Request Stream</span>
               </h2>
               <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-                {filteredEvents.length} {filteredEvents.length === 1 ? "item" : "items"}
+                {totalCount.toLocaleString()} {totalCount === 1 ? "item" : "items"}
               </span>
             </div>
 
@@ -1295,7 +1317,7 @@ print(response.choices[0].message.content)`,
                     <tr
                       key={ev.id}
                       className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                      onClick={() => setInspectEvent(ev)}
+                      onClick={() => openInspect(ev)}
                     >
                       {/* Time */}
                       <td className="mono text-xs text-muted" style={{ whiteSpace: "nowrap" }}>
@@ -1509,7 +1531,7 @@ print(response.choices[0].message.content)`,
                           className="table-action-btn"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setInspectEvent(ev);
+                            openInspect(ev);
                           }}
                           title="Inspect full telemetry details"
                           aria-label="Inspect telemetry"
@@ -1525,13 +1547,14 @@ print(response.choices[0].message.content)`,
           )}
 
           {/* Pagination Footer */}
-          {!loading && filteredEvents.length > 0 && (
+          {/* Pagination Footer */}
+          {!loading && events.length > 0 && (
             <div className="table-footer">
               <div className="table-footer-left">
                 <span className="table-footer-text">
-                  Showing {(safePage - 1) * pageSize + 1} to{" "}
-                  {Math.min(safePage * pageSize, filteredEvents.length)} of{" "}
-                  {filteredEvents.length.toLocaleString()} events
+                  Showing {totalCount === 0 ? 0 : (safePage - 1) * pageSize + 1} to{" "}
+                  {Math.min(safePage * pageSize, totalCount)} of{" "}
+                  {totalCount.toLocaleString()} events
                 </span>
                 <div className="per-page-wrap flex items-center gap-2">
                   <span className="text-muted text-xs">Per page:</span>
@@ -1547,6 +1570,7 @@ print(response.choices[0].message.content)`,
                       { value: "15", label: "15" },
                       { value: "25", label: "25" },
                       { value: "50", label: "50" },
+                      { value: "100", label: "100" },
                     ]}
                     minWidth={65}
                     width={65}
@@ -1558,7 +1582,7 @@ print(response.choices[0].message.content)`,
                 <button
                   type="button"
                   className="pager-btn"
-                  disabled={safePage <= 1}
+                  disabled={safePage <= 1 || loading}
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   title="Previous Page"
                 >
@@ -1571,7 +1595,7 @@ print(response.choices[0].message.content)`,
                 <button
                   type="button"
                   className="pager-btn"
-                  disabled={safePage >= totalPages}
+                  disabled={safePage >= totalPages || loading}
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   title="Next Page"
                 >
@@ -1918,21 +1942,27 @@ print(response.choices[0].message.content)`,
                     <pre className="inspector-pre" style={{ maxHeight: "400px", overflowY: "auto" }}>
                       <code>
                         {activeRawTab === "body" && (
-                          inspectEvent.rawBody
+                          loadingInspectDetail
+                            ? "// Sedang memuat full raw body dari database..."
+                            : inspectEvent.rawBody
                             ? (typeof inspectEvent.rawBody === "string"
                                 ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawBody), null, 2); } catch { return inspectEvent.rawBody; } })()
                                 : JSON.stringify(inspectEvent.rawBody, null, 2))
                             : "// Tidak ada data raw body yang tersimpan untuk request ini."
                         )}
                         {activeRawTab === "headers" && (
-                          inspectEvent.rawHeaders
+                          loadingInspectDetail
+                            ? "// Sedang memuat full raw headers dari database..."
+                            : inspectEvent.rawHeaders
                             ? (typeof inspectEvent.rawHeaders === "string"
                                 ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawHeaders), null, 2); } catch { return inspectEvent.rawHeaders; } })()
                                 : JSON.stringify(inspectEvent.rawHeaders, null, 2))
                             : "// Tidak ada data raw headers yang tersimpan untuk request ini."
                         )}
                         {activeRawTab === "response" && (
-                          inspectEvent.rawResponse
+                          loadingInspectDetail
+                            ? "// Sedang memuat full raw response dari database..."
+                            : inspectEvent.rawResponse
                             ? (typeof inspectEvent.rawResponse === "string"
                                 ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawResponse), null, 2); } catch { return inspectEvent.rawResponse; } })()
                                 : JSON.stringify(inspectEvent.rawResponse, null, 2))
