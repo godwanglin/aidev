@@ -36,6 +36,12 @@ import {
   SlidersHorizontal,
   User,
   Network,
+  MessageSquare,
+  Bot,
+  Sparkles,
+  Maximize2,
+  ChevronUp,
+  Wrench,
 } from "lucide-react";
 
 function DotsNineIcon({
@@ -174,6 +180,640 @@ const PROVIDER_COLORS: Record<string, string> = {
   DEFAULT: "#3b82f6",
 };
 
+interface ParsedChatMessage {
+  id: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  reasoning?: string;
+  toolCalls?: Array<{ id?: string; name: string; args?: string }>;
+  isFinalResponse?: boolean;
+}
+
+function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage[] {
+  const messages: ParsedChatMessage[] = [];
+  let bodyObj: any = null;
+  if (typeof rawBody === "string") {
+    try {
+      bodyObj = JSON.parse(rawBody);
+    } catch {
+      bodyObj = null;
+    }
+  } else {
+    bodyObj = rawBody;
+  }
+
+  if (bodyObj) {
+    // Anthropic top-level system
+    if (bodyObj.system) {
+      const s = typeof bodyObj.system === "string" ? bodyObj.system : JSON.stringify(bodyObj.system, null, 2);
+      messages.push({ id: "sys-top", role: "system", content: s });
+    }
+
+    // Standard OpenAI / Anthropic messages
+    if (Array.isArray(bodyObj.messages)) {
+      for (let i = 0; i < bodyObj.messages.length; i++) {
+        const m = bodyObj.messages[i];
+        let content = "";
+        if (typeof m.content === "string") {
+          content = m.content;
+        } else if (Array.isArray(m.content)) {
+          content = m.content
+            .map((p: any) => {
+              if (typeof p === "string") return p;
+              if (p.text) return p.text;
+              if (p.type === "text") return p.text || "";
+              if (p.type === "image_url") return `[Gambar/Image: ${p.image_url?.url ? "URL" : "Attached"}]`;
+              return JSON.stringify(p);
+            })
+            .join("\n");
+        } else if (m.content) {
+          content = JSON.stringify(m.content, null, 2);
+        }
+
+        const reasoning = m.reasoning_content || m.reasoning || m.thought || undefined;
+        const toolCalls = Array.isArray(m.tool_calls)
+          ? m.tool_calls.map((tc: any) => ({
+              id: tc.id,
+              name: tc.function?.name || tc.name || "function",
+              args: typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
+            }))
+          : undefined;
+
+        messages.push({
+          id: `msg-${i}`,
+          role: ((m.role || "user").toLowerCase() as any),
+          content,
+          reasoning,
+          toolCalls,
+        });
+      }
+    } else if (Array.isArray(bodyObj.input)) {
+      // Codex Responses input format
+      for (let i = 0; i < bodyObj.input.length; i++) {
+        const item = bodyObj.input[i];
+        const role = (item.role || (item.type === "message" ? "user" : item.type) || "user").toLowerCase();
+        let text = "";
+        if (typeof item.content === "string") {
+          text = item.content;
+        } else if (Array.isArray(item.content)) {
+          text = item.content.map((p: any) => p.text || JSON.stringify(p)).join("\n");
+        } else if (item.text) {
+          text = item.text;
+        } else {
+          text = JSON.stringify(item, null, 2);
+        }
+        messages.push({
+          id: `input-${i}`,
+          role: role === "model" ? "assistant" : (role as any),
+          content: text,
+        });
+      }
+    } else if (Array.isArray(bodyObj.contents)) {
+      // Gemini format
+      if (bodyObj.systemInstruction?.parts) {
+        const sys = bodyObj.systemInstruction.parts.map((p: any) => p.text || "").join("\n");
+        messages.push({ id: "gem-sys", role: "system", content: sys });
+      }
+      for (let i = 0; i < bodyObj.contents.length; i++) {
+        const c = bodyObj.contents[i];
+        const text = (c.parts || []).map((p: any) => p.text || (p.functionCall ? `[Tool Call: ${p.functionCall.name}]` : "")).join("\n");
+        messages.push({
+          id: `gem-${i}`,
+          role: c.role === "model" ? "assistant" : "user",
+          content: text,
+        });
+      }
+    } else if (bodyObj.prompt) {
+      // Legacy prompt
+      const p = typeof bodyObj.prompt === "string" ? bodyObj.prompt : JSON.stringify(bodyObj.prompt, null, 2);
+      messages.push({ id: "prompt-0", role: "user", content: p });
+    }
+  }
+
+  // Parse rawResponse for the Final Assistant Output
+  if (rawResponse) {
+    let accText = "";
+    let accReasoning = "";
+    const lines = String(rawResponse).split("\n");
+    for (const l of lines) {
+      const t = l.trim();
+      if (!t.startsWith("data: ") || t === "data: [DONE]") continue;
+      try {
+        const d = JSON.parse(t.slice(6));
+        const delta = d.choices?.[0]?.delta;
+        if (delta) {
+          if (delta.content) accText += delta.content;
+          if (delta.reasoning_content) accReasoning += delta.reasoning_content;
+        }
+        const parts = d.response?.candidates?.[0]?.content?.parts;
+        if (Array.isArray(parts)) {
+          for (const p of parts) {
+            if (p.thought && p.text) accReasoning += p.text;
+            else if (p.text) accText += p.text;
+          }
+        }
+        if (d.type === "response.output_item.added" && d.item?.content) {
+          for (const c of d.item.content) {
+            if (c.text) accText += c.text;
+          }
+        }
+      } catch {}
+    }
+
+    if (!accText && !accReasoning) {
+      try {
+        const respJson = typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
+        const msg = respJson.choices?.[0]?.message;
+        if (msg) {
+          accText = msg.content || "";
+          accReasoning = msg.reasoning_content || "";
+        } else if (respJson.candidates?.[0]?.content?.parts) {
+          for (const p of respJson.candidates[0].content.parts) {
+            if (p.thought && p.text) accReasoning += p.text;
+            else if (p.text) accText += p.text;
+          }
+        }
+      } catch {}
+    }
+
+    if (accText || accReasoning) {
+      messages.push({
+        id: "response-final",
+        role: "assistant",
+        content: accText || "(Hanya pemikiran / tool call tanpa teks balasan langsung)",
+        reasoning: accReasoning || undefined,
+        isFinalResponse: true,
+      });
+    }
+  }
+
+  return messages;
+}
+
+function ChatConversationView({
+  rawBody,
+  rawResponse,
+  loading = false,
+  maxHeight = "500px",
+  onOpenFullModal,
+  onSwitchToRaw,
+}: {
+  rawBody: any;
+  rawResponse?: any;
+  loading?: boolean;
+  maxHeight?: string;
+  onOpenFullModal?: () => void;
+  onSwitchToRaw?: () => void;
+}) {
+  const [roleFilter, setRoleFilter] = useState<"all" | "dialog" | "system" | "tool">("all");
+  const [search, setSearch] = useState("");
+  const [expandedSystem, setExpandedSystem] = useState<Record<string, boolean>>({});
+  const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  const messages = useMemo(() => extractChatMessages(rawBody, rawResponse), [rawBody, rawResponse]);
+
+  const dialogCount = messages.filter((m) => m.role === "user" || m.role === "assistant").length;
+  const systemCount = messages.filter((m) => m.role === "system").length;
+  const toolCount = messages.filter((m) => m.role === "tool").length;
+
+  const filtered = useMemo(() => {
+    return messages.filter((m) => {
+      if (roleFilter === "dialog" && m.role !== "user" && m.role !== "assistant") return false;
+      if (roleFilter === "system" && m.role !== "system") return false;
+      if (roleFilter === "tool" && m.role !== "tool") return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const inContent = m.content.toLowerCase().includes(q);
+        const inReasoning = m.reasoning?.toLowerCase().includes(q);
+        return inContent || inReasoning;
+      }
+      return true;
+    });
+  }, [messages, roleFilter, search]);
+
+  const handleCopyMessage = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleCopyAll = () => {
+    const transcript = messages
+      .map((m, idx) => {
+        let header = `--- [${m.role.toUpperCase()}] (#${idx + 1}) ---`;
+        if (m.isFinalResponse) header += " (Final Output)";
+        let text = `${header}\n${m.content}`;
+        if (m.reasoning) text = `💭 REASONING:\n${m.reasoning}\n\n` + text;
+        return text;
+      })
+      .join("\n\n");
+    navigator.clipboard.writeText(transcript);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  return (
+    <div className="flex flex-col w-full" style={{ gap: "10px" }}>
+      {/* Top Filter and Actions Toolbar */}
+      <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        {/* Role Filters */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setRoleFilter("all")}
+            className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              roleFilter === "all" ? "bg-blue text-white shadow-sm" : "text-muted hover:text-ink hover:bg-slate-800/30"
+            }`}
+            style={{
+              background: roleFilter === "all" ? "#3b82f6" : "transparent",
+              color: roleFilter === "all" ? "#fff" : "var(--muted)",
+            }}
+          >
+            Semua ({messages.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setRoleFilter("dialog")}
+            className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              roleFilter === "dialog" ? "bg-blue text-white shadow-sm" : "text-muted hover:text-ink hover:bg-slate-800/30"
+            }`}
+            style={{
+              background: roleFilter === "dialog" ? "#3b82f6" : "transparent",
+              color: roleFilter === "dialog" ? "#fff" : "var(--muted)",
+            }}
+          >
+            User & AI ({dialogCount})
+          </button>
+          {systemCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setRoleFilter("system")}
+              className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                roleFilter === "system" ? "bg-blue text-white shadow-sm" : "text-muted hover:text-ink hover:bg-slate-800/30"
+              }`}
+              style={{
+                background: roleFilter === "system" ? "#3b82f6" : "transparent",
+                color: roleFilter === "system" ? "#fff" : "var(--muted)",
+              }}
+            >
+              System ({systemCount})
+            </button>
+          )}
+          {toolCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setRoleFilter("tool")}
+              className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                roleFilter === "tool" ? "bg-blue text-white shadow-sm" : "text-muted hover:text-ink hover:bg-slate-800/30"
+              }`}
+              style={{
+                background: roleFilter === "tool" ? "#3b82f6" : "transparent",
+                color: roleFilter === "tool" ? "#fff" : "var(--muted)",
+              }}
+            >
+              Tool ({toolCount})
+            </button>
+          )}
+        </div>
+
+        {/* Search & Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex items-center">
+            <Search size={12} className="absolute left-2.5 text-muted pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Cari kata kunci..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-7 pr-2.5 py-1 rounded-md text-xs border bg-transparent"
+              style={{
+                borderColor: "var(--border)",
+                color: "var(--ink)",
+                width: "150px",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCopyAll}
+            className="px-2.5 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition"
+            style={{
+              background: "var(--surface-hover)",
+              border: "1px solid var(--border)",
+              color: "var(--ink)",
+            }}
+            title="Salin seluruh percakapan"
+          >
+            {copiedAll ? <Check size={12} className="text-green" /> : <Copy size={12} />}
+            <span>{copiedAll ? "Tersalin!" : "Salin Transkrip"}</span>
+          </button>
+
+          {onOpenFullModal && (
+            <button
+              type="button"
+              onClick={onOpenFullModal}
+              className="px-2.5 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition"
+              style={{
+                background: "rgba(59, 130, 246, 0.12)",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                color: "#3b82f6",
+              }}
+              title="Buka Chat di Popup Penuh"
+            >
+              <Maximize2 size={12} />
+              <span>Popup Penuh</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Messages Stream Container */}
+      <div
+        className="flex flex-col gap-3 p-3 rounded-lg overflow-y-auto"
+        style={{
+          maxHeight,
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <RefreshCw size={24} className="animate-spin text-blue mb-2" />
+            <span className="text-xs text-muted">Sedang memuat data percakapan lengkap dari database...</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-muted">
+            <MessageSquare size={28} className="opacity-40 mb-2" />
+            <p className="text-xs font-medium">Tidak ada pesan yang cocok dengan filter atau request ini bukan chat completion biasa.</p>
+            {onSwitchToRaw && (
+              <button
+                type="button"
+                onClick={onSwitchToRaw}
+                className="mt-3 px-3 py-1.5 rounded-md text-xs font-semibold text-blue bg-blue/10 border border-blue/20 hover:bg-blue/20 transition"
+              >
+                Lihat Raw JSON Request
+              </button>
+            )}
+          </div>
+        ) : (
+          filtered.map((msg, idx) => {
+            const isUser = msg.role === "user";
+            const isSystem = msg.role === "system";
+            const isTool = msg.role === "tool";
+
+            // SYSTEM PROMPT BUBBLE
+            if (isSystem) {
+              const isLong = msg.content.length > 300;
+              const isExpanded = expandedSystem[msg.id] ?? false;
+              const displayContent = isLong && !isExpanded ? msg.content.slice(0, 300) + "..." : msg.content;
+
+              return (
+                <div
+                  key={msg.id || idx}
+                  className="rounded-lg p-3 text-xs transition border"
+                  style={{
+                    backgroundColor: "rgba(245, 158, 11, 0.04)",
+                    borderColor: "rgba(245, 158, 11, 0.25)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-amber-500/20">
+                    <div className="flex items-center gap-1.5 font-bold text-[11px] text-amber-500 uppercase tracking-wider">
+                      <ShieldCheck size={13} />
+                      <span>System Instructions (#{idx + 1})</span>
+                      <span className="text-[10px] text-muted normal-case font-normal">({msg.content.length.toLocaleString()} chars)</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {isLong && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSystem((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
+                          className="px-1.5 py-0.5 rounded text-[10.5px] font-semibold text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 transition flex items-center gap-1"
+                        >
+                          {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          <span>{isExpanded ? "Ringkas" : "Lihat Semua"}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleCopyMessage(msg.id, msg.content)}
+                        className="p-1 rounded text-muted hover:text-ink hover:bg-slate-800/30 transition"
+                        title="Salin instruksi sistem"
+                      >
+                        {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-words opacity-90 max-h-[350px] overflow-y-auto">
+                    {displayContent}
+                  </pre>
+                </div>
+              );
+            }
+
+            // USER BUBBLE (Right aligned)
+            if (isUser) {
+              return (
+                <div key={msg.id || idx} className="flex justify-end w-full">
+                  <div
+                    className="rounded-2xl rounded-tr-sm p-3.5 max-w-[85%] text-xs shadow-sm transition border"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(30, 58, 138, 0.95), rgba(37, 99, 235, 0.9))",
+                      borderColor: "rgba(59, 130, 246, 0.5)",
+                      color: "#ffffff",
+                    }}
+                  >
+                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-blue-400/25">
+                      <div className="flex items-center gap-1.5 font-bold text-[11px] text-blue-200">
+                        <User size={12} />
+                        <span>User</span>
+                        <span className="text-[10px] opacity-75 font-mono">#{idx + 1}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyMessage(msg.id, msg.content)}
+                        className="p-1 rounded text-blue-200 hover:text-white hover:bg-white/10 transition"
+                        title="Salin pesan user"
+                      >
+                        {copiedId === msg.id ? <Check size={11} /> : <Copy size={11} />}
+                      </button>
+                    </div>
+                    <div className="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed break-words">
+                      {msg.content}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // TOOL RESPONSE BUBBLE
+            if (isTool) {
+              const isLong = msg.content.length > 300;
+              const isExpanded = expandedTools[msg.id] ?? false;
+              const displayContent = isLong && !isExpanded ? msg.content.slice(0, 300) + "..." : msg.content;
+
+              return (
+                <div key={msg.id || idx} className="flex justify-start w-full">
+                  <div
+                    className="rounded-xl p-3 max-w-[88%] text-xs shadow-sm transition border"
+                    style={{
+                      backgroundColor: "rgba(100, 116, 139, 0.08)",
+                      borderColor: "rgba(100, 116, 139, 0.25)",
+                      color: "var(--ink)",
+                    }}
+                  >
+                    <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-700/30">
+                      <div className="flex items-center gap-1.5 font-bold text-[11px] text-slate-400">
+                        <Wrench size={12} className="text-purple-400" />
+                        <span>Tool Result</span>
+                        <span className="text-[10px] text-muted font-mono">#{idx + 1}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {isLong && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedTools((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
+                            className="px-1.5 py-0.5 rounded text-[10px] text-slate-300 bg-slate-800 hover:bg-slate-700 transition"
+                          >
+                            {isExpanded ? "Tutup" : "Lihat Semua"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(msg.id, msg.content)}
+                          className="p-1 rounded text-muted hover:text-ink"
+                          title="Salin hasil tool"
+                        >
+                          {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </div>
+                    <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words opacity-85">
+                      {displayContent}
+                    </pre>
+                  </div>
+                </div>
+              );
+            }
+
+            // ASSISTANT BUBBLE (Left aligned)
+            const hasReasoning = !!msg.reasoning;
+            const isReasoningExpanded = expandedReasoning[msg.id] ?? false;
+
+            return (
+              <div key={msg.id || idx} className="flex justify-start w-full">
+                <div
+                  className="rounded-2xl rounded-tl-sm p-3.5 max-w-[88%] text-xs shadow-sm transition border"
+                  style={{
+                    backgroundColor: msg.isFinalResponse ? "rgba(16, 185, 129, 0.04)" : "var(--surface)",
+                    borderColor: msg.isFinalResponse ? "rgba(16, 185, 129, 0.3)" : "var(--border)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b" style={{ borderColor: "var(--border)" }}>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                      <Bot size={13} style={{ color: msg.isFinalResponse ? "#10b981" : "#a855f7" }} />
+                      <span style={{ color: msg.isFinalResponse ? "#10b981" : "var(--ink)" }}>Assistant</span>
+                      <span className="text-[10px] text-muted font-mono">#{idx + 1}</span>
+                      {msg.isFinalResponse && (
+                        <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/25 flex items-center gap-1">
+                          <Sparkles size={9} />
+                          <span>Final Upstream Output</span>
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMessage(msg.id, msg.content)}
+                      className="p-1 rounded text-muted hover:text-ink hover:bg-slate-800/30 transition"
+                      title="Salin jawaban assistant"
+                    >
+                      {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                    </button>
+                  </div>
+
+                  {/* Collapsible Reasoning Block if present */}
+                  {hasReasoning && (
+                    <div
+                      className="mb-2.5 rounded-lg p-2.5 transition border"
+                      style={{
+                        backgroundColor: "rgba(147, 51, 234, 0.06)",
+                        borderColor: "rgba(147, 51, 234, 0.2)",
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedReasoning((prev) => ({ ...prev, [msg.id]: !isReasoningExpanded }))}
+                          className="flex items-center gap-1.5 text-[11px] font-bold text-purple-400 hover:text-purple-300 transition"
+                        >
+                          <Zap size={11} />
+                          <span>Thought Process / Reasoning</span>
+                          <span className="text-[10px] opacity-75 font-normal">({msg.reasoning!.length.toLocaleString()} chars)</span>
+                          {isReasoningExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(`reasoning-${msg.id}`, msg.reasoning!)}
+                          className="p-0.5 text-muted hover:text-ink"
+                          title="Salin reasoning"
+                        >
+                          {copiedId === `reasoning-${msg.id}` ? <Check size={10} className="text-green" /> : <Copy size={10} />}
+                        </button>
+                      </div>
+                      {isReasoningExpanded && (
+                        <div className="mt-2 pt-2 border-t border-purple-500/20 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-purple-200/90 max-h-[300px] overflow-y-auto">
+                          {msg.reasoning}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tool Calls if present */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="mb-2 space-y-1">
+                      {msg.toolCalls.map((tc, tIdx) => (
+                        <div
+                          key={tc.id || tIdx}
+                          className="p-2 rounded text-[11px] font-mono border"
+                          style={{
+                            background: "rgba(2, 132, 199, 0.06)",
+                            borderColor: "rgba(2, 132, 199, 0.2)",
+                            color: "#38bdf8",
+                          }}
+                        >
+                          <div className="flex items-center gap-1 font-bold">
+                            <Wrench size={10} />
+                            <span>Tool Call: {tc.name}</span>
+                          </div>
+                          {tc.args && (
+                            <pre className="mt-1 text-[10.5px] opacity-80 whitespace-pre-wrap break-words">
+                              {tc.args}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Assistant Text Content */}
+                  <div className="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed break-words">
+                    {msg.content}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminUsagePage() {
   const [events, setEvents] = useState<UpstreamEvent[]>([]);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
@@ -240,12 +880,17 @@ export default function AdminUsagePage() {
   const [inspectEvent, setInspectEvent] = useState<UpstreamEvent | null>(null);
   const [loadingInspectDetail, setLoadingInspectDetail] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
-  const [activeRawTab, setActiveRawTab] = useState<"body" | "headers" | "response" | "telemetry">("body");
+  const [activeRawTab, setActiveRawTab] = useState<"chat" | "body" | "headers" | "response" | "telemetry">("chat");
   const [copiedTab, setCopiedTab] = useState(false);
+
+  // Dedicated Chat Bubble Popup Modal
+  const [chatModalEvent, setChatModalEvent] = useState<UpstreamEvent | null>(null);
+  const [loadingChatDetail, setLoadingChatDetail] = useState(false);
 
   async function openInspect(ev: UpstreamEvent) {
     setInspectEvent(ev);
-    if (!ev.rawBody && !ev.rawResponse) {
+    const isTruncated = typeof ev.rawBody === "string" && ev.rawBody.includes("[TRUNCATED_IN_MEMORY_CACHE]");
+    if (!ev.rawBody || isTruncated || (!ev.rawResponse && !ev.rawBody)) {
       setLoadingInspectDetail(true);
       try {
         const res = await fetch(`/api/admin/usage/history?logId=${ev.id}`);
@@ -255,6 +900,23 @@ export default function AdminUsagePage() {
         }
       } catch {}
       setLoadingInspectDetail(false);
+    }
+  }
+
+  async function openChatModal(ev: UpstreamEvent) {
+    setChatModalEvent(ev);
+    const isTruncated = typeof ev.rawBody === "string" && ev.rawBody.includes("[TRUNCATED_IN_MEMORY_CACHE]");
+    if (!ev.rawBody || isTruncated || (!ev.rawResponse && !ev.rawBody)) {
+      setLoadingChatDetail(true);
+      try {
+        const res = await fetch(`/api/admin/usage/history?logId=${ev.id}`);
+        const json = await res.json();
+        if (json.success && json.data?.log) {
+          setChatModalEvent((prev) => (prev?.id === ev.id ? { ...prev, ...json.data.log } : prev));
+          setInspectEvent((prev) => (prev?.id === ev.id ? { ...prev, ...json.data.log } : prev));
+        }
+      } catch {}
+      setLoadingChatDetail(false);
     }
   }
 
@@ -1309,7 +1971,7 @@ print(response.choices[0].message.content)`,
                     <th title="Format: Total Asli / Setelah Kompres / Total Hemat">RTK (ORI/COMP/SAVED)</th>
                     <th>LATENCY</th>
                     <th>STATUS</th>
-                    <th style={{ width: "56px", textAlign: "center" }}>ACTION</th>
+                    <th style={{ width: "78px", textAlign: "center" }}>ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1524,20 +2186,39 @@ print(response.choices[0].message.content)`,
                         </div>
                       </td>
 
-                      {/* Quick Inspect Action */}
-                      <td style={{ textAlign: "center", verticalAlign: "middle", width: "56px" }}>
-                        <button
-                          type="button"
-                          className="table-action-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openInspect(ev);
-                          }}
-                          title="Inspect full telemetry details"
-                          aria-label="Inspect telemetry"
-                        >
-                          <Eye size={13} strokeWidth={1.8} />
-                        </button>
+                      {/* Quick Actions: Chat & Inspect */}
+                      <td style={{ textAlign: "center", verticalAlign: "middle", width: "78px" }}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            className="table-action-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openChatModal(ev);
+                            }}
+                            title="Buka Conversation Bubble Chat"
+                            aria-label="Bubble Chat"
+                            style={{
+                              color: "#3b82f6",
+                              backgroundColor: "rgba(59, 130, 246, 0.12)",
+                              borderColor: "rgba(59, 130, 246, 0.3)",
+                            }}
+                          >
+                            <MessageSquare size={13} strokeWidth={2} />
+                          </button>
+                          <button
+                            type="button"
+                            className="table-action-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openInspect(ev);
+                            }}
+                            title="Inspect full telemetry details"
+                            aria-label="Inspect telemetry"
+                          >
+                            <Eye size={13} strokeWidth={1.8} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1610,7 +2291,15 @@ print(response.choices[0].message.content)`,
         {/* Telemetry Event Inspector Modal */}
         {inspectEvent && (
           <div className="modal-backdrop" onClick={() => setInspectEvent(null)}>
-            <div className="inspector-modal" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="inspector-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: activeRawTab === "chat" ? "880px" : "640px",
+                width: "100%",
+                transition: "max-width 0.2s ease",
+              }}
+            >
               <div className="inspector-header">
                 <div className="inspector-header-left">
                   <Activity size={16} style={{ color: "var(--blue)" }} />
@@ -1619,13 +2308,32 @@ print(response.choices[0].message.content)`,
                     ID: {inspectEvent.id.slice(0, 14)}...
                   </span>
                 </div>
-                <button
-                  className="control btn-icon-only text-xs"
-                  onClick={() => setInspectEvent(null)}
-                  aria-label="Close modal"
-                >
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition"
+                    style={{
+                      background: "rgba(59, 130, 246, 0.12)",
+                      color: "#3b82f6",
+                      border: "1px solid rgba(59, 130, 246, 0.3)",
+                    }}
+                    onClick={() => {
+                      openChatModal(inspectEvent);
+                      setInspectEvent(null);
+                    }}
+                    title="Buka Chat di Popup Penuh"
+                  >
+                    <MessageSquare size={13} />
+                    <span>Popup Chat</span>
+                  </button>
+                  <button
+                    className="control btn-icon-only text-xs"
+                    onClick={() => setInspectEvent(null)}
+                    aria-label="Close modal"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
 
               <div className="inspector-body">
@@ -1852,6 +2560,22 @@ print(response.choices[0].message.content)`,
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <button
                         type="button"
+                        onClick={() => setActiveRawTab("chat")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                          activeRawTab === "chat"
+                            ? "bg-blue text-white shadow-sm"
+                            : "text-muted hover:text-ink hover:bg-slate-800/40"
+                        }`}
+                        style={{
+                          background: activeRawTab === "chat" ? "#3b82f6" : "transparent",
+                          color: activeRawTab === "chat" ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        <MessageSquare size={13} />
+                        <span>Bubble Chat</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setActiveRawTab("body")}
                         className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                           activeRawTab === "body"
@@ -1912,69 +2636,193 @@ print(response.choices[0].message.content)`,
                       </button>
                     </div>
 
-                    <button
-                      className="inspector-copy-btn"
-                      onClick={() => {
-                        let textToCopy = "";
-                        if (activeRawTab === "body") {
-                          textToCopy = typeof inspectEvent.rawBody === "string" ? inspectEvent.rawBody : JSON.stringify(inspectEvent.rawBody || {}, null, 2);
-                        } else if (activeRawTab === "headers") {
-                          textToCopy = typeof inspectEvent.rawHeaders === "string" ? inspectEvent.rawHeaders : JSON.stringify(inspectEvent.rawHeaders || {}, null, 2);
-                        } else if (activeRawTab === "response") {
-                          textToCopy = typeof inspectEvent.rawResponse === "string" ? inspectEvent.rawResponse : JSON.stringify(inspectEvent.rawResponse || {}, null, 2);
-                        } else {
-                          textToCopy = JSON.stringify(inspectEvent, null, 2);
-                        }
-                        navigator.clipboard.writeText(textToCopy);
-                        setCopiedTab(true);
-                        setTimeout(() => setCopiedTab(false), 2000);
-                      }}
-                      type="button"
-                      style={{ padding: "4px 8px", fontSize: "11.5px" }}
-                    >
-                      {copiedTab ? <Check size={12} className="text-green" /> : <Copy size={12} />}
-                      <span>{copiedTab ? "Copied!" : "Copy"}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openChatModal(inspectEvent);
+                          setInspectEvent(null);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5"
+                        style={{
+                          background: "rgba(59, 130, 246, 0.12)",
+                          color: "#3b82f6",
+                          border: "1px solid rgba(59, 130, 246, 0.3)",
+                        }}
+                        title="Buka Chat di Popup Terpisah"
+                      >
+                        <Maximize2 size={12} />
+                        <span>Buka Popup Penuh</span>
+                      </button>
+
+                      {activeRawTab !== "chat" && (
+                        <button
+                          className="inspector-copy-btn"
+                          onClick={() => {
+                            let textToCopy = "";
+                            if (activeRawTab === "body") {
+                              textToCopy = typeof inspectEvent.rawBody === "string" ? inspectEvent.rawBody : JSON.stringify(inspectEvent.rawBody || {}, null, 2);
+                            } else if (activeRawTab === "headers") {
+                              textToCopy = typeof inspectEvent.rawHeaders === "string" ? inspectEvent.rawHeaders : JSON.stringify(inspectEvent.rawHeaders || {}, null, 2);
+                            } else if (activeRawTab === "response") {
+                              textToCopy = typeof inspectEvent.rawResponse === "string" ? inspectEvent.rawResponse : JSON.stringify(inspectEvent.rawResponse || {}, null, 2);
+                            } else {
+                              textToCopy = JSON.stringify(inspectEvent, null, 2);
+                            }
+                            navigator.clipboard.writeText(textToCopy);
+                            setCopiedTab(true);
+                            setTimeout(() => setCopiedTab(false), 2000);
+                          }}
+                          type="button"
+                          style={{ padding: "4px 8px", fontSize: "11.5px" }}
+                        >
+                          {copiedTab ? <Check size={12} className="text-green" /> : <Copy size={12} />}
+                          <span>{copiedTab ? "Copied!" : "Copy"}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Tab Contents Code Box */}
-                  <div className="inspector-code-box" style={{ marginTop: "10px" }}>
-                    <pre className="inspector-pre" style={{ maxHeight: "400px", overflowY: "auto" }}>
-                      <code>
-                        {activeRawTab === "body" && (
-                          loadingInspectDetail
-                            ? "// Sedang memuat full raw body dari database..."
-                            : inspectEvent.rawBody
-                            ? (typeof inspectEvent.rawBody === "string"
-                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawBody), null, 2); } catch { return inspectEvent.rawBody; } })()
-                                : JSON.stringify(inspectEvent.rawBody, null, 2))
-                            : "// Tidak ada data raw body yang tersimpan untuk request ini."
-                        )}
-                        {activeRawTab === "headers" && (
-                          loadingInspectDetail
-                            ? "// Sedang memuat full raw headers dari database..."
-                            : inspectEvent.rawHeaders
-                            ? (typeof inspectEvent.rawHeaders === "string"
-                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawHeaders), null, 2); } catch { return inspectEvent.rawHeaders; } })()
-                                : JSON.stringify(inspectEvent.rawHeaders, null, 2))
-                            : "// Tidak ada data raw headers yang tersimpan untuk request ini."
-                        )}
-                        {activeRawTab === "response" && (
-                          loadingInspectDetail
-                            ? "// Sedang memuat full raw response dari database..."
-                            : inspectEvent.rawResponse
-                            ? (typeof inspectEvent.rawResponse === "string"
-                                ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawResponse), null, 2); } catch { return inspectEvent.rawResponse; } })()
-                                : JSON.stringify(inspectEvent.rawResponse, null, 2))
-                            : "// Tidak ada data raw response yang tersimpan untuk request ini."
-                        )}
-                        {activeRawTab === "telemetry" && (
-                          JSON.stringify(inspectEvent, null, 2)
-                        )}
-                      </code>
-                    </pre>
+                  {/* Tab Contents */}
+                  {activeRawTab === "chat" ? (
+                    <div style={{ marginTop: "12px" }}>
+                      <ChatConversationView
+                        rawBody={inspectEvent.rawBody}
+                        rawResponse={inspectEvent.rawResponse}
+                        loading={loadingInspectDetail}
+                        maxHeight="440px"
+                        onOpenFullModal={() => {
+                          openChatModal(inspectEvent);
+                          setInspectEvent(null);
+                        }}
+                        onSwitchToRaw={() => setActiveRawTab("body")}
+                      />
+                    </div>
+                  ) : (
+                    <div className="inspector-code-box" style={{ marginTop: "10px" }}>
+                      <pre className="inspector-pre" style={{ maxHeight: "400px", overflowY: "auto" }}>
+                        <code>
+                          {activeRawTab === "body" && (
+                            loadingInspectDetail
+                              ? "// Sedang memuat full raw body dari database..."
+                              : inspectEvent.rawBody
+                              ? (typeof inspectEvent.rawBody === "string"
+                                  ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawBody), null, 2); } catch { return inspectEvent.rawBody; } })()
+                                  : JSON.stringify(inspectEvent.rawBody, null, 2))
+                              : "// Tidak ada data raw body yang tersimpan untuk request ini."
+                          )}
+                          {activeRawTab === "headers" && (
+                            loadingInspectDetail
+                              ? "// Sedang memuat full raw headers dari database..."
+                              : inspectEvent.rawHeaders
+                              ? (typeof inspectEvent.rawHeaders === "string"
+                                  ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawHeaders), null, 2); } catch { return inspectEvent.rawHeaders; } })()
+                                  : JSON.stringify(inspectEvent.rawHeaders, null, 2))
+                              : "// Tidak ada data raw headers yang tersimpan untuk request ini."
+                          )}
+                          {activeRawTab === "response" && (
+                            loadingInspectDetail
+                              ? "// Sedang memuat full raw response dari database..."
+                              : inspectEvent.rawResponse
+                              ? (typeof inspectEvent.rawResponse === "string"
+                                  ? (() => { try { return JSON.stringify(JSON.parse(inspectEvent.rawResponse), null, 2); } catch { return inspectEvent.rawResponse; } })()
+                                  : JSON.stringify(inspectEvent.rawResponse, null, 2))
+                              : "// Tidak ada data raw response yang tersimpan untuk request ini."
+                          )}
+                          {activeRawTab === "telemetry" && (
+                            JSON.stringify(inspectEvent, null, 2)
+                          )}
+                        </code>
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated Standalone Chat Bubbles Modal */}
+        {chatModalEvent && (
+          <div className="modal-backdrop" onClick={() => setChatModalEvent(null)}>
+            <div
+              className="inspector-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "920px",
+                width: "95%",
+                maxHeight: "90vh",
+              }}
+            >
+              {/* Modal Header */}
+              <div className="inspector-header">
+                <div className="inspector-header-left">
+                  <div className="p-1.5 rounded-md flex items-center justify-center" style={{ background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6" }}>
+                    <MessageSquare size={16} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="inspector-title" style={{ margin: 0 }}>
+                        Conversation Chat Bubbles
+                      </h3>
+                      <span
+                        className={`status-badge ${
+                          chatModalEvent.statusCode === 200
+                            ? "status-200"
+                            : chatModalEvent.statusCode === 429
+                            ? "status-429"
+                            : "status-error"
+                        }`}
+                        style={{ fontSize: "10.5px" }}
+                      >
+                        {chatModalEvent.statusCode}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted mt-1 flex-wrap">
+                      <span className="mono font-semibold text-blue">{chatModalEvent.model}</span>
+                      <span>•</span>
+                      <span>{chatModalEvent.clientUser?.email || chatModalEvent.clientUserEmail || "Direct Gateway API"}</span>
+                      <span>•</span>
+                      <span>{chatModalEvent.totalTokens.toLocaleString()} tokens</span>
+                      <span>•</span>
+                      <span>{chatModalEvent.latencyMs}ms</span>
+                    </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="control btn-icon-only text-xs"
+                    onClick={() => {
+                      openInspect(chatModalEvent);
+                      setChatModalEvent(null);
+                    }}
+                    title="Buka Telemetry Inspector Lengkap"
+                  >
+                    <Eye size={14} />
+                  </button>
+                  <button
+                    className="control btn-icon-only text-xs"
+                    onClick={() => setChatModalEvent(null)}
+                    aria-label="Close modal"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="inspector-body" style={{ padding: "16px" }}>
+                <ChatConversationView
+                  rawBody={chatModalEvent.rawBody}
+                  rawResponse={chatModalEvent.rawResponse}
+                  loading={loadingChatDetail}
+                  maxHeight="calc(90vh - 160px)"
+                  onSwitchToRaw={() => {
+                    openInspect(chatModalEvent);
+                    setChatModalEvent(null);
+                  }}
+                />
               </div>
             </div>
           </div>
