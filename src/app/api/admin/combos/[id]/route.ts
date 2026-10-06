@@ -63,27 +63,67 @@ export async function PUT(
 
     const body = await req.json();
 
-    // Check if this is a quick toggle (e.g. { isActive: false } or { isPublic: true })
-    const isQuickToggle =
-      (body.isActive !== undefined || body.isPublic !== undefined) &&
+    // Check if this is a quick update (inline toggle, strategy switch, or items reorder)
+    const isQuickUpdate =
       body.comboId === undefined &&
-      body.name === undefined &&
-      body.items === undefined;
+      body.name === undefined;
 
-    if (isQuickToggle) {
-      const updated = await prisma.comboModel.update({
-        where: { id: target.id },
-        data: {
-          ...(body.isActive !== undefined ? { isActive: Boolean(body.isActive) } : {}),
-          ...(body.isPublic !== undefined ? { isPublic: Boolean(body.isPublic) } : {}),
-        },
-      });
+    if (isQuickUpdate) {
+      const updateData: any = {};
+      if (body.isActive !== undefined) updateData.isActive = Boolean(body.isActive);
+      if (body.isPublic !== undefined) updateData.isPublic = Boolean(body.isPublic);
+      if (body.strategy !== undefined) {
+        updateData.strategy = body.strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : "FALLBACK";
+      }
+      if (body.cooldownSeconds !== undefined && Number(body.cooldownSeconds) > 0) {
+        updateData.cooldownSeconds = Number(body.cooldownSeconds);
+      }
+
+      let updatedCombo;
+
+      if (Array.isArray(body.items)) {
+        updatedCombo = await prisma.$transaction(async (tx) => {
+          await tx.comboModelItem.deleteMany({
+            where: { comboModelId: target.id },
+          });
+
+          await tx.comboModelItem.createMany({
+            data: body.items.map((it: any, index: number) => ({
+              comboModelId: target.id,
+              modelId: it.modelId.trim(),
+              priority: it.priority !== undefined ? Number(it.priority) : index + 1,
+              weight: Number(it.weight) > 0 ? Number(it.weight) : 1,
+              isActive: it.isActive !== undefined ? Boolean(it.isActive) : true,
+            })),
+          });
+
+          return tx.comboModel.update({
+            where: { id: target.id },
+            data: updateData,
+            include: {
+              items: {
+                orderBy: { priority: "asc" },
+              },
+            },
+          });
+        });
+      } else {
+        updatedCombo = await prisma.comboModel.update({
+          where: { id: target.id },
+          data: updateData,
+          include: {
+            items: {
+              orderBy: { priority: "asc" },
+            },
+          },
+        });
+      }
 
       invalidateComboCache();
       invalidateModelsCache();
       clearPricingCache();
 
-      return NextResponse.json({ success: true, combo: updated });
+      return NextResponse.json({ success: true, combo: updatedCombo });
     }
 
     // Full update from edit modal
@@ -177,10 +217,10 @@ export async function PUT(
           comboId: cleanComboId,
           name: name ? name.trim() : target.name,
           description: description !== undefined ? (description?.trim() || null) : target.description,
-          type: type === "image" ? "image" : "chat",
+          type: type === "image" ? "image" : (type === "chat" ? "chat" : target.type || "chat"),
           imageCostUsd: imageCost,
-          strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : "FALLBACK",
-          cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : 60,
+          strategy: strategy === "ROUND_ROBIN" ? "ROUND_ROBIN" : (strategy === "FALLBACK" ? "FALLBACK" : target.strategy || "FALLBACK"),
+          cooldownSeconds: Number(cooldownSeconds) > 0 ? Number(cooldownSeconds) : (target.cooldownSeconds || 60),
           rateInUsdPer1m: inRate1m,
           rateOutUsdPer1m: outRate1m,
           rateInUsdPer1k: inRate1k,

@@ -27,6 +27,7 @@ import {
   Info,
   Coins,
   Image as ImageIcon,
+  GripVertical,
 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
 
@@ -130,6 +131,12 @@ export default function AdminCombosPage() {
 
   // Ping Testing State
   const [pingResults, setPingResults] = useState<Record<string, { latencyMs?: number; status?: number; loading?: boolean; error?: string }>>({});
+
+  // Inline Table Actions State (Strategy toggle & Drag-and-drop reordering)
+  const [updatingStrategyId, setUpdatingStrategyId] = useState<string | null>(null);
+  const [draggedChip, setDraggedChip] = useState<{ comboId: string; index: number } | null>(null);
+  const [dragOverChip, setDragOverChip] = useState<{ comboId: string; index: number } | null>(null);
+  const [savingReorderId, setSavingReorderId] = useState<string | null>(null);
 
   async function fetchCombos() {
     setLoading(true);
@@ -296,6 +303,121 @@ export default function AdminCombosPage() {
       });
     } catch {
       fetchCombos();
+    }
+  }
+
+  async function handleToggleStrategy(combo: ComboItem) {
+    if (updatingStrategyId === combo.id) return;
+    const nextStrategy: "FALLBACK" | "ROUND_ROBIN" =
+      combo.strategy === "ROUND_ROBIN" ? "FALLBACK" : "ROUND_ROBIN";
+
+    // Optimistic UI update
+    setCombos((prev) =>
+      prev.map((c) => (c.id === combo.id ? { ...c, strategy: nextStrategy } : c))
+    );
+    setUpdatingStrategyId(combo.id);
+
+    try {
+      const res = await fetch(`/api/admin/combos/${combo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy: nextStrategy }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Gagal mengubah routing strategy.");
+      }
+      setSuccessMsg(`Strategy '${combo.name}' diubah ke ${nextStrategy === "ROUND_ROBIN" ? "Round-Robin" : "Priority Fallback"}`);
+      setTimeout(() => setSuccessMsg(""), 2500);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Gagal mengubah routing strategy.");
+      fetchCombos(); // Revert from server
+    } finally {
+      setUpdatingStrategyId(null);
+    }
+  }
+
+  function handleChipDragStart(e: React.DragEvent, comboId: string, index: number) {
+    e.dataTransfer.setData("text/plain", `${comboId}:${index}`);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggedChip({ comboId, index });
+  }
+
+  function handleChipDragOver(e: React.DragEvent, comboId: string, index: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (draggedChip && draggedChip.comboId === comboId && draggedChip.index !== index) {
+      if (!dragOverChip || dragOverChip.comboId !== comboId || dragOverChip.index !== index) {
+        setDragOverChip({ comboId, index });
+      }
+    }
+  }
+
+  function handleChipDragLeave(comboId: string, index: number) {
+    if (dragOverChip?.comboId === comboId && dragOverChip.index === index) {
+      setDragOverChip(null);
+    }
+  }
+
+  function handleChipDragEnd() {
+    setDraggedChip(null);
+    setDragOverChip(null);
+  }
+
+  async function handleChipDrop(e: React.DragEvent, combo: ComboItem, targetIndex: number) {
+    e.preventDefault();
+    if (!draggedChip || draggedChip.comboId !== combo.id) {
+      setDraggedChip(null);
+      setDragOverChip(null);
+      return;
+    }
+
+    const sourceIndex = draggedChip.index;
+    setDraggedChip(null);
+    setDragOverChip(null);
+
+    if (sourceIndex === targetIndex) return;
+
+    // Move candidate from sourceIndex to targetIndex
+    const newItems = [...combo.items];
+    const [movedItem] = newItems.splice(sourceIndex, 1);
+    newItems.splice(targetIndex, 0, movedItem);
+
+    // Reassign priorities sequentially: 1, 2, 3...
+    const reorderedItems = newItems.map((it, idx) => ({
+      ...it,
+      priority: idx + 1,
+    }));
+
+    // Optimistically update table immediately
+    setCombos((prev) =>
+      prev.map((c) => (c.id === combo.id ? { ...c, items: reorderedItems } : c))
+    );
+
+    // Persist to backend
+    setSavingReorderId(combo.id);
+    try {
+      const res = await fetch(`/api/admin/combos/${combo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: reorderedItems }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Gagal menyimpan urutan candidates.");
+      }
+      if (data.combo) {
+        setCombos((prev) =>
+          prev.map((c) => (c.id === combo.id ? data.combo : c))
+        );
+      }
+      setSuccessMsg(`Urutan candidate '${combo.name}' berhasil diperbarui`);
+      setTimeout(() => setSuccessMsg(""), 2500);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Gagal menyimpan urutan candidates.");
+      fetchCombos(); // Revert from server
+    } finally {
+      setSavingReorderId(null);
     }
   }
 
@@ -630,9 +752,15 @@ export default function AdminCombosPage() {
               <thead>
                 <tr>
                   <th style={{ width: "220px", minWidth: "200px" }}>Combo Identifier</th>
-                  <th style={{ width: "150px", minWidth: "140px" }}>Strategy</th>
+                  <th style={{ width: "160px", minWidth: "150px" }}>
+                    Strategy
+                    <span className="block text-[10px] font-normal text-muted opacity-70">Click to switch</span>
+                  </th>
                   <th style={{ width: "170px", minWidth: "150px" }}>Cost ($ / 1M tok)</th>
-                  <th style={{ minWidth: "240px" }}>Candidate Stack & Order</th>
+                  <th style={{ minWidth: "260px" }}>
+                    Candidate Stack & Order
+                    <span className="block text-[10px] font-normal text-muted opacity-70">Drag & drop to reorder</span>
+                  </th>
                   <th style={{ width: "90px", minWidth: "85px" }}>Cooldown</th>
                   <th style={{ width: "110px", minWidth: "105px" }}>Public View</th>
                   <th style={{ width: "100px", minWidth: "95px" }}>Status</th>
@@ -711,23 +839,29 @@ export default function AdminCombosPage() {
                       </td>
 
                       <td>
-                        {combo.strategy === "ROUND_ROBIN" ? (
-                          <span
-                            className="combo-strategy-rr inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
-                            title="Rotates sequentially per request to balance load and multiply quota"
-                          >
-                            <ArrowDownUp size={11} />
-                            <span>Round-Robin</span>
-                          </span>
-                        ) : (
-                          <span
-                            className="combo-strategy-fallback inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
-                            title="Tries Tier 1 first; only falls back to Tier 2 upon 429/quota exhaustion"
-                          >
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStrategy(combo)}
+                          disabled={updatingStrategyId === combo.id}
+                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition-all hover:opacity-90 hover:scale-[1.02] active:scale-[0.98] select-none ${
+                            combo.strategy === "ROUND_ROBIN" ? "combo-strategy-rr" : "combo-strategy-fallback"
+                          }`}
+                          title={`Klik untuk switch strategy ke ${
+                            combo.strategy === "ROUND_ROBIN" ? "Priority Fallback" : "Round-Robin"
+                          }`}
+                        >
+                          {updatingStrategyId === combo.id ? (
+                            <RefreshCw size={11} className="animate-spin" />
+                          ) : combo.strategy === "ROUND_ROBIN" ? (
+                            <ArrowDownUp size={11} className="group-hover:rotate-180 transition-transform duration-300" />
+                          ) : (
                             <ShieldAlert size={11} />
-                            <span>Priority Fallback</span>
+                          )}
+                          <span>
+                            {combo.strategy === "ROUND_ROBIN" ? "Round-Robin" : "Priority Fallback"}
                           </span>
-                        )}
+                          <span className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity ml-0.5">⇄</span>
+                        </button>
                       </td>
 
                       <td>
@@ -762,11 +896,22 @@ export default function AdminCombosPage() {
                             const isCooling = Boolean(cooldowns[item.modelId.toLowerCase()]);
                             const remaining = cooldowns[item.modelId.toLowerCase()];
                             const ping = pingResults[item.modelId];
+                            const isDragged = draggedChip?.comboId === combo.id && draggedChip.index === idx;
+                            const isDragOver = dragOverChip?.comboId === combo.id && dragOverChip.index === idx;
+                            const canDrag = combo.items.length > 1;
 
                             return (
                               <div
-                                key={item.id || idx}
-                                className={`combo-model-chip ${isCooling ? "cooling" : ""}`}
+                                key={item.id || `${item.modelId}-${idx}`}
+                                draggable={canDrag}
+                                onDragStart={(e) => canDrag && handleChipDragStart(e, combo.id, idx)}
+                                onDragOver={(e) => canDrag && handleChipDragOver(e, combo.id, idx)}
+                                onDragLeave={() => canDrag && handleChipDragLeave(combo.id, idx)}
+                                onDrop={(e) => canDrag && handleChipDrop(e, combo, idx)}
+                                onDragEnd={handleChipDragEnd}
+                                className={`combo-model-chip ${isCooling ? "cooling" : ""} ${
+                                  isDragOver ? "ring-2 ring-blue-500 shadow-md scale-105" : ""
+                                }`}
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
@@ -775,9 +920,31 @@ export default function AdminCombosPage() {
                                   borderRadius: "6px",
                                   fontSize: "11px",
                                   fontFamily: "'JetBrains Mono', monospace",
-                                  boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                                  boxShadow: isDragOver
+                                    ? "0 4px 12px rgba(59, 130, 246, 0.3)"
+                                    : "0 1px 2px rgba(0,0,0,0.02)",
+                                  cursor: canDrag ? "grab" : "default",
+                                  opacity: isDragged ? 0.35 : 1,
+                                  borderStyle: isDragged ? "dashed" : "solid",
+                                  borderColor: isDragOver ? "#3b82f6" : undefined,
+                                  backgroundColor: isDragOver ? "rgba(59, 130, 246, 0.15)" : undefined,
+                                  transition: "all 0.15s ease",
+                                  userSelect: "none",
                                 }}
+                                title={
+                                  canDrag
+                                    ? `Drag untuk menukar urutan (${
+                                        combo.strategy === "ROUND_ROBIN" ? `W:${item.weight}` : `T${item.priority}`
+                                      })`
+                                    : undefined
+                                }
                               >
+                                {canDrag && (
+                                  <GripVertical
+                                    size={11}
+                                    className="opacity-40 hover:opacity-100 cursor-grab shrink-0 -mr-0.5"
+                                  />
+                                )}
                                 <span
                                   className={combo.strategy === "ROUND_ROBIN" ? "combo-item-badge-rr" : "combo-item-badge-fallback"}
                                   style={{
@@ -817,6 +984,12 @@ export default function AdminCombosPage() {
                               </div>
                             );
                           })}
+
+                          {savingReorderId === combo.id && (
+                            <span className="flex items-center gap-1 text-[11px] text-muted ml-1" title="Menyimpan urutan...">
+                              <RefreshCw size={11} className="animate-spin text-blue-500" />
+                            </span>
+                          )}
                         </div>
                       </td>
 
