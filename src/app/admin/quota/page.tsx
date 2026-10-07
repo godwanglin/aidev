@@ -104,7 +104,7 @@ export default function AdminQuotaTrackerPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [providerFilter, setProviderFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"expiring" | "least" | "most" | "name">("expiring");
+  const [sortBy, setSortBy] = useState<"most" | "expiring" | "least" | "name">("most");
   const [viewMode, setViewMode] = useState<"account" | "provider">("account");
 
   const [successMsg, setSuccessMsg] = useState("");
@@ -452,25 +452,41 @@ export default function AdminQuotaTrackerPage() {
     });
 
     list.sort((a, b) => {
+      // 1. Inactive accounts ALWAYS behind Active accounts (Active first!)
+      if (a.isActive !== b.isActive) {
+        return a.isActive ? -1 : 1;
+      }
+
+      // Helper to calculate usable quota (bottleneck minimum bucket, then average)
+      const getMinQuota = (acc: AccountQuotaCardData) =>
+        acc.quotas.length > 0 ? Math.min(...acc.quotas.map((q) => q.percentage)) : 0;
+      const getAvgQuota = (acc: AccountQuotaCardData) =>
+        acc.quotas.length > 0
+          ? acc.quotas.reduce((s, q) => s + q.percentage, 0) / acc.quotas.length
+          : 0;
+
       if (sortBy === "name") {
         return a.name.localeCompare(b.name);
       }
       if (sortBy === "least") {
-        const minA = a.quotas.length > 0 ? Math.min(...a.quotas.map((q) => q.percentage)) : 0;
-        const minB = b.quotas.length > 0 ? Math.min(...b.quotas.map((q) => q.percentage)) : 0;
-        return minA - minB;
+        const diff = getMinQuota(a) - getMinQuota(b);
+        if (diff !== 0) return diff;
+        return getAvgQuota(a) - getAvgQuota(b);
       }
       if (sortBy === "most") {
-        const maxA = a.quotas.length > 0 ? Math.max(...a.quotas.map((q) => q.percentage)) : 0;
-        const maxB = b.quotas.length > 0 ? Math.max(...b.quotas.map((q) => q.percentage)) : 0;
-        return maxB - maxA;
+        // Higher remaining quota first (bottleneck first, then average)
+        const diff = getMinQuota(b) - getMinQuota(a);
+        if (diff !== 0) return diff;
+        return getAvgQuota(b) - getAvgQuota(a);
       }
-      // "expiring" - earliest reset date first
+      // "expiring" - earliest reset date first, with tie-break by higher quota
       const timeA =
         a.quotas.find((q) => q.resetTime)?.resetTime || "9999-12-31T23:59:59Z";
       const timeB =
         b.quotas.find((q) => q.resetTime)?.resetTime || "9999-12-31T23:59:59Z";
-      return new Date(timeA).getTime() - new Date(timeB).getTime();
+      const timeDiff = new Date(timeA).getTime() - new Date(timeB).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return getMinQuota(b) - getMinQuota(a);
     });
 
     return list;
@@ -811,6 +827,11 @@ export default function AdminQuotaTrackerPage() {
               onChange={(val) => setSortBy(val as any)}
               options={[
                 {
+                  value: "most",
+                  label: "Most quota first",
+                  icon: <CheckCircle2 size={13} className="text-emerald-500" />,
+                },
+                {
                   value: "expiring",
                   label: "Expiring first",
                   icon: <Clock size={13} className="text-amber-500" />,
@@ -819,11 +840,6 @@ export default function AdminQuotaTrackerPage() {
                   value: "least",
                   label: "Least quota first",
                   icon: <AlertTriangle size={13} className="text-red" />,
-                },
-                {
-                  value: "most",
-                  label: "Most quota first",
-                  icon: <CheckCircle2 size={13} className="text-emerald-500" />,
                 },
                 {
                   value: "name",
