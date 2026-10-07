@@ -42,6 +42,7 @@ import {
   Maximize2,
   ChevronUp,
   Wrench,
+  CornerDownRight,
 } from "lucide-react";
 
 function DotsNineIcon({
@@ -180,13 +181,44 @@ const PROVIDER_COLORS: Record<string, string> = {
   DEFAULT: "#3b82f6",
 };
 
+interface ParsedToolCall {
+  id?: string;
+  name: string;
+  args?: string;
+}
+
 interface ParsedChatMessage {
   id: string;
-  role: "system" | "user" | "assistant" | "tool";
+  role: "system" | "user" | "assistant" | "tool" | "developer";
   content: string;
   reasoning?: string;
-  toolCalls?: Array<{ id?: string; name: string; args?: string }>;
+  toolCalls?: ParsedToolCall[];
+  // Exec and Output wrappers
+  isToolExec?: boolean;
+  toolName?: string;
+  toolCallId?: string;
+  isToolOutput?: boolean;
+  // Tools configuration / schema declaration
+  isAdditionalTools?: boolean;
+  toolsList?: Array<{ name: string; type?: string; description?: string }>;
+  rawToolsJson?: string;
   isFinalResponse?: boolean;
+}
+
+function extractToolsFromSchema(toolsArray: any[]): Array<{ name: string; type?: string; description?: string }> {
+  const result: Array<{ name: string; type?: string; description?: string }> = [];
+  if (!Array.isArray(toolsArray)) return result;
+  for (const t of toolsArray) {
+    if (!t) continue;
+    if (t.type === "namespace" && Array.isArray(t.tools)) {
+      result.push(...extractToolsFromSchema(t.tools));
+    } else if (t.name) {
+      result.push({ name: t.name, type: t.type || "custom", description: t.description || "" });
+    } else if (t.function?.name) {
+      result.push({ name: t.function.name, type: "function", description: t.function.description || "" });
+    }
+  }
+  return result;
 }
 
 function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage[] {
@@ -202,6 +234,8 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
     bodyObj = rawBody;
   }
 
+  const callIdToToolName: Record<string, string> = {};
+
   if (bodyObj) {
     // Anthropic top-level system
     if (bodyObj.system) {
@@ -209,59 +243,252 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
       messages.push({ id: "sys-top", role: "system", content: s });
     }
 
+    // Top-level tools declaration if present
+    if (Array.isArray(bodyObj.tools) && bodyObj.tools.length > 0) {
+      const toolSummaries = extractToolsFromSchema(bodyObj.tools);
+      messages.push({
+        id: "top-tools",
+        role: "system",
+        content: "",
+        isAdditionalTools: true,
+        toolsList: toolSummaries,
+        rawToolsJson: JSON.stringify(bodyObj.tools, null, 2),
+      });
+    }
+
     // Standard OpenAI / Anthropic messages
     if (Array.isArray(bodyObj.messages)) {
       for (let i = 0; i < bodyObj.messages.length; i++) {
         const m = bodyObj.messages[i];
+        if (!m) continue;
+
+        // Tool output message in OpenAI format
+        if (m.role === "tool") {
+          const callId = m.tool_call_id || `tool-${i}`;
+          const tName = callIdToToolName[callId] || m.name || "exec";
+          messages.push({
+            id: `msg-tool-${i}`,
+            role: "tool",
+            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2),
+            isToolOutput: true,
+            toolName: tName,
+            toolCallId: callId,
+          });
+          continue;
+        }
+
         let content = "";
+        let inlineToolCalls: ParsedToolCall[] | undefined = undefined;
+
         if (typeof m.content === "string") {
           content = m.content;
         } else if (Array.isArray(m.content)) {
-          content = m.content
-            .map((p: any) => {
-              if (typeof p === "string") return p;
-              if (p.text) return p.text;
-              if (p.type === "text") return p.text || "";
-              if (p.type === "image_url") return `[Gambar/Image: ${p.image_url?.url ? "URL" : "Attached"}]`;
-              return JSON.stringify(p);
-            })
-            .join("\n");
+          // Check for Anthropic tool_use or tool_result blocks
+          const textParts: string[] = [];
+          for (const p of m.content) {
+            if (typeof p === "string") {
+              textParts.push(p);
+            } else if (p.type === "tool_use") {
+              const callId = p.id || `call_${i}`;
+              callIdToToolName[callId] = p.name;
+              messages.push({
+                id: callId,
+                role: "assistant",
+                content: typeof p.input === "string" ? p.input : JSON.stringify(p.input || {}, null, 2),
+                isToolExec: true,
+                toolName: p.name || "exec",
+                toolCallId: callId,
+              });
+            } else if (p.type === "tool_result") {
+              const callId = p.tool_use_id || `out_${i}`;
+              const tName = callIdToToolName[callId] || "exec";
+              messages.push({
+                id: `out-${callId}`,
+                role: "tool",
+                content: typeof p.content === "string" ? p.content : JSON.stringify(p.content || {}, null, 2),
+                isToolOutput: true,
+                toolName: tName,
+                toolCallId: callId,
+              });
+            } else if (p.text) {
+              textParts.push(p.text);
+            } else if (p.type === "text") {
+              textParts.push(p.text || "");
+            } else if (p.type === "image_url") {
+              textParts.push(`[Gambar/Image: ${p.image_url?.url ? "URL" : "Attached"}]`);
+            } else {
+              textParts.push(JSON.stringify(p));
+            }
+          }
+          content = textParts.join("\n");
         } else if (m.content) {
           content = JSON.stringify(m.content, null, 2);
         }
 
         const reasoning = m.reasoning_content || m.reasoning || m.thought || undefined;
-        const toolCalls = Array.isArray(m.tool_calls)
-          ? m.tool_calls.map((tc: any) => ({
-              id: tc.id,
-              name: tc.function?.name || tc.name || "function",
-              args: typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
-            }))
-          : undefined;
 
-        messages.push({
-          id: `msg-${i}`,
-          role: ((m.role || "user").toLowerCase() as any),
-          content,
-          reasoning,
-          toolCalls,
-        });
+        if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+          inlineToolCalls = m.tool_calls.map((tc: any) => {
+            const name = tc.function?.name || tc.name || "exec";
+            const callId = tc.id || `call_${i}`;
+            callIdToToolName[callId] = name;
+            let code = "";
+            if (typeof tc.function?.arguments === "string") {
+              try {
+                const parsed = JSON.parse(tc.function.arguments);
+                code = parsed.code || parsed.cmd || parsed.command || tc.function.arguments;
+              } catch {
+                code = tc.function.arguments;
+              }
+            } else if (tc.function?.arguments) {
+              code = JSON.stringify(tc.function.arguments, null, 2);
+            }
+            return {
+              id: callId,
+              name,
+              args: code,
+            };
+          });
+        }
+
+        if (content || reasoning || inlineToolCalls) {
+          messages.push({
+            id: `msg-${i}`,
+            role: ((m.role || "user").toLowerCase() as any),
+            content,
+            reasoning,
+            toolCalls: inlineToolCalls,
+          });
+        }
       }
     } else if (Array.isArray(bodyObj.input)) {
       // Codex Responses input format
       for (let i = 0; i < bodyObj.input.length; i++) {
         const item = bodyObj.input[i];
+        if (!item) continue;
+
+        // 1. additional_tools schema declaration
+        if (item.type === "additional_tools" || (item.tools && Array.isArray(item.tools))) {
+          const toolSummaries = extractToolsFromSchema(item.tools || []);
+          messages.push({
+            id: item.id || `tools-${i}`,
+            role: "system",
+            content: "",
+            isAdditionalTools: true,
+            toolsList: toolSummaries,
+            rawToolsJson: JSON.stringify(item, null, 2),
+          });
+          continue;
+        }
+
+        // 2. custom_tool_call or function_call
+        if (
+          item.type === "custom_tool_call" ||
+          item.type === "function_call" ||
+          item.type === "tool_call" ||
+          (item.name && (item.input !== undefined || item.arguments !== undefined))
+        ) {
+          const toolName = item.name || "exec";
+          const callId = item.call_id || item.id || `call_${i}`;
+          callIdToToolName[callId] = toolName;
+
+          let code = "";
+          if (typeof item.input === "string") {
+            code = item.input;
+          } else if (item.input && typeof item.input === "object") {
+            code = item.input.code || item.input.cmd || item.input.command || JSON.stringify(item.input, null, 2);
+          } else if (typeof item.arguments === "string") {
+            try {
+              const parsedArgs = JSON.parse(item.arguments);
+              code = parsedArgs.code || parsedArgs.cmd || parsedArgs.command || item.arguments;
+            } catch {
+              code = item.arguments;
+            }
+          } else if (item.arguments) {
+            code = JSON.stringify(item.arguments, null, 2);
+          } else {
+            code = JSON.stringify(item, null, 2);
+          }
+
+          messages.push({
+            id: callId,
+            role: "assistant",
+            content: code,
+            isToolExec: true,
+            toolName,
+            toolCallId: callId,
+          });
+          continue;
+        }
+
+        // 3. custom_tool_call_output or function_call_output or role: "tool"
+        if (
+          item.type === "custom_tool_call_output" ||
+          item.type === "function_call_output" ||
+          item.type === "tool_output" ||
+          item.role === "tool" ||
+          (item.output !== undefined && (item.call_id || item.id))
+        ) {
+          const callId = item.call_id || item.id || `out_${i}`;
+          const toolName = callIdToToolName[callId] || item.name || "exec";
+          let outText = "";
+          if (typeof item.output === "string") {
+            outText = item.output;
+          } else if (item.output !== undefined) {
+            outText = JSON.stringify(item.output, null, 2);
+          } else if (typeof item.content === "string") {
+            outText = item.content;
+          } else if (item.content) {
+            outText = JSON.stringify(item.content, null, 2);
+          } else {
+            outText = JSON.stringify(item, null, 2);
+          }
+
+          messages.push({
+            id: `out-${callId}`,
+            role: "tool",
+            content: outText,
+            isToolOutput: true,
+            toolName,
+            toolCallId: callId,
+          });
+          continue;
+        }
+
+        // 4. Standard message
         const role = (item.role || (item.type === "message" ? "user" : item.type) || "user").toLowerCase();
         let text = "";
         if (typeof item.content === "string") {
           text = item.content;
         } else if (Array.isArray(item.content)) {
-          text = item.content.map((p: any) => p.text || JSON.stringify(p)).join("\n");
+          text = item.content
+            .map((p: any) => p.text || p.output_text || p.input_text || (typeof p === "string" ? p : JSON.stringify(p)))
+            .join("\n");
         } else if (item.text) {
           text = item.text;
         } else {
           text = JSON.stringify(item, null, 2);
         }
+
+        // Guard: Check if stringified content is actually additional_tools
+        if (text.trim().startsWith("{") && (text.includes('"additional_tools"') || text.includes('"type": "additional_tools"'))) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed.type === "additional_tools" || Array.isArray(parsed.tools)) {
+              const toolSummaries = extractToolsFromSchema(parsed.tools || []);
+              messages.push({
+                id: parsed.id || `tools-${i}`,
+                role: "system",
+                content: "",
+                isAdditionalTools: true,
+                toolsList: toolSummaries,
+                rawToolsJson: text,
+              });
+              continue;
+            }
+          } catch {}
+        }
+
         messages.push({
           id: `input-${i}`,
           role: role === "model" ? "assistant" : (role as any),
@@ -276,12 +503,40 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
       }
       for (let i = 0; i < bodyObj.contents.length; i++) {
         const c = bodyObj.contents[i];
-        const text = (c.parts || []).map((p: any) => p.text || (p.functionCall ? `[Tool Call: ${p.functionCall.name}]` : "")).join("\n");
-        messages.push({
-          id: `gem-${i}`,
-          role: c.role === "model" ? "assistant" : "user",
-          content: text,
-        });
+        const textParts: string[] = [];
+        for (const p of c.parts || []) {
+          if (p.text) {
+            textParts.push(p.text);
+          } else if (p.functionCall) {
+            const callId = `call_gem_${i}`;
+            callIdToToolName[callId] = p.functionCall.name;
+            messages.push({
+              id: callId,
+              role: "assistant",
+              content: JSON.stringify(p.functionCall.args || {}, null, 2),
+              isToolExec: true,
+              toolName: p.functionCall.name,
+              toolCallId: callId,
+            });
+          } else if (p.functionResponse) {
+            const callId = `out_gem_${i}`;
+            messages.push({
+              id: callId,
+              role: "tool",
+              content: JSON.stringify(p.functionResponse.response || {}, null, 2),
+              isToolOutput: true,
+              toolName: p.functionResponse.name,
+              toolCallId: callId,
+            });
+          }
+        }
+        if (textParts.length > 0) {
+          messages.push({
+            id: `gem-${i}`,
+            role: c.role === "model" ? "assistant" : "user",
+            content: textParts.join("\n"),
+          });
+        }
       }
     } else if (bodyObj.prompt) {
       // Legacy prompt
@@ -294,6 +549,7 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
   if (rawResponse) {
     let accText = "";
     let accReasoning = "";
+    const accToolCalls: Array<{ id?: string; name: string; args?: string }> = [];
     const lines = String(rawResponse).split("\n");
     for (const l of lines) {
       const t = l.trim();
@@ -304,44 +560,88 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
         if (delta) {
           if (delta.content) accText += delta.content;
           if (delta.reasoning_content) accReasoning += delta.reasoning_content;
+          if (Array.isArray(delta.tool_calls)) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? accToolCalls.length;
+              if (!accToolCalls[idx]) {
+                accToolCalls[idx] = {
+                  id: tc.id || `call_${idx}`,
+                  name: tc.function?.name || "tool",
+                  args: tc.function?.arguments || "",
+                };
+              } else {
+                if (tc.function?.arguments) accToolCalls[idx].args += tc.function.arguments;
+              }
+            }
+          }
         }
         const parts = d.response?.candidates?.[0]?.content?.parts;
         if (Array.isArray(parts)) {
           for (const p of parts) {
             if (p.thought && p.text) accReasoning += p.text;
             else if (p.text) accText += p.text;
+            if (p.functionCall) {
+              accToolCalls.push({
+                name: p.functionCall.name,
+                args: JSON.stringify(p.functionCall.args || {}, null, 2),
+              });
+            }
           }
         }
-        if (d.type === "response.output_item.added" && d.item?.content) {
-          for (const c of d.item.content) {
-            if (c.text) accText += c.text;
+        if (d.type === "response.output_item.added" && d.item) {
+          if (d.item.type === "custom_tool_call" || d.item.type === "function_call") {
+            accToolCalls.push({
+              id: d.item.call_id || d.item.id,
+              name: d.item.name || "exec",
+              args: typeof d.item.input === "string" ? d.item.input : JSON.stringify(d.item.input || d.item.arguments || {}, null, 2),
+            });
+          } else if (Array.isArray(d.item.content)) {
+            for (const c of d.item.content) {
+              if (c.text) accText += c.text;
+            }
           }
         }
       } catch {}
     }
 
-    if (!accText && !accReasoning) {
+    if (!accText && !accReasoning && accToolCalls.length === 0) {
       try {
         const respJson = typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
         const msg = respJson.choices?.[0]?.message;
         if (msg) {
           accText = msg.content || "";
           accReasoning = msg.reasoning_content || "";
+          if (Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+              accToolCalls.push({
+                id: tc.id,
+                name: tc.function?.name || tc.name || "tool",
+                args: typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}, null, 2),
+              });
+            }
+          }
         } else if (respJson.candidates?.[0]?.content?.parts) {
           for (const p of respJson.candidates[0].content.parts) {
             if (p.thought && p.text) accReasoning += p.text;
             else if (p.text) accText += p.text;
+            if (p.functionCall) {
+              accToolCalls.push({
+                name: p.functionCall.name,
+                args: JSON.stringify(p.functionCall.args || {}, null, 2),
+              });
+            }
           }
         }
       } catch {}
     }
 
-    if (accText || accReasoning) {
+    if (accText || accReasoning || accToolCalls.length > 0) {
       messages.push({
         id: "response-final",
         role: "assistant",
-        content: accText || "(Hanya pemikiran / tool call tanpa teks balasan langsung)",
+        content: accText || (accToolCalls.length > 0 ? "" : "(Hanya pemikiran / tool call tanpa teks balasan langsung)"),
         reasoning: accReasoning || undefined,
+        toolCalls: accToolCalls.length > 0 ? accToolCalls : undefined,
         isFinalResponse: true,
       });
     }
@@ -370,25 +670,33 @@ function ChatConversationView({
   const [expandedSystem, setExpandedSystem] = useState<Record<string, boolean>>({});
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [expandedExec, setExpandedExec] = useState<Record<string, boolean>>({});
+  const [expandedOutput, setExpandedOutput] = useState<Record<string, boolean>>({});
+  const [expandedSchema, setExpandedSchema] = useState<Record<string, boolean>>({});
+  const [allToolsExpanded, setAllToolsExpanded] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
   const messages = useMemo(() => extractChatMessages(rawBody, rawResponse), [rawBody, rawResponse]);
 
-  const dialogCount = messages.filter((m) => m.role === "user" || m.role === "assistant").length;
-  const systemCount = messages.filter((m) => m.role === "system").length;
-  const toolCount = messages.filter((m) => m.role === "tool").length;
+  const dialogCount = messages.filter((m) => !m.isToolExec && !m.isToolOutput && !m.isAdditionalTools && (m.role === "user" || m.role === "assistant")).length;
+  const systemCount = messages.filter((m) => m.role === "system" || m.isAdditionalTools).length;
+  const toolCount = messages.filter((m) => m.role === "tool" || m.isToolExec || m.isToolOutput || (m.toolCalls && m.toolCalls.length > 0)).length;
+  const hasTools = messages.some((m) => m.isToolExec || m.isToolOutput || m.isAdditionalTools || (m.toolCalls && m.toolCalls.length > 0));
 
   const filtered = useMemo(() => {
     return messages.filter((m) => {
-      if (roleFilter === "dialog" && m.role !== "user" && m.role !== "assistant") return false;
-      if (roleFilter === "system" && m.role !== "system") return false;
-      if (roleFilter === "tool" && m.role !== "tool") return false;
+      if (roleFilter === "dialog" && (m.isToolExec || m.isToolOutput || m.isAdditionalTools || (m.role !== "user" && m.role !== "assistant"))) return false;
+      if (roleFilter === "system" && m.role !== "system" && !m.isAdditionalTools) return false;
+      if (roleFilter === "tool" && !m.isToolExec && !m.isToolOutput && m.role !== "tool" && (!m.toolCalls || m.toolCalls.length === 0)) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         const inContent = m.content.toLowerCase().includes(q);
         const inReasoning = m.reasoning?.toLowerCase().includes(q);
-        return inContent || inReasoning;
+        const inToolName = m.toolName?.toLowerCase().includes(q);
+        const inToolsList = m.toolsList?.some((t) => t.name.toLowerCase().includes(q));
+        const inToolCalls = m.toolCalls?.some((tc) => tc.name.toLowerCase().includes(q) || tc.args?.toLowerCase().includes(q));
+        return inContent || inReasoning || inToolName || inToolsList || inToolCalls;
       }
       return true;
     });
@@ -400,13 +708,46 @@ function ChatConversationView({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleToggleAllTools = () => {
+    const nextState = !allToolsExpanded;
+    setAllToolsExpanded(nextState);
+    const newExec: Record<string, boolean> = {};
+    const newOutput: Record<string, boolean> = {};
+    for (const m of messages) {
+      if (m.isToolExec) newExec[m.id] = nextState;
+      if (m.isToolOutput) newOutput[m.id] = nextState;
+      if (m.toolCalls) {
+        for (const tc of m.toolCalls) {
+          if (tc.id) newExec[tc.id] = nextState;
+        }
+      }
+    }
+    setExpandedExec(newExec);
+    setExpandedOutput(newOutput);
+  };
+
   const handleCopyAll = () => {
     const transcript = messages
       .map((m, idx) => {
+        if (m.isAdditionalTools) {
+          const names = m.toolsList?.map((t) => t.name).join(", ") || "tools";
+          return `--- [DECLARED TOOLS: ${names}] ---\n${m.rawToolsJson || m.content}`;
+        }
+        if (m.isToolExec) {
+          return `--- [EXEC: ${m.toolName || "tool"}] (${m.toolCallId || `#${idx + 1}`}) ---\n${m.content}`;
+        }
+        if (m.isToolOutput) {
+          return `--- [OUTPUT: ${m.toolName || "tool"}] (${m.toolCallId || `#${idx + 1}`}) ---\n${m.content}`;
+        }
         let header = `--- [${m.role.toUpperCase()}] (#${idx + 1}) ---`;
         if (m.isFinalResponse) header += " (Final Output)";
         let text = `${header}\n${m.content}`;
         if (m.reasoning) text = `💭 REASONING:\n${m.reasoning}\n\n` + text;
+        if (m.toolCalls && m.toolCalls.length > 0) {
+          for (const tc of m.toolCalls) {
+            text += `\n\n⚡ TOOL CALL: ${tc.name}\n${tc.args}`;
+          }
+        }
         return text;
       })
       .join("\n\n");
@@ -474,13 +815,25 @@ function ChatConversationView({
                 color: roleFilter === "tool" ? "#fff" : "var(--muted)",
               }}
             >
-              Tool ({toolCount})
+              Tools & Exec ({toolCount})
             </button>
           )}
         </div>
 
         {/* Search & Actions */}
         <div className="flex items-center gap-2 flex-wrap">
+          {hasTools && (
+            <button
+              type="button"
+              onClick={handleToggleAllTools}
+              className="px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition text-amber-400 bg-amber-500/10 border border-amber-500/25 hover:bg-amber-500/20"
+              title="Expand atau Collapse semua tools exec dan output"
+            >
+              <Terminal size={12} />
+              <span>{allToolsExpanded ? "Collapse All Tools" : "Expand All Tools"}</span>
+            </button>
+          )}
+
           <div className="relative flex items-center">
             <Search size={12} className="absolute left-2.5 text-muted pointer-events-none" />
             <input
@@ -492,7 +845,7 @@ function ChatConversationView({
               style={{
                 borderColor: "var(--border)",
                 color: "var(--ink)",
-                width: "150px",
+                width: "140px",
               }}
             />
           </div>
@@ -561,12 +914,234 @@ function ChatConversationView({
           </div>
         ) : (
           filtered.map((msg, idx) => {
-            const isUser = msg.role === "user";
-            const isSystem = msg.role === "system";
-            const isTool = msg.role === "tool";
+            // 1. ADDITIONAL TOOLS / TOOLS CONFIGURATION SCHEMA
+            if (msg.isAdditionalTools) {
+              const isExpanded = expandedSchema[msg.id] ?? false;
+              const toolsList = msg.toolsList || [];
+              const rawJson = msg.rawToolsJson || msg.content;
 
-            // SYSTEM PROMPT BUBBLE
-            if (isSystem) {
+              return (
+                <div key={msg.id || idx} className="w-full">
+                  <div
+                    className="rounded-xl overflow-hidden border shadow-sm transition"
+                    style={{
+                      borderColor: "rgba(99, 102, 241, 0.3)",
+                      backgroundColor: "rgba(15, 23, 42, 0.65)",
+                    }}
+                  >
+                    <div
+                      className="flex items-center justify-between px-3.5 py-2 flex-wrap gap-2"
+                      style={{
+                        backgroundColor: "rgba(99, 102, 241, 0.08)",
+                        borderBottom: isExpanded ? "1px solid rgba(99, 102, 241, 0.2)" : "none",
+                      }}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-indigo-500/20 text-indigo-400">
+                          <Wrench size={13} />
+                        </div>
+                        <span className="font-semibold text-xs text-indigo-300">
+                          Declared Tools Configuration
+                        </span>
+                        {toolsList.map((t, tIdx) => (
+                          <span
+                            key={tIdx}
+                            className="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-semibold bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 flex items-center gap-1"
+                            title={t.description}
+                          >
+                            <span>⚡</span>
+                            <span>{t.name}</span>
+                            {t.type && <span className="opacity-60 text-[9px]">({t.type})</span>}
+                          </span>
+                        ))}
+                        {toolsList.length === 0 && (
+                          <span className="text-[11px] text-muted font-mono">(Tools Schema)</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSchema((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
+                          className="px-2 py-0.5 rounded text-[10.5px] font-medium text-indigo-300 bg-indigo-500/15 hover:bg-indigo-500/25 transition flex items-center gap-1"
+                        >
+                          {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          <span>{isExpanded ? "Tutup Schema" : "Lihat Schema JSON"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(msg.id, rawJson)}
+                          className="p-1 rounded text-muted hover:text-ink hover:bg-slate-800/30 transition"
+                          title="Salin Schema JSON"
+                        >
+                          {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-3 bg-slate-950/90 font-mono text-[11px] leading-relaxed text-indigo-100/80 max-h-[350px] overflow-y-auto">
+                        <pre className="whitespace-pre-wrap break-words">{rawJson}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // 2. TOOL EXECUTION BLOCK (e.g. exec, custom_tool_call)
+            if (msg.isToolExec) {
+              const isExpanded = expandedExec[msg.id] ?? true;
+              const toolName = msg.toolName || "exec";
+              const callId = msg.toolCallId;
+              const code = msg.content;
+              const lineCount = code.split("\n").length;
+
+              return (
+                <div key={msg.id || idx} className="w-full">
+                  <div
+                    className="rounded-xl overflow-hidden border shadow-sm transition"
+                    style={{
+                      borderColor: "rgba(245, 158, 11, 0.35)",
+                      backgroundColor: "rgba(15, 23, 42, 0.7)",
+                    }}
+                  >
+                    <div
+                      className="flex items-center justify-between px-3.5 py-2 flex-wrap gap-2"
+                      style={{
+                        backgroundColor: "rgba(245, 158, 11, 0.08)",
+                        borderBottom: isExpanded ? "1px solid rgba(245, 158, 11, 0.2)" : "none",
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-amber-500/20 text-amber-400">
+                          <Terminal size={13} />
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs text-amber-400">
+                            {toolName === "exec" ? "exec (JavaScript V8)" : `exec: ${toolName}`}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 font-mono">
+                            Tool Call
+                          </span>
+                          <span className="text-[10px] text-muted font-mono opacity-70">
+                            {lineCount} baris
+                          </span>
+                          {callId && (
+                            <span className="text-[10px] text-muted font-mono opacity-60 hidden sm:inline">
+                              #{callId.slice(-8)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedExec((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
+                          className="px-2 py-0.5 rounded text-[10.5px] font-medium text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 transition flex items-center gap-1"
+                        >
+                          {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          <span>{isExpanded ? "Collapse" : "Expand"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(msg.id, code)}
+                          className="p-1 rounded text-muted hover:text-ink hover:bg-slate-800/30 transition"
+                          title="Salin kode / script exec"
+                        >
+                          {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-3 bg-slate-950/95 font-mono text-[11.5px] leading-relaxed text-amber-100/90 max-h-[420px] overflow-y-auto">
+                        <pre className="whitespace-pre-wrap break-words">{code}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // 3. TOOL OUTPUT BLOCK (e.g. custom_tool_call_output, function_call_output, role: "tool")
+            if (msg.isToolOutput) {
+              const lineCount = msg.content.split("\n").length;
+              const isExpanded = expandedOutput[msg.id] !== undefined ? expandedOutput[msg.id] : (lineCount <= 12);
+              const toolName = msg.toolName;
+              const callId = msg.toolCallId;
+
+              return (
+                <div key={msg.id || idx} className="w-full">
+                  <div
+                    className="rounded-xl overflow-hidden border shadow-sm transition"
+                    style={{
+                      borderColor: "rgba(16, 185, 129, 0.35)",
+                      backgroundColor: "rgba(15, 23, 42, 0.7)",
+                    }}
+                  >
+                    <div
+                      className="flex items-center justify-between px-3.5 py-2 flex-wrap gap-2"
+                      style={{
+                        backgroundColor: "rgba(16, 185, 129, 0.08)",
+                        borderBottom: isExpanded ? "1px solid rgba(16, 185, 129, 0.2)" : "none",
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400">
+                          <CheckCircle2 size={13} />
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs text-emerald-400">
+                            Output{toolName ? `: ${toolName}` : ""}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 font-mono">
+                            Tool Result
+                          </span>
+                          <span className="text-[10px] text-muted font-mono opacity-75">
+                            {lineCount} baris ({msg.content.length.toLocaleString()} chars)
+                          </span>
+                          {callId && (
+                            <span className="text-[10px] text-muted font-mono opacity-60 hidden sm:inline">
+                              #{callId.slice(-8)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedOutput((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
+                          className="px-2 py-0.5 rounded text-[10.5px] font-medium text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 transition flex items-center gap-1"
+                        >
+                          {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          <span>{isExpanded ? "Collapse" : "Expand"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(msg.id, msg.content)}
+                          className="p-1 rounded text-muted hover:text-ink hover:bg-slate-800/30 transition"
+                          title="Salin hasil output"
+                        >
+                          {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-3 bg-slate-950/95 font-mono text-[11.5px] leading-relaxed text-emerald-100/90 max-h-[380px] overflow-y-auto">
+                        <pre className="whitespace-pre-wrap break-words">{msg.content}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // 4. SYSTEM PROMPT BUBBLE
+            if (msg.role === "system") {
               const isLong = msg.content.length > 300;
               const isExpanded = expandedSystem[msg.id] ?? false;
               const displayContent = isLong && !isExpanded ? msg.content.slice(0, 300) + "..." : msg.content;
@@ -615,8 +1190,8 @@ function ChatConversationView({
               );
             }
 
-            // USER BUBBLE (Right aligned)
-            if (isUser) {
+            // 5. USER BUBBLE (Right aligned)
+            if (msg.role === "user") {
               return (
                 <div key={msg.id || idx} className="flex justify-end w-full">
                   <div
@@ -650,57 +1225,7 @@ function ChatConversationView({
               );
             }
 
-            // TOOL RESPONSE BUBBLE
-            if (isTool) {
-              const isLong = msg.content.length > 300;
-              const isExpanded = expandedTools[msg.id] ?? false;
-              const displayContent = isLong && !isExpanded ? msg.content.slice(0, 300) + "..." : msg.content;
-
-              return (
-                <div key={msg.id || idx} className="flex justify-start w-full">
-                  <div
-                    className="rounded-xl p-3 max-w-[88%] text-xs shadow-sm transition border"
-                    style={{
-                      backgroundColor: "rgba(100, 116, 139, 0.08)",
-                      borderColor: "rgba(100, 116, 139, 0.25)",
-                      color: "var(--ink)",
-                    }}
-                  >
-                    <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-700/30">
-                      <div className="flex items-center gap-1.5 font-bold text-[11px] text-slate-400">
-                        <Wrench size={12} className="text-purple-400" />
-                        <span>Tool Result</span>
-                        <span className="text-[10px] text-muted font-mono">#{idx + 1}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {isLong && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedTools((prev) => ({ ...prev, [msg.id]: !isExpanded }))}
-                            className="px-1.5 py-0.5 rounded text-[10px] text-slate-300 bg-slate-800 hover:bg-slate-700 transition"
-                          >
-                            {isExpanded ? "Tutup" : "Lihat Semua"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleCopyMessage(msg.id, msg.content)}
-                          className="p-1 rounded text-muted hover:text-ink"
-                          title="Salin hasil tool"
-                        >
-                          {copiedId === msg.id ? <Check size={11} className="text-green" /> : <Copy size={11} />}
-                        </button>
-                      </div>
-                    </div>
-                    <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words opacity-85">
-                      {displayContent}
-                    </pre>
-                  </div>
-                </div>
-              );
-            }
-
-            // ASSISTANT BUBBLE (Left aligned)
+            // 6. ASSISTANT BUBBLE (Left aligned)
             const hasReasoning = !!msg.reasoning;
             const isReasoningExpanded = expandedReasoning[msg.id] ?? false;
 
@@ -773,37 +1298,76 @@ function ChatConversationView({
                     </div>
                   )}
 
-                  {/* Tool Calls if present */}
+                  {/* Inline Tool Calls if present in Assistant message */}
                   {msg.toolCalls && msg.toolCalls.length > 0 && (
-                    <div className="mb-2 space-y-1">
-                      {msg.toolCalls.map((tc, tIdx) => (
-                        <div
-                          key={tc.id || tIdx}
-                          className="p-2 rounded text-[11px] font-mono border"
-                          style={{
-                            background: "rgba(2, 132, 199, 0.06)",
-                            borderColor: "rgba(2, 132, 199, 0.2)",
-                            color: "#38bdf8",
-                          }}
-                        >
-                          <div className="flex items-center gap-1 font-bold">
-                            <Wrench size={10} />
-                            <span>Tool Call: {tc.name}</span>
+                    <div className="mb-2.5 space-y-2">
+                      {msg.toolCalls.map((tc, tIdx) => {
+                        const tcId = tc.id || `${msg.id}-tc-${tIdx}`;
+                        const isTcExpanded = expandedExec[tcId] ?? true;
+                        return (
+                          <div
+                            key={tcId}
+                            className="rounded-xl overflow-hidden border shadow-sm transition"
+                            style={{
+                              borderColor: "rgba(245, 158, 11, 0.35)",
+                              backgroundColor: "rgba(15, 23, 42, 0.7)",
+                            }}
+                          >
+                            <div
+                              className="flex items-center justify-between px-3 py-1.5 flex-wrap gap-2"
+                              style={{
+                                backgroundColor: "rgba(245, 158, 11, 0.08)",
+                                borderBottom: isTcExpanded ? "1px solid rgba(245, 158, 11, 0.2)" : "none",
+                              }}
+                            >
+                              <div className="flex items-center gap-1.5 font-bold font-mono text-[11px] text-amber-400">
+                                <Terminal size={12} />
+                                <span>exec: {tc.name}</span>
+                                <span className="px-1.5 py-0.2 rounded text-[9.5px] font-semibold bg-amber-500/20 text-amber-300 font-mono">
+                                  Tool Call
+                                </span>
+                                {tc.id && (
+                                  <span className="text-[10px] text-muted opacity-70 hidden sm:inline">
+                                    #{tc.id.slice(-8)}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedExec((prev) => ({ ...prev, [tcId]: !isTcExpanded }))}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 transition flex items-center gap-1"
+                                >
+                                  {isTcExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                                  <span>{isTcExpanded ? "Collapse" : "Expand"}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyMessage(`tc-${tcId}`, tc.args || "")}
+                                  className="p-1 rounded text-muted hover:text-ink hover:bg-white/5 transition"
+                                  title="Salin argument tool"
+                                >
+                                  {copiedId === `tc-${tcId}` ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                                </button>
+                              </div>
+                            </div>
+                            {isTcExpanded && (
+                              <div className="p-2.5 bg-slate-950/95 font-mono text-[11px] leading-relaxed text-amber-100/90 max-h-[350px] overflow-y-auto">
+                                <pre className="whitespace-pre-wrap break-words">{tc.args}</pre>
+                              </div>
+                            )}
                           </div>
-                          {tc.args && (
-                            <pre className="mt-1 text-[10.5px] opacity-80 whitespace-pre-wrap break-words">
-                              {tc.args}
-                            </pre>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
                   {/* Assistant Text Content */}
-                  <div className="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed break-words">
-                    {msg.content}
-                  </div>
+                  {msg.content && (
+                    <div className="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed break-words">
+                      {msg.content}
+                    </div>
+                  )}
                 </div>
               </div>
             );
