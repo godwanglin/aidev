@@ -53,14 +53,14 @@ function extractAccountId(token: string): string | null {
  * Codex backend supports gpt-6.1-sol, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-6-astra, etc.
  */
 export function resolveCodexModelAndEffort(rawModel: string): { model: string; inferredEffort?: string } {
+  // Strip any upstream/provider namespace prefix (e.g. "cx/", "codex/", "<custom>/cx/", "<custom>/")
   let clean = rawModel
-    .replace(/^cx\//i, "")
-    .replace(/^codex\//i, "")
-    .replace(/^openai-codex\//i, "")
-    .replace(/^openai\//i, "")
-    .replace(/^stdprm\/cx\//i, "")
-    .replace(/^stdprm\//i, "")
+    .replace(/^([a-z0-9_-]+\/)?(cx|codex|openai-codex|openai)\//i, "")
     .trim();
+  if (clean.includes("/") && !clean.startsWith("gpt-") && !clean.startsWith("chatgpt-")) {
+    const parts = clean.split("/");
+    clean = parts[parts.length - 1].trim();
+  }
   const lower = clean.toLowerCase();
 
   let inferredEffort: string | undefined = undefined;
