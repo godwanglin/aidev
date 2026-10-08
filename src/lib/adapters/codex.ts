@@ -404,8 +404,8 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   }
 
   if (!response.ok) {
-    if (params.connectionId && (response.status === 429 || response.status >= 500)) {
-      markConnectionCooldown(params.connectionId, 60);
+    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
+      markConnectionCooldown(params.connectionId, response.status === 401 ? 3600 : 60);
     }
 
     const errText = await response.text();
@@ -440,7 +440,12 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       }),
       {
         status: response.status,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(response.status === 401
+            ? { "X-Aidev-Account-Fallback": "true", "X-Aidev-Transient-Error": "invalidated_token" }
+            : {}),
+        },
       }
     );
   }
@@ -1002,8 +1007,8 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   }
 
   if (!response.ok) {
-    if (params.connectionId && (response.status === 429 || response.status >= 500)) {
-      markConnectionCooldown(params.connectionId, 60);
+    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
+      markConnectionCooldown(params.connectionId, response.status === 401 ? 3600 : 60);
     }
 
     const errText = await response.text();
@@ -1046,7 +1051,12 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       }),
       {
         status: response.status,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(response.status === 401
+            ? { "X-Aidev-Account-Fallback": "true", "X-Aidev-Transient-Error": "invalidated_token" }
+            : {}),
+        },
       }
     );
   }

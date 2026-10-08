@@ -518,15 +518,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             clientWantsStream,
           });
 
-          // Check if this connection returned capacity or server error
+          // Check if this connection returned invalid token, capacity, or server error
           const isRetryableError =
+            codexResponse.status === 401 ||
             codexResponse.status === 429 ||
             codexResponse.status >= 500 ||
             codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
 
           if (isRetryableError) {
             if (currentConnId) {
-              markConnectionCooldown(currentConnId, 60);
+              markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
             }
 
             // Attempt to find another healthy connection for Codex
@@ -578,6 +579,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
       if (codexResponse) {
         const isCapacityOrServerError =
+          codexResponse.status === 401 ||
           codexResponse.status === 429 ||
           codexResponse.status >= 500 ||
           codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
@@ -586,7 +588,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `All Codex connections returned HTTP ${codexResponse.status} (capacity/overload), falling back to ${candidates[candIdx + 1]}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status} (invalidated token / capacity / overload), falling back to ${candidates[candIdx + 1]}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
@@ -629,13 +631,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           });
 
           const isRetryableError =
+            codexResponse.status === 401 ||
             codexResponse.status === 429 ||
             codexResponse.status >= 500 ||
             codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
 
           if (isRetryableError) {
             if (currentConnId) {
-              markConnectionCooldown(currentConnId, 60);
+              markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
             }
 
             if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
@@ -686,6 +689,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
       if (codexResponse) {
         const isCapacityOrServerError =
+          codexResponse.status === 401 ||
           codexResponse.status === 429 ||
           codexResponse.status >= 500 ||
           codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
@@ -694,7 +698,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `All Codex connections returned HTTP ${codexResponse.status} (capacity/overload), falling back to ${candidates[candIdx + 1]}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status} (invalidated token / capacity / overload), falling back to ${candidates[candIdx + 1]}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);

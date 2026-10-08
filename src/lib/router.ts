@@ -87,6 +87,7 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
 
   const whereClause: any = {
     isActive: true,
+    syncStatus: { not: 'EXHAUSTED' },
     OR: [
       { cooldownUntil: null },
       { cooldownUntil: { lt: new Date() } }
@@ -422,6 +423,7 @@ export async function resolveWithFailover(context: RouteContext): Promise<RouteR
 
   const whereClause: any = {
     isActive: true,
+    syncStatus: { not: 'EXHAUSTED' },
     OR: [
       { cooldownUntil: null },
       { cooldownUntil: { lt: new Date() } }
