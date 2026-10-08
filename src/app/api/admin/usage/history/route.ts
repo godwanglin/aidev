@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { telemetryStore } from "@/lib/telemetry-store";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -267,12 +268,24 @@ export async function DELETE(req: NextRequest) {
       where = { createdAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) } };
     }
 
-    const deleted = await prisma.upstreamLog.deleteMany({ where });
+    let deletedCount = 0;
+    if (scope === "all") {
+      const count = await prisma.upstreamLog.count();
+      await prisma.$executeRawUnsafe("TRUNCATE TABLE UpstreamLog;");
+      deletedCount = count;
+    } else {
+      const deleted = await prisma.upstreamLog.deleteMany({ where });
+      deletedCount = deleted.count;
+    }
+
+    try {
+      telemetryStore.clear();
+    } catch {}
 
     return NextResponse.json({
       success: true,
-      message: `Successfully cleared ${deleted.count.toLocaleString()} telemetry log(s) from database.`,
-      count: deleted.count,
+      message: `Successfully cleared ${deletedCount.toLocaleString()} telemetry log(s) from database.`,
+      count: deletedCount,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
