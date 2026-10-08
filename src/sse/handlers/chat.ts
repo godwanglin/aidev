@@ -483,7 +483,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       let currentAccount = upstreamAccount;
       let codexResponse: Response | null = null;
       const triedConnectionIds: string[] = currentConnId ? [currentConnId] : [];
-      const MAX_CODEX_CONNECTION_ATTEMPTS = 3;
+      // Try across up to 7 active Codex OAuth accounts
+      const MAX_CODEX_CONNECTION_ATTEMPTS = 7;
 
       for (let attempt = 0; attempt < MAX_CODEX_CONNECTION_ATTEMPTS; attempt++) {
         try {
@@ -505,7 +506,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           });
 
           // Check if this connection returned capacity or server error
-          const isRetryableError = codexResponse.status === 429 || codexResponse.status >= 500;
+          const isRetryableError =
+            codexResponse.status === 429 ||
+            codexResponse.status >= 500 ||
+            codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
+
           if (isRetryableError) {
             if (currentConnId) {
               markConnectionCooldown(currentConnId, 60);
@@ -523,7 +528,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 adminLogger.fallback({
                   fromModel: candidateModel,
                   toModel: candidateModel,
-                  reason: `Codex connection ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (retrying next Codex connection: ${nextRoute.connectionName || nextRoute.connectionId})`,
+                  reason: `Codex account ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (rotating to next Codex account: ${nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId})`,
                   account: upstreamAccount,
                 });
                 currentKey = nextRoute.apiKey;
@@ -559,11 +564,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
 
       if (codexResponse) {
-        if ((codexResponse.status === 429 || codexResponse.status >= 500) && !isLastCandidate) {
+        const isCapacityOrServerError =
+          codexResponse.status === 429 ||
+          codexResponse.status >= 500 ||
+          codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
+
+        if (isCapacityOrServerError && !isLastCandidate) {
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `All Codex connections returned HTTP ${codexResponse.status}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status} (capacity/overload), falling back to ${candidates[candIdx + 1]}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
@@ -586,7 +596,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       let currentAccount = upstreamAccount;
       let codexResponse: Response | null = null;
       const triedConnectionIds: string[] = currentConnId ? [currentConnId] : [];
-      const MAX_CODEX_CONNECTION_ATTEMPTS = 3;
+      // Try across up to 7 active Codex OAuth accounts
+      const MAX_CODEX_CONNECTION_ATTEMPTS = 7;
 
       for (let attempt = 0; attempt < MAX_CODEX_CONNECTION_ATTEMPTS; attempt++) {
         try {
@@ -604,7 +615,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             clientWantsStream,
           });
 
-          const isRetryableError = codexResponse.status === 429 || codexResponse.status >= 500;
+          const isRetryableError =
+            codexResponse.status === 429 ||
+            codexResponse.status >= 500 ||
+            codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
+
           if (isRetryableError) {
             if (currentConnId) {
               markConnectionCooldown(currentConnId, 60);
@@ -621,7 +636,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 adminLogger.fallback({
                   fromModel: candidateModel,
                   toModel: candidateModel,
-                  reason: `Codex connection ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (retrying next Codex connection: ${nextRoute.connectionName || nextRoute.connectionId})`,
+                  reason: `Codex account ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (rotating to next Codex account: ${nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId})`,
                   account: upstreamAccount,
                 });
                 currentKey = nextRoute.apiKey;
@@ -657,11 +672,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
 
       if (codexResponse) {
-        if ((codexResponse.status === 429 || codexResponse.status >= 500) && !isLastCandidate) {
+        const isCapacityOrServerError =
+          codexResponse.status === 429 ||
+          codexResponse.status >= 500 ||
+          codexResponse.headers.get("X-Aidev-Account-Fallback") === "true";
+
+        if (isCapacityOrServerError && !isLastCandidate) {
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `All Codex connections returned HTTP ${codexResponse.status}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status} (capacity/overload), falling back to ${candidates[candIdx + 1]}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);

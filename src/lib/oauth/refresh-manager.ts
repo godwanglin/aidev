@@ -4,9 +4,27 @@ import { getProviderOAuthConfig } from "@/lib/oauth/config";
 import { adminLogger } from "@/lib/admin-logger";
 
 /**
- * Lead time before token expiry to trigger proactive refresh (10 minutes).
+ * Default lead time before token expiry to trigger proactive refresh (10 minutes).
  */
 export const REFRESH_LEAD_MS = 10 * 60 * 1000;
+
+/**
+ * Provider-specific early refresh lead times (synced with 9Router & CLIProxyAPI).
+ * - OpenAI Codex: 5 days (Codex tokens expire in ~10 days; 5 days lead ensures reliable rotation)
+ * - Claude: 4 hours
+ * - Antigravity: 10 minutes
+ * - Default: 10 minutes
+ */
+export function getProviderRefreshLeadMs(provider: string): number {
+  const p = (provider || "").toUpperCase().trim();
+  if (p === "OPENAI_CODEX" || p === "CODEX" || p === "OPENAI") {
+    return 5 * 24 * 60 * 60 * 1000; // 5 days
+  }
+  if (p === "CLAUDE_CODE" || p === "CLAUDE" || p === "ANTHROPIC") {
+    return 4 * 60 * 60 * 1000; // 4 hours
+  }
+  return REFRESH_LEAD_MS;
+}
 
 /**
  * In-memory Promise deduplication lock map.
@@ -126,26 +144,44 @@ async function callUpstreamRefreshToken(
     };
   }
 
-  // 3. OpenAI Codex (form-urlencoded, PKCE public client)
+  // 3. OpenAI Codex (JSON payload as per 9router, fallback to form-urlencoded)
   if (p === "OPENAI_CODEX" || p === "OPENAI" || p === "CODEX") {
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: config.defaultClientId || "app_EMoamEEZ73f0CkXaXp7hrann",
-    });
+    const clientId = config.defaultClientId || "app_EMoamEEZ73f0CkXaXp7hrann";
+    const tokenUrl = config.tokenUrl || "https://auth.openai.com/oauth/token";
 
-    if (config.defaultClientSecret) {
-      body.set("client_secret", config.defaultClientSecret);
-    }
-
-    const res = await fetch(config.tokenUrl || "https://auth.openai.com/oauth/token", {
+    let res = await fetch(tokenUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: body.toString(),
+      body: JSON.stringify({
+        client_id: clientId,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        ...(config.defaultClientSecret ? { client_secret: config.defaultClientSecret } : {}),
+      }),
     });
+
+    if (!res.ok) {
+      // Fallback to form-urlencoded
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: clientId,
+      });
+      if (config.defaultClientSecret) {
+        body.set("client_secret", config.defaultClientSecret);
+      }
+      res = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: body.toString(),
+      });
+    }
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
@@ -235,10 +271,11 @@ export async function refreshConnectionToken(
       return conn.apiKeyEncrypted ? decryptCredential(conn.apiKeyEncrypted) : "";
     }
 
-    // Check if token is still fresh and force is false
+    // Check if token is still fresh and force is false (using provider-specific lead time)
     const now = Date.now();
     const expiryMs = conn.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() : 0;
-    const isExpiring = !expiryMs || expiryMs - now < REFRESH_LEAD_MS;
+    const leadMs = getProviderRefreshLeadMs(conn.provider);
+    const isExpiring = !expiryMs || expiryMs - now < leadMs;
 
     if (!force && !isExpiring && conn.accessTokenEnc) {
       return decryptCredential(conn.accessTokenEnc);
@@ -304,9 +341,9 @@ export async function refreshConnectionToken(
       });
       const isUnrecoverable =
         errMsg.includes("invalid_grant") ||
-        errMsg.includes("revoked") ||
-        errMsg.includes("expired") ||
-        errMsg.includes("invalid_request");
+        errMsg.includes("refresh_token_revoked") ||
+        errMsg.includes("token_expired") ||
+        (errMsg.includes("revoked") && !errMsg.includes("retry"));
 
       if (isUnrecoverable) {
         await prisma.providerConnection.update({
@@ -325,7 +362,7 @@ export async function refreshConnectionToken(
 
 /**
  * Scans all active OAuth connections in the database and proactively refreshes
- * any token that will expire within the REFRESH_LEAD_MS window (or has expired).
+ * any token that will expire within provider-specific lead time window (or has expired).
  */
 export async function runAllOAuthTokenRefreshes(): Promise<BatchRefreshSummary> {
   const connections = await prisma.providerConnection.findMany({
@@ -343,7 +380,8 @@ export async function runAllOAuthTokenRefreshes(): Promise<BatchRefreshSummary> 
 
   for (const conn of connections) {
     const expiryMs = conn.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() : 0;
-    const needsRefresh = !expiryMs || expiryMs - now < REFRESH_LEAD_MS;
+    const leadMs = getProviderRefreshLeadMs(conn.provider);
+    const needsRefresh = !expiryMs || expiryMs - now < leadMs;
 
     if (!needsRefresh) {
       skippedCount++;

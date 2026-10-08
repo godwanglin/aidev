@@ -58,14 +58,22 @@ export function resolveCodexModelAndEffort(rawModel: string): { model: string; i
     .replace(/^codex\//i, "")
     .replace(/^openai-codex\//i, "")
     .replace(/^openai\//i, "")
+    .replace(/^stdprm\/cx\//i, "")
+    .replace(/^stdprm\//i, "")
     .trim();
   const lower = clean.toLowerCase();
 
   let inferredEffort: string | undefined = undefined;
-  if (lower.includes("ultra")) {
-    inferredEffort = "ultra";
-  } else if (lower.includes("xhigh")) {
+  if (
+    lower.includes("extra high") ||
+    lower.includes("extra-high") ||
+    lower.includes("extra_high") ||
+    lower.includes("xhigh") ||
+    lower.includes("max")
+  ) {
     inferredEffort = "xhigh";
+  } else if (lower.includes("ultra")) {
+    inferredEffort = "ultra";
   } else if (lower.includes("high")) {
     inferredEffort = "high";
   } else if (lower.includes("medium") || lower.includes("med")) {
@@ -74,9 +82,9 @@ export function resolveCodexModelAndEffort(rawModel: string): { model: string; i
     inferredEffort = "low";
   }
 
-  // Strip reasoning / size suffixes (e.g. "6.1 Sol Ultra" -> "6.1 sol")
+  // Strip reasoning / size suffixes (e.g. "6.1 Sol Extra High" -> "6.1 sol")
   const baseModel = lower
-    .replace(/[-_\s]+(ultra|xhigh|high|medium|med|low|none|thinking|extra-low)$/i, "")
+    .replace(/[-_\s]+(extra[-_\s]high|extra[-_\s]low|ultra|xhigh|max|high|medium|med|low|none|thinking)$/i, "")
     .replace(/\[.*\]$/, "")
     .trim();
 
@@ -249,6 +257,101 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
   };
 }
 
+// SSE error patterns inside 200-OK bodies
+const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
+const CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS = ["selected model is at capacity", "model_at_capacity"];
+const CODEX_SSE_USER_OUTPUT_PATTERNS = [
+  "event: response.output_text.delta",
+  "event: response.function_call_arguments.delta",
+  '"type":"response.output_text.delta"',
+  '"type":"response.function_call_arguments.delta"',
+];
+const CODEX_SSE_PEEK_BYTES = 256 * 1024; // 256 KB peek buffer to catch capacity errors even after large headers/tools
+
+// Peek first 256KB for transient SSE errors (e.g. 200 OK with "model at capacity" or "server_is_overloaded")
+async function peekSseTransientError(response: Response): Promise<{
+  matched: string | null;
+  message: string | null;
+  accountFallback: boolean;
+  replacementBody: ReadableStream<Uint8Array> | null;
+}> {
+  if (!response || !response.ok || !response.body) {
+    return { matched: null, message: null, accountFallback: false, replacementBody: null };
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
+  let text = "";
+  let matched: string | null = null;
+  let accountFallback = false;
+
+  try {
+    while (text.length < CODEX_SSE_PEEK_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
+      const lowerText = text.toLowerCase();
+
+      const accountHit = CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS.find((p) => lowerText.includes(p));
+      if (accountHit) {
+        matched = accountHit;
+        accountFallback = true;
+        break;
+      }
+      const retryHit = CODEX_SSE_RETRY_PATTERNS.find((p) => lowerText.includes(p));
+      if (retryHit) {
+        matched = retryHit;
+        break;
+      }
+      if (CODEX_SSE_USER_OUTPUT_PATTERNS.some((p) => lowerText.includes(p))) {
+        break;
+      }
+    }
+  } catch {}
+
+  if (matched) {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+    return {
+      matched,
+      message: accountFallback
+        ? "Selected model is at capacity. Please try a different model."
+        : "Our servers are currently overloaded. Please try again later.",
+      accountFallback,
+      replacementBody: null,
+    };
+  }
+
+  reader.releaseLock();
+
+  const upstream = response.body;
+  let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const replacementBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(c);
+      upstreamReader = upstream.getReader();
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await upstreamReader!.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+    cancel(reason) {
+      try { upstreamReader?.cancel(reason); } catch {}
+    },
+  });
+
+  return { matched: null, message: null, accountFallback: false, replacementBody };
+}
+
 /**
  * Dispatches a chat completion request to the OpenAI Codex backend (chatgpt.com/backend-api/codex/responses)
  * mimicking the official Codex CLI / 9Router mechanism.
@@ -273,6 +376,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       version: CODEX_CLIENT_VERSION,
     };
     if (accountId) {
+      headers["ChatGPT-Account-ID"] = accountId;
       headers["ChatGPT-Account-Id"] = accountId;
     }
     return headers;
@@ -300,6 +404,10 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   }
 
   if (!response.ok) {
+    if (params.connectionId && (response.status === 429 || response.status >= 500)) {
+      markConnectionCooldown(params.connectionId, 60);
+    }
+
     const errText = await response.text();
     let errMsg = errText;
     try {
@@ -337,9 +445,53 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
     );
   }
 
+  // Peek SSE stream for capacity / transient errors inside 200 OK
+  const peek = await peekSseTransientError(response);
+  if (peek.matched) {
+    if (params.connectionId) {
+      markConnectionCooldown(params.connectionId, 60);
+    }
+
+    logUpstreamRequest({
+      connectionId: params.connectionId,
+      provider: "OPENAI_CODEX",
+      model: logModel,
+      clientApiKeyId: params.clientApiKeyId,
+      clientUserId: params.clientUserId,
+      promptTokens: 15,
+      completionTokens: 0,
+      totalTokens: 15,
+      latencyMs: Date.now() - startTime,
+      statusCode: 503,
+      isFailover: true,
+      failoverReason: `Codex SSE transient error: ${peek.matched}`,
+    }).catch(() => {});
+
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: peek.message || "Selected model is at capacity. Please try a different model.",
+          type: "server_error",
+          code: "service_unavailable",
+          account_fallback: peek.accountFallback,
+        },
+      }),
+      {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Aidev-Account-Fallback": peek.accountFallback ? "true" : "false",
+          "X-Aidev-Transient-Error": peek.matched || "capacity",
+        },
+      }
+    );
+  }
+
+  const effectiveBody = peek.replacementBody || response.body;
+
   // Case 1: Client wants Streaming (OpenAI SSE format)
-  if (params.clientWantsStream && response.body) {
-    const upstreamBody = response.body;
+  if (params.clientWantsStream && effectiveBody) {
+    const upstreamBody = effectiveBody;
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
@@ -673,16 +825,6 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
  * Direct native handler for POST /v1/responses targeting OpenAI Codex.
  * Passes through Responses API request directly to ChatGPT backend.
  */
-// SSE error patterns inside 200-OK bodies
-const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
-const CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS = ["selected model is at capacity", "model_at_capacity"];
-const CODEX_SSE_USER_OUTPUT_PATTERNS = [
-  "event: response.output_text.delta",
-  "event: response.function_call_arguments.delta",
-  '"type":"response.output_text.delta"',
-  '"type":"response.function_call_arguments.delta"',
-];
-const CODEX_SSE_PEEK_BYTES = 64 * 1024;
 
 // Server-generated item id prefixes that Codex /responses cannot resolve when store=false
 const SERVER_ID_PATTERN = /^(rs|fc|resp|msg)_/;
@@ -717,83 +859,7 @@ function stripStoredItemReferences(body: any) {
   });
 }
 
-// Peek first 64KB for transient SSE errors (e.g. 200 OK with "model at capacity")
-async function peekSseTransientError(response: Response): Promise<{
-  matched: string | null;
-  message: string | null;
-  replacementBody: ReadableStream<Uint8Array> | null;
-}> {
-  if (!response || !response.ok || !response.body) {
-    return { matched: null, message: null, replacementBody: null };
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: Uint8Array[] = [];
-  let text = "";
-  let matched: string | null = null;
 
-  try {
-    while (text.length < CODEX_SSE_PEEK_BYTES) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      text += decoder.decode(value, { stream: true });
-      const lowerText = text.toLowerCase();
-
-      const accountHit = CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS.find((p) => lowerText.includes(p));
-      if (accountHit) {
-        matched = accountHit;
-        break;
-      }
-      const retryHit = CODEX_SSE_RETRY_PATTERNS.find((p) => lowerText.includes(p));
-      if (retryHit) {
-        matched = retryHit;
-        break;
-      }
-      if (CODEX_SSE_USER_OUTPUT_PATTERNS.some((p) => lowerText.includes(p))) {
-        break;
-      }
-    }
-  } catch {}
-
-  if (matched) {
-    try { await reader.cancel(); } catch {}
-    try { reader.releaseLock(); } catch {}
-    return {
-      matched,
-      message: "Selected model is at capacity. Please try a different model.",
-      replacementBody: null,
-    };
-  }
-
-  reader.releaseLock();
-
-  const upstream = response.body;
-  let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  const replacementBody = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const c of chunks) controller.enqueue(c);
-      upstreamReader = upstream.getReader();
-    },
-    async pull(controller) {
-      try {
-        const { done, value } = await upstreamReader!.read();
-        if (done) {
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
-      } catch (e) {
-        controller.error(e);
-      }
-    },
-    cancel(reason) {
-      try { upstreamReader?.cancel(reason); } catch {}
-    },
-  });
-
-  return { matched: null, message: null, replacementBody };
-}
 
 export async function dispatchCodexResponsesDirect(params: CodexDispatchParams): Promise<Response> {
   const startTime = Date.now();
@@ -860,8 +926,16 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     ];
   }
 
-  // Apply reasoning effort if explicitly given or inferred from model name (e.g. 6.1 Sol Ultra)
-  const effectiveEffort = params.reasoningEffort || codexBody.reasoning?.effort || resolved.inferredEffort;
+  // Map fast service tier to priority as expected by OpenAI Codex backend
+  if (codexBody.service_tier === "fast") {
+    codexBody.service_tier = "priority";
+  }
+
+  // Apply reasoning effort if explicitly given or inferred from model name (e.g. 6.1 Sol Extra High)
+  let effectiveEffort = params.reasoningEffort || codexBody.reasoning?.effort || resolved.inferredEffort;
+  if (effectiveEffort === "max") {
+    effectiveEffort = "xhigh";
+  }
   if (effectiveEffort && effectiveEffort !== "none") {
     if (!codexBody.reasoning) codexBody.reasoning = {};
     codexBody.reasoning.effort = effectiveEffort;
@@ -901,6 +975,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       version: CODEX_CLIENT_VERSION,
     };
     if (accountId) {
+      headers["ChatGPT-Account-ID"] = accountId;
       headers["ChatGPT-Account-Id"] = accountId;
     }
     return headers;
@@ -1008,7 +1083,11 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       }),
       {
         status: 503,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Aidev-Account-Fallback": peek.accountFallback ? "true" : "false",
+          "X-Aidev-Transient-Error": peek.matched || "capacity",
+        },
       }
     );
   }
