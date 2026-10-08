@@ -93,20 +93,54 @@ function stripClientNamespace(model: string): string {
 }
 
 /**
+ * Normalizes user-requested model aliases/suffixes (e.g. '6.1 Sol Ultra', 'cx/gpt-6.1-sol', '6.1-sol-ultra')
+ * so they match registered combo IDs (e.g. 'gpt-6.1-sol').
+ */
+function normalizeComboModelName(model: string): string {
+  let lower = stripClientNamespace(model).toLowerCase();
+  lower = lower.replace(/^combo[:/]/, "");
+  // strip provider prefixes if any
+  lower = lower.replace(/^(cx|codex|openai-codex|openai|ag|gem|antigravity)\//, "");
+  // strip reasoning / size suffixes
+  lower = lower.replace(/[-_\s]+(ultra|xhigh|high|medium|med|low|none|thinking|extra-low)$/i, "");
+  lower = lower.replace(/\[.*\]$/, "");
+  // map common aliases
+  if (lower === "6.1" || lower === "6.1-sol" || lower === "6.1 sol" || lower === "codex-6.1-sol" || lower === "codex-6.1") {
+    return "gpt-6.1-sol";
+  }
+  if (lower === "6-astra" || lower === "astra") {
+    return "gpt-6-astra";
+  }
+  if (lower === "6-sol") {
+    return "gpt-6-sol";
+  }
+  if (lower === "6-luna") {
+    return "gpt-6-luna";
+  }
+  return lower;
+}
+
+/**
  * Check whether a requested model string refers to a Combo Model.
  */
 export async function isComboModel(rawModel?: string | null): Promise<boolean> {
   if (!rawModel) return false;
   const stripped = stripClientNamespace(rawModel);
   const clean = stripped.replace(/^combo[:/]/, "");
+  const normalized = normalizeComboModelName(rawModel);
 
   const combos = await getActiveCombos();
   return combos.some(
-    (c) =>
-      c.comboId.toLowerCase() === stripped ||
-      c.comboId.toLowerCase() === clean ||
-      stripped === `combo/${c.comboId.toLowerCase()}` ||
-      stripped === `combo:${c.comboId.toLowerCase()}`
+    (c) => {
+      const cId = c.comboId.toLowerCase();
+      return (
+        cId === stripped ||
+        cId === clean ||
+        cId === normalized ||
+        stripped === `combo/${cId}` ||
+        stripped === `combo:${cId}`
+      );
+    }
   );
 }
 
@@ -116,15 +150,21 @@ export async function isComboModel(rawModel?: string | null): Promise<boolean> {
 export async function findCombo(rawModel: string): Promise<CachedCombo | null> {
   const stripped = stripClientNamespace(rawModel);
   const clean = stripped.replace(/^combo[:/]/, "");
+  const normalized = normalizeComboModelName(rawModel);
   const combos = await getActiveCombos();
 
   return (
     combos.find(
-      (c) =>
-        c.comboId.toLowerCase() === stripped ||
-        c.comboId.toLowerCase() === clean ||
-        stripped === `combo/${c.comboId.toLowerCase()}` ||
-        stripped === `combo:${c.comboId.toLowerCase()}`
+      (c) => {
+        const cId = c.comboId.toLowerCase();
+        return (
+          cId === stripped ||
+          cId === clean ||
+          cId === normalized ||
+          stripped === `combo/${cId}` ||
+          stripped === `combo:${cId}`
+        );
+      }
     ) || null
   );
 }

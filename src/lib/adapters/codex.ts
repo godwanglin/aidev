@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { logUpstreamRequest, refreshConnectionOn401 } from "@/lib/router";
+import { logUpstreamRequest, refreshConnectionOn401, markConnectionCooldown } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
 
@@ -48,32 +48,81 @@ function extractAccountId(token: string): string | null {
 }
 
 /**
- * Normalizes OpenAI model name for Codex backend.
- * Codex backend supports gpt-6.1-sol, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, etc.
+ * Normalizes OpenAI model name and infers reasoning effort for Codex backend.
+ * Strips provider prefixes and suffixes like 'Ultra', 'High', 'Medium', 'Low'
+ * Codex backend supports gpt-6.1-sol, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-6-astra, etc.
  */
-function resolveCodexModel(rawModel: string): string {
+export function resolveCodexModelAndEffort(rawModel: string): { model: string; inferredEffort?: string } {
   let clean = rawModel
     .replace(/^cx\//i, "")
     .replace(/^codex\//i, "")
     .replace(/^openai-codex\//i, "")
+    .replace(/^openai\//i, "")
     .trim();
   const lower = clean.toLowerCase();
-  
-  if (lower === "default" || lower === "default-model" || !clean) {
-    return "gpt-5.5";
+
+  let inferredEffort: string | undefined = undefined;
+  if (lower.includes("ultra")) {
+    inferredEffort = "ultra";
+  } else if (lower.includes("xhigh")) {
+    inferredEffort = "xhigh";
+  } else if (lower.includes("high")) {
+    inferredEffort = "high";
+  } else if (lower.includes("medium") || lower.includes("med")) {
+    inferredEffort = "medium";
+  } else if (lower.includes("low")) {
+    inferredEffort = "low";
+  }
+
+  // Strip reasoning / size suffixes (e.g. "6.1 Sol Ultra" -> "6.1 sol")
+  const baseModel = lower
+    .replace(/[-_\s]+(ultra|xhigh|high|medium|med|low|none|thinking|extra-low)$/i, "")
+    .replace(/\[.*\]$/, "")
+    .trim();
+
+  if (baseModel === "default" || baseModel === "default-model" || !baseModel) {
+    return { model: "gpt-5.5", inferredEffort };
   }
   if (
-    lower === "gpt-6.1" ||
-    lower === "codex-6.1" ||
-    lower === "codex-6.1-sol" ||
-    lower === "codex 6.1 sol" ||
-    lower === "codex 6.1" ||
-    lower === "6.1-sol" ||
-    lower === "6.1 sol"
+    baseModel === "gpt-6.1" ||
+    baseModel === "gpt-6.1-sol" ||
+    baseModel === "codex-6.1" ||
+    baseModel === "codex-6.1-sol" ||
+    baseModel === "codex 6.1 sol" ||
+    baseModel === "codex 6.1" ||
+    baseModel === "6.1-sol" ||
+    baseModel === "6.1 sol" ||
+    baseModel === "6.1"
   ) {
-    return "gpt-6.1-sol";
+    return { model: "gpt-6.1-sol", inferredEffort };
   }
-  return clean;
+  if (baseModel === "gpt-6-astra" || baseModel === "6-astra" || baseModel === "astra") {
+    return { model: "gpt-6-astra", inferredEffort };
+  }
+  if (baseModel === "gpt-6-sol" || baseModel === "6-sol") {
+    return { model: "gpt-6-sol", inferredEffort };
+  }
+  if (baseModel === "gpt-6-luna" || baseModel === "6-luna") {
+    return { model: "gpt-6-luna", inferredEffort };
+  }
+  if (baseModel === "gpt-5.6-sol" || baseModel === "5.6-sol") {
+    return { model: "gpt-5.6-sol", inferredEffort };
+  }
+  if (baseModel === "gpt-5.6-terra" || baseModel === "5.6-terra") {
+    return { model: "gpt-5.6-terra", inferredEffort };
+  }
+  if (baseModel === "gpt-5.6-luna" || baseModel === "5.6-luna") {
+    return { model: "gpt-5.6-luna", inferredEffort };
+  }
+  if (baseModel === "gpt-5.5" || baseModel === "5.5") {
+    return { model: "gpt-5.5", inferredEffort };
+  }
+
+  return { model: baseModel || clean, inferredEffort };
+}
+
+function resolveCodexModel(rawModel: string): string {
+  return resolveCodexModelAndEffort(rawModel).model;
 }
 
 /**
@@ -749,7 +798,8 @@ async function peekSseTransientError(response: Response): Promise<{
 export async function dispatchCodexResponsesDirect(params: CodexDispatchParams): Promise<Response> {
   const startTime = Date.now();
   const created = Math.floor(Date.now() / 1000);
-  const targetModel = resolveCodexModel(params.model);
+  const resolved = resolveCodexModelAndEffort(params.model);
+  const targetModel = resolved.model;
   const logModel = params.upstreamLogModel || params.model;
   const accountId = extractAccountId(params.accessToken);
 
@@ -810,8 +860,11 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     ];
   }
 
-  // Include reasoning encrypted content for reasoning models
-  if (codexBody.reasoning && codexBody.reasoning.effort && codexBody.reasoning.effort !== "none") {
+  // Apply reasoning effort if explicitly given or inferred from model name (e.g. 6.1 Sol Ultra)
+  const effectiveEffort = params.reasoningEffort || codexBody.reasoning?.effort || resolved.inferredEffort;
+  if (effectiveEffort && effectiveEffort !== "none") {
+    if (!codexBody.reasoning) codexBody.reasoning = {};
+    codexBody.reasoning.effort = effectiveEffort;
     codexBody.include = ["reasoning.encrypted_content"];
   }
 
@@ -874,6 +927,10 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   }
 
   if (!response.ok) {
+    if (params.connectionId && (response.status === 429 || response.status >= 500)) {
+      markConnectionCooldown(params.connectionId, 60);
+    }
+
     const errText = await response.text();
     let errMsg = errText;
     try {
@@ -922,6 +979,10 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   // Peek SSE stream for capacity / transient errors inside 200 OK
   const peek = await peekSseTransientError(response);
   if (peek.matched) {
+    if (params.connectionId) {
+      markConnectionCooldown(params.connectionId, 60);
+    }
+
     logUpstreamRequest({
       connectionId: params.connectionId,
       provider: "OPENAI_CODEX",
@@ -1009,18 +1070,26 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       flush() {
         const durationMs = Date.now() - startTime;
         const ttftMs = firstTokenTime ? firstTokenTime - startTime : undefined;
-        const hasTokens = completionTokens > 0;
-        const statusCode = (response.status === 200 && hasTokens) ? 200 : 502;
+        const hasStreamedContent = Boolean(firstTokenTime || accumulatedChunks.length > 0 || completionTokens > 0);
+        const estimatedCompletion = completionTokens > 0 
+          ? completionTokens 
+          : hasStreamedContent 
+          ? Math.max(1, Math.round(accumulatedChunks.length / 4)) 
+          : 0;
+        const finalTokens = hasStreamedContent ? estimatedCompletion : 0;
+        const statusCode = (response.status === 200 && (hasStreamedContent || response.ok)) 
+          ? 200 
+          : (response.status >= 400 ? response.status : 502);
 
         if (statusCode === 200) {
           adminLogger.done({
             durationMs,
             ttftMs,
             promptTokens: promptTokens || 15,
-            completionTokens: hasTokens ? completionTokens : 0,
+            completionTokens: finalTokens,
             model: responseModel,
             upstreamModel: logModel,
-            reasoningEffort: params.reasoningEffort,
+            reasoningEffort: params.reasoningEffort || effectiveEffort,
           });
         } else {
           adminLogger.error({
@@ -1038,13 +1107,13 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
           clientUserEmail: params.clientUserEmail,
-          reasoningEffort: params.reasoningEffort,
+          reasoningEffort: params.reasoningEffort || effectiveEffort,
           rawHeaders: params.rawHeaders,
           rawBody: params.rawBody,
           rawResponse: accumulatedChunks,
           promptTokens: promptTokens || 15,
-          completionTokens: hasTokens ? completionTokens : 0,
-          totalTokens: hasTokens ? (promptTokens + completionTokens) : (promptTokens || 15),
+          completionTokens: finalTokens,
+          totalTokens: (promptTokens || 15) + finalTokens,
           latencyMs: durationMs,
           statusCode,
           isFailover: false,
@@ -1058,8 +1127,8 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
             statusCode,
             model: responseModel,
             promptTokens: promptTokens || 15,
-            completionTokens: hasTokens ? completionTokens : 0,
-            totalTokens: hasTokens ? (promptTokens + completionTokens) : (promptTokens || 15),
+            completionTokens: finalTokens,
+            totalTokens: (promptTokens || 15) + finalTokens,
             costUsd: statusCode >= 400 ? 0 : undefined,
             durationMs,
           });

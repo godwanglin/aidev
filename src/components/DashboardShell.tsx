@@ -108,14 +108,36 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.user) {
-          setCurrentUser(data.user);
-        }
-      })
-      .catch(() => {});
+    const refreshAuth = () => {
+      fetch("/api/auth/me")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.user) {
+            setCurrentUser(data.user);
+          }
+        })
+        .catch(() => {});
+    };
+
+    refreshAuth();
+
+    // Rolling session heartbeat every 10 minutes
+    const interval = setInterval(refreshAuth, 10 * 60 * 1000);
+
+    // Refresh session on tab focus
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshAuth();
+      }
+    };
+    window.addEventListener("focus", refreshAuth);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", refreshAuth);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {

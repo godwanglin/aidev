@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/captcha",
   "/api/auth/logout",
   "/api/auth/me",
+  "/api/auth/refresh",
   "/api/models",
   "/models",
   "/docs",
@@ -36,8 +37,9 @@ function verifySessionToken(token: string): boolean {
     const [userId, ts, sig] = raw.split(":");
     if (!userId || !ts || !sig) return false;
     
+    // Check expiration (30 days max) with 10-minute forward clock-drift tolerance
     const tokenTime = Number(ts);
-    if (isNaN(tokenTime) || Date.now() - tokenTime > MAX_SESSION_AGE_MS || tokenTime > Date.now() + 60000) {
+    if (isNaN(tokenTime) || Date.now() - tokenTime > MAX_SESSION_AGE_MS || tokenTime > Date.now() + 10 * 60 * 1000) {
       return false;
     }
 
@@ -86,6 +88,12 @@ export function proxy(request: NextRequest) {
   const sessionToken = request.cookies.get("devportal_session")?.value;
 
   if (!sessionToken || !verifySessionToken(sessionToken)) {
+    // For API calls, return 401 JSON error instead of redirecting to login page HTML
+    if (pathname.startsWith("/api/")) {
+      return applySecurityHeaders(
+        NextResponse.json({ error: "Unauthorized", code: "session_expired" }, { status: 401 })
+      );
+    }
     const loginUrl = new URL("/login", request.url);
     return applySecurityHeaders(NextResponse.redirect(loginUrl));
   }

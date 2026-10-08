@@ -23,9 +23,9 @@ export function parseSessionToken(token: string): string | null {
     const [userId, ts, sig] = raw.split(":");
     if (!userId || !ts || !sig) return null;
     
-    // Check expiration (30 days max)
+    // Check expiration (30 days max) with 10-minute forward clock-drift tolerance
     const tokenTime = Number(ts);
-    if (isNaN(tokenTime) || Date.now() - tokenTime > MAX_SESSION_AGE_MS || tokenTime > Date.now() + 60000) {
+    if (isNaN(tokenTime) || Date.now() - tokenTime > MAX_SESSION_AGE_MS || tokenTime > Date.now() + 10 * 60 * 1000) {
       return null;
     }
 
@@ -34,6 +34,20 @@ export function parseSessionToken(token: string): string | null {
     return userId;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Returns true if session token should be renewed (older than 12 hours).
+ */
+export function shouldRenewSessionToken(token: string): boolean {
+  try {
+    const raw = Buffer.from(token, "base64").toString("utf-8");
+    const [, ts] = raw.split(":");
+    const tokenTime = Number(ts);
+    return !isNaN(tokenTime) && Date.now() - tokenTime > 12 * 60 * 60 * 1000;
+  } catch {
+    return false;
   }
 }
 

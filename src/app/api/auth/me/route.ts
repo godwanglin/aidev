@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, createSessionToken } from "@/lib/session";
 
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ authenticated: false, user: null });
   }
-  return NextResponse.json({
+
+  const res = NextResponse.json({
     authenticated: true,
     user: {
       id: user.id,
@@ -19,4 +20,16 @@ export async function GET() {
       subscriptionExpiresAt: user.subscriptionExpiresAt,
     },
   });
+
+  // Rolling/sliding session renewal: active requests always extend the 30-day session
+  const newToken = createSessionToken(user.id);
+  res.cookies.set("devportal_session", newToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 30 * 24 * 60 * 60,
+    path: "/",
+  });
+
+  return res;
 }

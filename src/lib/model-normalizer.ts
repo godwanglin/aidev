@@ -83,7 +83,32 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
       "codex-6.1-sol": "gpt-6.1-sol",
       "codex-6.1": "gpt-6.1-sol",
       "6.1-sol": "gpt-6.1-sol",
+      "6.1 sol": "gpt-6.1-sol",
       "6.1": "gpt-6.1-sol",
+      "6.1-sol-ultra": "gpt-6.1-sol",
+      "6.1 sol ultra": "gpt-6.1-sol",
+      "gpt-6.1-sol-ultra": "gpt-6.1-sol",
+      "6.1-sol-high": "gpt-6.1-sol",
+      "6.1 sol high": "gpt-6.1-sol",
+      "gpt-6.1-sol-high": "gpt-6.1-sol",
+      "6.1-sol-medium": "gpt-6.1-sol",
+      "6.1 sol medium": "gpt-6.1-sol",
+      "6.1-sol-low": "gpt-6.1-sol",
+      "6.1 sol low": "gpt-6.1-sol",
+      "gpt-6-astra": "gpt-6-astra",
+      "6-astra": "gpt-6-astra",
+      "gpt-6-sol": "gpt-6-sol",
+      "6-sol": "gpt-6-sol",
+      "gpt-6-luna": "gpt-6-luna",
+      "6-luna": "gpt-6-luna",
+      "gpt-5.6-sol": "gpt-5.6-sol",
+      "5.6-sol": "gpt-5.6-sol",
+      "gpt-5.6-terra": "gpt-5.6-terra",
+      "5.6-terra": "gpt-5.6-terra",
+      "gpt-5.6-luna": "gpt-5.6-luna",
+      "5.6-luna": "gpt-5.6-luna",
+      "gpt-5.5": "gpt-5.5",
+      "5.5": "gpt-5.5",
     },
   },
   {
@@ -267,7 +292,10 @@ export function normalizeModelRequest(rawModel?: string | null): NormalizedModel
         let thinkingLevel: "HIGH" | "MEDIUM" | "LOW" | "OFF" | null = null;
         let thinkingBudget: number | null = null;
 
-        if (cleanLower.includes("extra-low")) {
+        if (cleanLower.includes("ultra")) {
+          thinkingLevel = "HIGH";
+          thinkingBudget = 32768;
+        } else if (cleanLower.includes("extra-low")) {
           thinkingLevel = "LOW";
           thinkingBudget = 1024;
         } else if (cleanLower.includes("high")) {

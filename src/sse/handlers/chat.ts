@@ -478,92 +478,202 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
     // Direct Native 1: OpenAI Codex Responses API
     if (subPath === "responses" && isCodexProvider(activeProvider, resolvedRoute?.authType) && targetKey) {
-      try {
-        const response = await dispatchCodexResponsesDirect({
-          rawBody: candidateRawBody || "{}",
-          parsedBody: JSON.parse(candidateRawBody || "{}"),
-          accessToken: targetKey,
-          connectionId: activeConnectionId || "",
-          model: candidateModel || "gpt-5.5",
-          clientRequestedModel,
-          upstreamLogModel,
-          clientApiKeyId: apiKeyId,
-          clientUserId,
-          clientUserEmail,
-          reasoningEffort: candidateReasoningEffort,
-          rawHeaders: rawHeadersObj,
-          reqPath,
-          clientWantsStream,
-        });
+      let currentKey = targetKey;
+      let currentConnId = activeConnectionId || "";
+      let currentAccount = upstreamAccount;
+      let codexResponse: Response | null = null;
+      const triedConnectionIds: string[] = currentConnId ? [currentConnId] : [];
+      const MAX_CODEX_CONNECTION_ATTEMPTS = 3;
 
-        if ((response.status === 429 || response.status >= 500) && !isLastCandidate) {
+      for (let attempt = 0; attempt < MAX_CODEX_CONNECTION_ATTEMPTS; attempt++) {
+        try {
+          codexResponse = await dispatchCodexResponsesDirect({
+            rawBody: candidateRawBody || "{}",
+            parsedBody: JSON.parse(candidateRawBody || "{}"),
+            accessToken: currentKey,
+            connectionId: currentConnId,
+            model: candidateModel || "gpt-5.5",
+            clientRequestedModel,
+            upstreamLogModel,
+            clientApiKeyId: apiKeyId,
+            clientUserId,
+            clientUserEmail,
+            reasoningEffort: candidateReasoningEffort,
+            rawHeaders: rawHeadersObj,
+            reqPath,
+            clientWantsStream,
+          });
+
+          // Check if this connection returned capacity or server error
+          const isRetryableError = codexResponse.status === 429 || codexResponse.status >= 500;
+          if (isRetryableError) {
+            if (currentConnId) {
+              markConnectionCooldown(currentConnId, 60);
+            }
+
+            // Attempt to find another healthy connection for Codex
+            if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
+              const nextRoute = await resolveUpstreamConnection({
+                model: candidateModel,
+                provider: activeProvider,
+                excludeConnectionIds: triedConnectionIds,
+              });
+
+              if (nextRoute && nextRoute.apiKey && !triedConnectionIds.includes(nextRoute.connectionId)) {
+                adminLogger.fallback({
+                  fromModel: candidateModel,
+                  toModel: candidateModel,
+                  reason: `Codex connection ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (retrying next Codex connection: ${nextRoute.connectionName || nextRoute.connectionId})`,
+                  account: upstreamAccount,
+                });
+                currentKey = nextRoute.apiKey;
+                currentConnId = nextRoute.connectionId;
+                currentAccount = nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId;
+                triedConnectionIds.push(currentConnId);
+                continue;
+              }
+            }
+          }
+
+          break;
+        } catch (err: any) {
+          if (currentConnId) {
+            markConnectionCooldown(currentConnId, 60);
+          }
+          if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
+            const nextRoute = await resolveUpstreamConnection({
+              model: candidateModel,
+              provider: activeProvider,
+              excludeConnectionIds: triedConnectionIds,
+            });
+            if (nextRoute && nextRoute.apiKey && !triedConnectionIds.includes(nextRoute.connectionId)) {
+              currentKey = nextRoute.apiKey;
+              currentConnId = nextRoute.connectionId;
+              currentAccount = nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId;
+              triedConnectionIds.push(currentConnId);
+              continue;
+            }
+          }
+          break;
+        }
+      }
+
+      if (codexResponse) {
+        if ((codexResponse.status === 429 || codexResponse.status >= 500) && !isLastCandidate) {
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `Codex returned HTTP ${response.status}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
           continue;
         }
 
-        return response;
-      } catch (err: any) {
-        if (!isLastCandidate) {
-          adminLogger.fallback({
-            fromModel: candidateModel,
-            toModel: candidates[candIdx + 1],
-            reason: `Codex exception: ${err.message}`,
-            account: upstreamAccount,
-          });
-          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
-          continue;
-        }
-        throw err;
+        return codexResponse;
+      }
+
+      if (!isLastCandidate) {
+        markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+        continue;
       }
     }
 
     // Direct Native 1b: OpenAI Codex for standard Chat Completions
     if (subPath !== "responses" && isCodexProvider(activeProvider, resolvedRoute?.authType) && targetKey) {
-      try {
-        const response = await dispatchCodexChat({
-          rawBody: candidateChatBody || "{}",
-          parsedBody: parsedCandidateJson,
-          accessToken: targetKey,
-          connectionId: activeConnectionId || "",
-          model: candidateModel || "gpt-5.5",
-          clientRequestedModel,
-          upstreamLogModel,
-          clientApiKeyId: apiKeyId,
-          clientUserId,
-          reqPath,
-          clientWantsStream,
-        });
+      let currentKey = targetKey;
+      let currentConnId = activeConnectionId || "";
+      let currentAccount = upstreamAccount;
+      let codexResponse: Response | null = null;
+      const triedConnectionIds: string[] = currentConnId ? [currentConnId] : [];
+      const MAX_CODEX_CONNECTION_ATTEMPTS = 3;
 
-        if ((response.status === 429 || response.status >= 500) && !isLastCandidate) {
+      for (let attempt = 0; attempt < MAX_CODEX_CONNECTION_ATTEMPTS; attempt++) {
+        try {
+          codexResponse = await dispatchCodexChat({
+            rawBody: candidateChatBody || "{}",
+            parsedBody: parsedCandidateJson,
+            accessToken: currentKey,
+            connectionId: currentConnId,
+            model: candidateModel || "gpt-5.5",
+            clientRequestedModel,
+            upstreamLogModel,
+            clientApiKeyId: apiKeyId,
+            clientUserId,
+            reqPath,
+            clientWantsStream,
+          });
+
+          const isRetryableError = codexResponse.status === 429 || codexResponse.status >= 500;
+          if (isRetryableError) {
+            if (currentConnId) {
+              markConnectionCooldown(currentConnId, 60);
+            }
+
+            if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
+              const nextRoute = await resolveUpstreamConnection({
+                model: candidateModel,
+                provider: activeProvider,
+                excludeConnectionIds: triedConnectionIds,
+              });
+
+              if (nextRoute && nextRoute.apiKey && !triedConnectionIds.includes(nextRoute.connectionId)) {
+                adminLogger.fallback({
+                  fromModel: candidateModel,
+                  toModel: candidateModel,
+                  reason: `Codex connection ${currentAccount || currentConnId} returned HTTP ${codexResponse.status} (retrying next Codex connection: ${nextRoute.connectionName || nextRoute.connectionId})`,
+                  account: upstreamAccount,
+                });
+                currentKey = nextRoute.apiKey;
+                currentConnId = nextRoute.connectionId;
+                currentAccount = nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId;
+                triedConnectionIds.push(currentConnId);
+                continue;
+              }
+            }
+          }
+
+          break;
+        } catch (err: any) {
+          if (currentConnId) {
+            markConnectionCooldown(currentConnId, 60);
+          }
+          if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
+            const nextRoute = await resolveUpstreamConnection({
+              model: candidateModel,
+              provider: activeProvider,
+              excludeConnectionIds: triedConnectionIds,
+            });
+            if (nextRoute && nextRoute.apiKey && !triedConnectionIds.includes(nextRoute.connectionId)) {
+              currentKey = nextRoute.apiKey;
+              currentConnId = nextRoute.connectionId;
+              currentAccount = nextRoute.connectionName || nextRoute.accountEmail || nextRoute.connectionId;
+              triedConnectionIds.push(currentConnId);
+              continue;
+            }
+          }
+          break;
+        }
+      }
+
+      if (codexResponse) {
+        if ((codexResponse.status === 429 || codexResponse.status >= 500) && !isLastCandidate) {
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
-            reason: `Codex returned HTTP ${response.status}`,
+            reason: `All Codex connections returned HTTP ${codexResponse.status}`,
             account: upstreamAccount,
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
           continue;
         }
 
-        return response;
-      } catch (err: any) {
-        if (!isLastCandidate) {
-          adminLogger.fallback({
-            fromModel: candidateModel,
-            toModel: candidates[candIdx + 1],
-            reason: `Codex exception: ${err.message}`,
-            account: upstreamAccount,
-          });
-          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
-          continue;
-        }
-        throw err;
+        return codexResponse;
+      }
+
+      if (!isLastCandidate) {
+        markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+        continue;
       }
     }
 

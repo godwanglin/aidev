@@ -22,6 +22,7 @@ export interface RouteResult {
 export interface RouteContext {
   model?: string;
   provider?: string;
+  excludeConnectionIds?: string[];
 }
 
 const roundRobinCounters = new Map<string, number>();
@@ -92,6 +93,10 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     ]
   };
 
+  if (context.excludeConnectionIds && context.excludeConnectionIds.length > 0) {
+    whereClause.id = { notIn: context.excludeConnectionIds };
+  }
+
   if (!targetProvider) {
     // Never silently route unknown models to an arbitrary provider connection!
     // Multi-model fallbacks are strictly reserved for explicit Combo Models.
@@ -131,11 +136,15 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     if (targetProvider) {
       // If all connections are in temporary cooldown, find active connections ignoring cooldown,
       // ordered by earliest cooldown expiry so the request doesn't drop to an incompatible fallback provider!
+      const fallbackWhereClause: any = {
+        isActive: true,
+        provider: whereClause.provider,
+      };
+      if (context.excludeConnectionIds && context.excludeConnectionIds.length > 0) {
+        fallbackWhereClause.id = { notIn: context.excludeConnectionIds };
+      }
       const fallbackConnections = await prisma.providerConnection.findMany({
-        where: {
-          isActive: true,
-          provider: whereClause.provider,
-        },
+        where: fallbackWhereClause,
         orderBy: [
           { cooldownUntil: 'asc' },
           { priority: 'asc' },
@@ -143,7 +152,7 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
         ]
       });
       if (fallbackConnections.length > 0) {
-        const nonExhausted = fallbackConnections.filter(c => c.syncStatus !== 'EXHAUSTED');
+        const nonExhausted = fallbackConnections.filter(c => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
         const eligible = nonExhausted.length > 0 ? nonExhausted : fallbackConnections;
         return await buildRouteResult(eligible[0], norm);
       }
@@ -151,8 +160,8 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     return null;
   }
 
-  // Filter out EXHAUSTED connections if other healthy connections are available
-  const nonExhausted = connections.filter(c => c.syncStatus !== 'EXHAUSTED');
+  // Filter out EXHAUSTED and FAILED connections if other healthy connections are available
+  const nonExhausted = connections.filter(c => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
   const eligibleConnections = nonExhausted.length > 0 ? nonExhausted : connections;
 
   let selectedConnection = eligibleConnections[0];
