@@ -334,9 +334,16 @@ export async function logUpstreamRequest(data: {
 }): Promise<void> {
   const rtkSaved = Number(data.tokensSavedRtk) || 0;
   const safeConnectionId = (data.connectionId && !data.connectionId.startsWith("default-")) ? data.connectionId : null;
-  const rawHeadersStr = data.rawHeaders ? (typeof data.rawHeaders === "object" ? JSON.stringify(data.rawHeaders) : String(data.rawHeaders)) : null;
-  const rawBodyStr = data.rawBody ? (typeof data.rawBody === "object" ? JSON.stringify(data.rawBody) : String(data.rawBody)) : null;
-  const rawResponseStr = data.rawResponse ? (typeof data.rawResponse === "object" ? JSON.stringify(data.rawResponse) : String(data.rawResponse)) : null;
+  const MAX_LOG_PAYLOAD = 50000;
+  const rawHeadersStr = data.rawHeaders
+    ? (typeof data.rawHeaders === "object" ? JSON.stringify(data.rawHeaders) : String(data.rawHeaders)).slice(0, MAX_LOG_PAYLOAD)
+    : null;
+  const rawBodyStr = data.rawBody
+    ? (typeof data.rawBody === "object" ? JSON.stringify(data.rawBody) : String(data.rawBody)).slice(0, MAX_LOG_PAYLOAD)
+    : null;
+  const rawResponseStr = data.rawResponse
+    ? (typeof data.rawResponse === "object" ? JSON.stringify(data.rawResponse) : String(data.rawResponse)).slice(0, MAX_LOG_PAYLOAD)
+    : null;
 
   const safeData: any = {
     ...data,

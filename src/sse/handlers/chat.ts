@@ -137,15 +137,24 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         clientWantsStream = Boolean(jsonBody.stream);
 
         if (Array.isArray(jsonBody.messages)) {
-          const combinedMsg = jsonBody.messages
-            .map((m: any) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")))
-            .join(" ");
-          const sys = typeof jsonBody.system === "string" ? jsonBody.system : "";
-          estimatedPromptTokens = estimateTokens(`${sys} ${combinedMsg}`);
-        } else if (jsonBody.input) {
-          const inputStr = typeof jsonBody.input === "string" ? jsonBody.input : JSON.stringify(jsonBody.input);
-          const instStr = typeof jsonBody.instructions === "string" ? jsonBody.instructions : "";
-          estimatedPromptTokens = estimateTokens(`${instStr} ${inputStr}`);
+          let charCount = 0;
+          for (const m of jsonBody.messages) {
+            if (typeof m?.content === "string") charCount += m.content.length;
+            else if (m?.content) charCount += 100;
+          }
+          if (typeof jsonBody.system === "string") charCount += jsonBody.system.length;
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
+        } else if (Array.isArray(jsonBody.input)) {
+          let charCount = 0;
+          for (const item of jsonBody.input) {
+            if (typeof item === "string") charCount += item.length;
+            else if (typeof item?.content === "string") charCount += item.content.length;
+            else charCount += 100;
+          }
+          if (typeof jsonBody.instructions === "string") charCount += jsonBody.instructions.length;
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
+        } else {
+          estimatedPromptTokens = estimateTokens(rawText);
         }
       } catch {}
     }
@@ -485,12 +494,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       const triedConnectionIds: string[] = currentConnId ? [currentConnId] : [];
       // Try across up to 7 active Codex OAuth accounts
       const MAX_CODEX_CONNECTION_ATTEMPTS = 7;
+      let baseParsedBody: any = parsedCandidateJson;
+      if (!baseParsedBody && candidateRawBody) {
+        try { baseParsedBody = JSON.parse(candidateRawBody); } catch { baseParsedBody = {}; }
+      }
 
       for (let attempt = 0; attempt < MAX_CODEX_CONNECTION_ATTEMPTS; attempt++) {
         try {
           codexResponse = await dispatchCodexResponsesDirect({
             rawBody: candidateRawBody || "{}",
-            parsedBody: JSON.parse(candidateRawBody || "{}"),
+            parsedBody: baseParsedBody || {},
             accessToken: currentKey,
             connectionId: currentConnId,
             model: candidateModel || "gpt-5.5",
