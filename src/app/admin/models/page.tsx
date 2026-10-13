@@ -96,6 +96,10 @@ export default function AdminModelsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [syncingModels, setSyncingModels] = useState(false);
 
+  // Multi-select & Bulk operations state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkOperating, setIsBulkOperating] = useState(false);
+
   async function handleSyncProviderModels() {
     setSyncingModels(true);
     setErrorMsg("");
@@ -360,6 +364,111 @@ export default function AdminModelsPage() {
   const totalPages = Math.ceil(filtered.length / pageSize) || 1;
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
+  const isAllPageSelected = paginated.length > 0 && paginated.every((m) => selectedIds.includes(m.id));
+  const isSomePageSelected = paginated.some((m) => selectedIds.includes(m.id)) && !isAllPageSelected;
+
+  function handleToggleSelect(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  }
+
+  function handleToggleSelectAllPage() {
+    const pageIds = paginated.map((m) => m.id);
+    if (isAllPageSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  }
+
+  function handleSelectAllFiltered() {
+    setSelectedIds(filtered.map((m) => m.id));
+  }
+
+  function handleClearSelection() {
+    setSelectedIds([]);
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    if (!confirm(`Yakin ingin menghapus ${count} model yang dipilih secara permanen? Tindakan ini tidak dapat dibatalkan.`)) {
+      return;
+    }
+    setIsBulkOperating(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/admin/models", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuccessMsg(`Berhasil menghapus ${json.count || count} model.`);
+        setSelectedIds([]);
+        setTimeout(() => setSuccessMsg(""), 3500);
+        fetchModels();
+      } else {
+        setErrorMsg(json.error || "Gagal menghapus model terpilih.");
+      }
+    } catch {
+      setErrorMsg("Terjadi kesalahan jaringan saat menghapus model.");
+    }
+    setIsBulkOperating(false);
+  }
+
+  async function handleBulkSetActive(active: boolean) {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    setIsBulkOperating(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/admin/models", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds, isActive: active }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuccessMsg(`Berhasil mengubah status ${json.count || count} model menjadi ${active ? "Aktif" : "Nonaktif"}.`);
+        setTimeout(() => setSuccessMsg(""), 3500);
+        fetchModels();
+      } else {
+        setErrorMsg(json.error || "Gagal memperbarui status model terpilih.");
+      }
+    } catch {
+      setErrorMsg("Terjadi kesalahan jaringan saat memperbarui status model.");
+    }
+    setIsBulkOperating(false);
+  }
+
+  async function handleBulkSetPublic(isPub: boolean) {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    setIsBulkOperating(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/admin/models", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds, isPublic: isPub }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuccessMsg(`Berhasil mengubah visibilitas ${json.count || count} model menjadi ${isPub ? "Publik" : "Hidden (Privat)"}.`);
+        setTimeout(() => setSuccessMsg(""), 3500);
+        fetchModels();
+      } else {
+        setErrorMsg(json.error || "Gagal memperbarui visibilitas model terpilih.");
+      }
+    } catch {
+      setErrorMsg("Terjadi kesalahan jaringan saat memperbarui visibilitas model.");
+    }
+    setIsBulkOperating(false);
+  }
+
   const availableProviders = ["ALL", ...Array.from(new Set(models.map((m) => m.provider.toUpperCase())))];
 
   return (
@@ -476,11 +585,129 @@ export default function AdminModelsPage() {
           </div>
         </div>
 
+        {/* Floating / Top Bulk Actions Toolbar */}
+        {selectedIds.length > 0 && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl mb-3 border shadow-md transition-all animate-in fade-in"
+            style={{
+              background: "var(--card)",
+              borderColor: "var(--blue)",
+              boxShadow: "0 4px 18px rgba(0, 0, 0, 0.12)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full"
+                  style={{ background: "rgba(59, 130, 246, 0.18)", color: "var(--blue)" }}
+                >
+                  {selectedIds.length}
+                </span>
+                <span className="text-xs font-semibold text-[var(--ink)]">Model Terpilih</span>
+              </div>
+
+              {selectedIds.length < filtered.length && (
+                <button
+                  type="button"
+                  onClick={handleSelectAllFiltered}
+                  className="text-xs text-blue-500 hover:text-blue-600 underline font-medium"
+                >
+                  Pilih semua ({filtered.length})
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                className="text-xs text-muted hover:text-[var(--ink)]"
+              >
+                Batal Pilih
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-muted font-medium mr-1 hidden sm:inline">Aksi Masal:</span>
+
+              {/* Aktifkan */}
+              <button
+                type="button"
+                onClick={() => handleBulkSetActive(true)}
+                disabled={isBulkOperating}
+                className="control btn-inline text-xs font-medium px-2.5 py-1.5 flex items-center gap-1.5 hover:border-emerald-500 hover:text-emerald-500"
+                title="Aktifkan seluruh model yang dipilih"
+              >
+                <CheckCircle2 size={13} className="text-emerald-500" />
+                <span>Aktif</span>
+              </button>
+
+              {/* Nonaktifkan */}
+              <button
+                type="button"
+                onClick={() => handleBulkSetActive(false)}
+                disabled={isBulkOperating}
+                className="control btn-inline text-xs font-medium px-2.5 py-1.5 flex items-center gap-1.5 hover:border-amber-500 hover:text-amber-500"
+                title="Nonaktifkan seluruh model yang dipilih"
+              >
+                <AlertCircle size={13} className="text-amber-500" />
+                <span>Nonaktif</span>
+              </button>
+
+              {/* Jadikan Publik */}
+              <button
+                type="button"
+                onClick={() => handleBulkSetPublic(true)}
+                disabled={isBulkOperating}
+                className="control btn-inline text-xs font-medium px-2.5 py-1.5 flex items-center gap-1.5 hover:border-blue-500 hover:text-blue-500"
+                title="Tampilkan seluruh model yang dipilih di katalog publik (/models & /v1/models)"
+              >
+                <Globe size={13} className="text-blue-500" />
+                <span>Publik</span>
+              </button>
+
+              {/* Jadikan Hidden */}
+              <button
+                type="button"
+                onClick={() => handleBulkSetPublic(false)}
+                disabled={isBulkOperating}
+                className="control btn-inline text-xs font-medium px-2.5 py-1.5 flex items-center gap-1.5 hover:border-slate-500"
+                title="Sembunyikan seluruh model yang dipilih dari katalog publik"
+              >
+                <EyeOff size={13} className="text-muted" />
+                <span>Hidden</span>
+              </button>
+
+              {/* Hapus Masal */}
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={isBulkOperating}
+                className="control btn-inline text-xs font-semibold px-3 py-1.5 flex items-center gap-1.5 text-red-500 border-red-500/30 hover:bg-red-500/10 hover:border-red-500"
+                title="Hapus seluruh model yang dipilih secara permanen"
+              >
+                <Trash2 size={13} className={isBulkOperating ? "animate-spin" : "text-red-500"} />
+                <span>Hapus ({selectedIds.length})</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <article className="panel logs">
           <div className="logs-wrap">
-            <table className="table" style={{ minWidth: "1150px" }}>
+            <table className="table" style={{ minWidth: "1200px" }}>
               <thead>
                 <tr>
+                  <th style={{ width: "42px", minWidth: "42px", textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={isAllPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomePageSelected;
+                      }}
+                      onChange={handleToggleSelectAllPage}
+                      title={isAllPageSelected ? "Batal pilih halaman ini" : "Pilih semua di halaman ini"}
+                      style={{ cursor: "pointer", accentColor: "var(--blue)", width: "15px", height: "15px" }}
+                    />
+                  </th>
                   <th style={{ minWidth: "220px" }}>Model ID</th>
                   <th style={{ minWidth: "180px" }}>Display Name</th>
                   <th style={{ minWidth: "120px" }}>Target Provider</th>
@@ -494,7 +721,7 @@ export default function AdminModelsPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted text-xs">
+                    <td colSpan={9} className="text-center py-8 text-muted text-xs">
                       <div className="flex flex-col items-center gap-2">
                         <RefreshCw size={16} className="animate-spin text-muted" />
                         <span>Loading models from database...</span>
@@ -503,7 +730,7 @@ export default function AdminModelsPage() {
                   </tr>
                 ) : paginated.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted text-xs">
+                    <td colSpan={9} className="text-center py-8 text-muted text-xs">
                       <div className="flex flex-col items-center gap-2">
                         <Boxes size={20} className="text-muted" style={{ opacity: 0.4 }} />
                         <span>No models found matching criteria.</span>
@@ -516,11 +743,20 @@ export default function AdminModelsPage() {
                   </tr>
                 ) : (
                   paginated.map((m) => {
+                    const isSelected = selectedIds.includes(m.id);
                     const isCopied = copiedId === m.modelId;
                     const ping = pingStatuses[m.modelId];
 
                     return (
-                      <tr key={m.id}>
+                      <tr key={m.id} style={{ background: isSelected ? "rgba(59, 130, 246, 0.08)" : undefined }}>
+                        <td style={{ textAlign: "center", width: "42px", minWidth: "42px" }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelect(m.id)}
+                            style={{ cursor: "pointer", accentColor: "var(--blue)", width: "15px", height: "15px" }}
+                          />
+                        </td>
                         <td className="cell-project">
                           <div className="flex items-center gap-2">
                             <span className="project-icon">

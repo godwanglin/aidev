@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PUT update existing model or combo
+// PUT update existing model or combo (single or bulk)
 export async function PUT(req: NextRequest) {
   try {
     const admin = await verifyAdmin();
@@ -133,10 +133,41 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { id, modelId, name, provider, promptCost, completionCost, contextWindow, isActive, isPublic } = body;
+    const { id, ids, modelId, name, provider, promptCost, completionCost, contextWindow, isActive, isPublic } = body;
+
+    // Bulk update support
+    if (Array.isArray(ids) && ids.length > 0) {
+      const updateData: any = {};
+      if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+      if (isPublic !== undefined) updateData.isPublic = Boolean(isPublic);
+
+      if (Object.keys(updateData).length === 0) {
+        return NextResponse.json({ error: "No update fields provided" }, { status: 400 });
+      }
+
+      const [comboRes, aiRes] = await Promise.all([
+        prisma.comboModel.updateMany({
+          where: { id: { in: ids } },
+          data: updateData,
+        }),
+        prisma.aiModel.updateMany({
+          where: { id: { in: ids } },
+          data: updateData,
+        }),
+      ]);
+
+      invalidateModelsCache();
+
+      return NextResponse.json({
+        success: true,
+        count: comboRes.count + aiRes.count,
+        updatedCombos: comboRes.count,
+        updatedModels: aiRes.count,
+      });
+    }
 
     if (!id) {
-      return NextResponse.json({ error: "Model ID (uuid) is required" }, { status: 400 });
+      return NextResponse.json({ error: "Model ID (uuid) or IDs array is required" }, { status: 400 });
     }
 
     // Check if it's a ComboModel
@@ -178,7 +209,7 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// DELETE model or combo
+// DELETE model or combo (single or bulk)
 export async function DELETE(req: NextRequest) {
   try {
     const admin = await verifyAdmin();
@@ -186,28 +217,49 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized. Admin only." }, { status: 403 });
     }
 
+    let ids: string[] = [];
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
+    const singleId = searchParams.get("id");
+    const idsParam = searchParams.get("ids");
 
-    if (!id) {
-      return NextResponse.json({ error: "Model ID is required" }, { status: 400 });
+    if (idsParam) {
+      ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (singleId) {
+      ids = [singleId];
+    } else {
+      try {
+        const body = await req.json();
+        if (Array.isArray(body?.ids)) {
+          ids = body.ids.map((s: any) => String(s).trim()).filter(Boolean);
+        } else if (body?.id) {
+          ids = [String(body.id).trim()];
+        }
+      } catch {
+        // no body
+      }
     }
 
-    // Check if it's a ComboModel
-    const existingCombo = await prisma.comboModel.findUnique({ where: { id } });
-    if (existingCombo) {
-      await prisma.comboModel.delete({ where: { id } });
-      invalidateModelsCache();
-      return NextResponse.json({ success: true });
+    if (ids.length === 0) {
+      return NextResponse.json({ error: "Model ID or IDs are required" }, { status: 400 });
     }
 
-    await prisma.aiModel.delete({
-      where: { id },
-    });
+    const [comboRes, aiRes] = await Promise.all([
+      prisma.comboModel.deleteMany({
+        where: { id: { in: ids } },
+      }),
+      prisma.aiModel.deleteMany({
+        where: { id: { in: ids } },
+      }),
+    ]);
 
     invalidateModelsCache();
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      count: comboRes.count + aiRes.count,
+      deletedCombos: comboRes.count,
+      deletedModels: aiRes.count,
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
