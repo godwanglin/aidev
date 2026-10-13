@@ -378,29 +378,33 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       clientUser: userEmail,
     });
 
+    const isCustomProvider = activeProvider.startsWith("CUSTOM_");
+
     if (subPath === "messages") {
-      const openAiMessages = convertAnthropicToOpenAiMessages(parsedCandidateJson);
-      const chatPayload = {
-        ...parsedCandidateJson,
-        model: candidateModel,
-        messages: openAiMessages,
-        stream: clientWantsStream,
-      };
-      delete chatPayload.system;
+      if (!isCustomProvider) {
+        const openAiMessages = convertAnthropicToOpenAiMessages(parsedCandidateJson);
+        const chatPayload = {
+          ...parsedCandidateJson,
+          model: candidateModel,
+          messages: openAiMessages,
+          stream: clientWantsStream,
+        };
+        delete chatPayload.system;
 
-      // Ensure token headroom for reasoning
-      if (!chatPayload.max_tokens || chatPayload.max_tokens < MIN_REASONING_HEADROOM) {
-        chatPayload.max_tokens = MIN_REASONING_HEADROOM;
+        // Ensure token headroom for reasoning
+        if (!chatPayload.max_tokens || chatPayload.max_tokens < MIN_REASONING_HEADROOM) {
+          chatPayload.max_tokens = MIN_REASONING_HEADROOM;
+        }
+
+        candidateChatBody = JSON.stringify(chatPayload);
+        parsedCandidateJson = chatPayload;
       }
-
-      candidateChatBody = JSON.stringify(chatPayload);
-      parsedCandidateJson = chatPayload;
     } else if (subPath === "responses") {
       // Auto-inject Codex standard tools (apply_patch, exec) across turns
       const allResponsesTools = extractAllResponsesTools(parsedCandidateJson);
       customToolNames = extractCustomToolNames(parsedCandidateJson);
 
-      if (!isCodexProvider(activeProvider, resolvedRoute?.authType)) {
+      if (!isCodexProvider(activeProvider, resolvedRoute?.authType) && !isCustomProvider) {
         const openAiMessages = convertResponsesToChatMessages(parsedCandidateJson);
         const chatPayload: any = {
           ...parsedCandidateJson,
@@ -1070,8 +1074,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
     }
 
-    // Provider Dispatch 4: Standard Upstream (OpenAI / OpenRouter / DeepSeek / Claude / Gemini)
-    const targetSubPath = (subPath === "responses" || subPath === "messages") ? "chat/completions" : subPath;
+    // Provider Dispatch 4: Standard Upstream (OpenAI / OpenRouter / DeepSeek / Claude / Gemini / Custom Providers)
+    let targetSubPath = subPath;
+    if (!isCustomProvider && (subPath === "responses" || subPath === "messages")) {
+      targetSubPath = "chat/completions";
+    }
     const targetUrl = `${targetBase}/${targetSubPath}${req.nextUrl.search}`;
 
     const forwardHeaders = new Headers();
@@ -1263,7 +1270,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 const jsonStr = trimmed.startsWith("data: ") ? trimmed.slice(6) : trimmed;
                 try {
                   const data = JSON.parse(jsonStr);
-                  const delta = data.choices?.[0]?.delta?.content || data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.reasoning || "";
+                  const delta =
+                    data.choices?.[0]?.delta?.content ||
+                    data.choices?.[0]?.delta?.reasoning_content ||
+                    data.choices?.[0]?.delta?.reasoning ||
+                    data.delta?.text ||
+                    data.text ||
+                    (data.type?.includes("delta") ? data.delta?.content || data.delta?.text : "") ||
+                    "";
                   if (delta) {
                     generatedChars += delta.length;
                     if (!firstTokenTime) {
@@ -1276,14 +1290,16 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                     modified = true;
                   }
 
-                  if (data.usage) {
-                    promptTokens = data.usage.prompt_tokens || promptTokens;
-                    completionTokens = data.usage.completion_tokens || completionTokens;
-                    totalTokens = data.usage.total_tokens || (promptTokens + completionTokens);
+                  const usage = data.usage || data.response?.usage;
+                  if (usage) {
+                    promptTokens = usage.input_tokens || usage.prompt_tokens || promptTokens;
+                    completionTokens = usage.output_tokens || usage.completion_tokens || completionTokens;
+                    totalTokens = usage.total_tokens || (promptTokens + completionTokens);
 
                     if (tokensSavedRtk > 0) {
-                      data.usage.prompt_tokens = (data.usage.prompt_tokens || 0) + tokensSavedRtk;
-                      data.usage.total_tokens = (data.usage.total_tokens || 0) + tokensSavedRtk;
+                      if (data.usage?.prompt_tokens !== undefined) data.usage.prompt_tokens += tokensSavedRtk;
+                      if (data.usage?.input_tokens !== undefined) data.usage.input_tokens += tokensSavedRtk;
+                      if (data.usage?.total_tokens !== undefined) data.usage.total_tokens += tokensSavedRtk;
                       modified = true;
                     }
                   }
@@ -1355,7 +1371,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               isFailover: false,
             }).catch(() => {});
 
-            if (subPath !== "responses") {
+            if (subPath !== "responses" || (isCustomProvider && targetSubPath === "responses")) {
               logRequest({
                 apiKeyId,
                 path: reqPath,
@@ -1380,6 +1396,10 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           status: upstreamRes.status,
           headers: SSE_HEADERS,
         });
+
+        if (targetSubPath === subPath) {
+          return streamResponse;
+        }
 
         if (subPath === "messages") {
           return await transformChatResponseToAnthropic(streamResponse, { model: clientRequestedModel, clientWantsStream: true });
@@ -1488,6 +1508,21 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           status: upstreamRes.status,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      if (targetSubPath === subPath) {
+        logRequest({
+          apiKeyId,
+          path: reqPath,
+          method: "POST",
+          statusCode: upstreamRes.status,
+          model: clientRequestedModel,
+          promptTokens: estimatedPromptTokens || 10,
+          completionTokens: 20,
+          totalTokens: (estimatedPromptTokens || 10) + 20,
+          durationMs: Date.now() - startTime,
+        });
+        return successResponse;
       }
 
       if (subPath === "messages") {
