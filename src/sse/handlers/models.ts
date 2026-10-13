@@ -24,16 +24,22 @@ export async function handleModelsList(req?: NextRequest): Promise<NextResponse>
     whereClause.type = { not: "image" };
   }
 
-  const dbCombos = await prisma.comboModel.findMany({
-    where: whereClause,
-    include: {
-      items: {
-        where: { isActive: true },
-        orderBy: { priority: "asc" },
+  const [dbCombos, dbModels] = await Promise.all([
+    prisma.comboModel.findMany({
+      where: whereClause,
+      include: {
+        items: {
+          where: { isActive: true },
+          orderBy: { priority: "asc" },
+        },
       },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.aiModel.findMany({
+      where: whereClause,
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   const seenIds = new Set<string>();
   const entries: any[] = [];
@@ -57,7 +63,7 @@ export async function handleModelsList(req?: NextRequest): Promise<NextResponse>
       ? "openrouter"
       : "system";
 
-    const effectiveModelId = (c.comboId.toLowerCase().includes("v4") ? c.comboId : firstItem) || c.comboId;
+    const effectiveModelId = firstItem || c.comboId;
     const caps = isImageModel
       ? {
           context_length: 0,
@@ -82,6 +88,41 @@ export async function handleModelsList(req?: NextRequest): Promise<NextResponse>
       owned_by: ownedBy,
       permission: [],
       root: c.comboId,
+      parent: null,
+      context_length: caps.context_length,
+      max_completion_tokens: caps.max_completion_tokens,
+      capabilities: caps.capabilities,
+    });
+  }
+
+  for (const m of dbModels) {
+    if (seenIds.has(m.modelId)) continue;
+    seenIds.add(m.modelId);
+
+    const isImageModel = m.type === "image";
+    const caps = isImageModel
+      ? {
+          context_length: 0,
+          max_completion_tokens: 0,
+          capabilities: {
+            chat: false,
+            image_generation: true,
+            vision: false,
+            tools: false,
+          },
+        }
+      : getModelCapabilities(m.modelId, m.provider.toLowerCase());
+
+    entries.push({
+      id: m.modelId,
+      name: m.name,
+      display_name: m.name,
+      object: "model",
+      type: m.type || "chat",
+      created: Math.floor(new Date(m.createdAt).getTime() / 1000),
+      owned_by: m.provider.toLowerCase(),
+      permission: [],
+      root: m.modelId,
       parent: null,
       context_length: caps.context_length,
       max_completion_tokens: caps.max_completion_tokens,
@@ -157,7 +198,7 @@ export async function handleModelDetail(modelId: string): Promise<NextResponse> 
       : firstItemLower.startsWith("or/") || dbCombo.comboId.includes("openrouter")
       ? "openrouter"
       : "system";
-    const effectiveModelId = (dbCombo.comboId.toLowerCase().includes("v4") ? dbCombo.comboId : firstItem) || dbCombo.comboId;
+    const effectiveModelId = firstItem || dbCombo.comboId;
     const caps = isImageModel
       ? {
           context_length: 0,

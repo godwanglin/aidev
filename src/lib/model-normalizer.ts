@@ -11,13 +11,12 @@ export interface ProviderPrefixConfig {
   providerName: string;
   aliases?: string[];
   defaultUpstreamModel?: string;
-  virtualModelMap?: Record<string, string>;
 }
 
 export interface NormalizedModelResult {
   rawModel: string;
-  cleanModel: string;             // Stripped of prefix, e.g. "gemini-3.8-flash-high"
-  upstreamModel: string;          // Sent to real upstream API, e.g. "gemini-2.5-flash"
+  cleanModel: string;             // Stripped of prefix, e.g. "gemini-2.5-flash"
+  upstreamModel: string;          // Sent to real upstream API
   providerId: string | null;      // e.g. "ANTIGRAVITY", "OPENAI_CODEX"
   providerName: string | null;
   matchedPrefix: string | null;
@@ -32,45 +31,6 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "Antigravity",
     aliases: ["antigravity/", "google-ag/"],
     defaultUpstreamModel: "gemini-2.5-flash",
-    virtualModelMap: {
-      "gemini-3.8-flash-high": "gemini-3.8-flash-high",
-      "gemini-3.8-flash-medium": "gemini-3.8-flash-medium",
-      "gemini-3.8-flash-low": "gemini-3.8-flash-low",
-      "gemini-3.8-flash": "gemini-3.8-flash-medium",
-      "gemini-3.7-flash-high": "gemini-3.7-flash-high",
-      "gemini-3.7-flash-medium": "gemini-3.7-flash-medium",
-      "gemini-3.7-flash-low": "gemini-3.7-flash-low",
-      "gemini-3.6-flash-high": "gemini-3.6-flash-high",
-      "gemini-3.6-flash-medium": "gemini-3.6-flash-medium",
-      "gemini-3.6-flash-low": "gemini-3.6-flash-low",
-      "gemini-3.5-flash-high": "gemini-3.5-flash-high",
-      "gemini-3.5-flash-medium": "gemini-3.5-flash-medium",
-      "gemini-3.5-flash-low": "gemini-3.5-flash-low",
-      "gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
-      "gemini-3-flash-agent": "gemini-3-flash-agent",
-      "gemini-3-flash": "gemini-3-flash",
-      "gemini-pro-agent": "gemini-pro-agent",
-      "gemini-3.1-pro-high": "gemini-3.1-pro-high",
-      "gemini-3.1-pro-low": "gemini-3.1-pro-low",
-      "claude-opus-5-5-high": "claude-opus-5-5-high",
-      "claude-opus-5-5-medium": "claude-opus-5-5-medium",
-      "claude-opus-5-5-low": "claude-opus-5-5-low",
-      "claude-opus-5-5": "claude-opus-5-5-high",
-      "claude-opus-5.5": "claude-opus-5-5-high",
-      "claude-opus-5-5-thinking": "claude-opus-5-5-high",
-      "claude-opus-5.5-thinking": "claude-opus-5-5-high",
-      "claude-sonnet-5-5-high": "claude-sonnet-5-5-high",
-      "claude-sonnet-5-5-medium": "claude-sonnet-5-5-medium",
-      "claude-sonnet-5-5-low": "claude-sonnet-5-5-low",
-      "claude-sonnet-5-5": "claude-sonnet-5-5-high",
-      "claude-sonnet-5.5": "claude-sonnet-5-5-high",
-      "claude-sonnet-5-5-thinking": "claude-sonnet-5-5-high",
-      "claude-sonnet-5.5-thinking": "claude-sonnet-5-5-high",
-      "claude-sonnet-4-6": "claude-sonnet-5-5-high",
-      "claude-opus-4-6-thinking": "claude-opus-5-5-high",
-      "claude-opus-4-6": "claude-opus-5-5-high",
-      "gpt-oss-120b-medium": "gpt-oss-120b-medium",
-    },
   },
   {
     prefix: "cx/",
@@ -78,38 +38,6 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "OpenAI Codex",
     aliases: ["codex/", "openai-codex/"],
     defaultUpstreamModel: "gpt-5.5",
-    virtualModelMap: {
-      "gpt-6.1-sol": "gpt-6.1-sol",
-      "codex-6.1-sol": "gpt-6.1-sol",
-      "codex-6.1": "gpt-6.1-sol",
-      "6.1-sol": "gpt-6.1-sol",
-      "6.1 sol": "gpt-6.1-sol",
-      "6.1": "gpt-6.1-sol",
-      "6.1-sol-ultra": "gpt-6.1-sol",
-      "6.1 sol ultra": "gpt-6.1-sol",
-      "gpt-6.1-sol-ultra": "gpt-6.1-sol",
-      "6.1-sol-high": "gpt-6.1-sol",
-      "6.1 sol high": "gpt-6.1-sol",
-      "gpt-6.1-sol-high": "gpt-6.1-sol",
-      "6.1-sol-medium": "gpt-6.1-sol",
-      "6.1 sol medium": "gpt-6.1-sol",
-      "6.1-sol-low": "gpt-6.1-sol",
-      "6.1 sol low": "gpt-6.1-sol",
-      "gpt-6-astra": "gpt-6-astra",
-      "6-astra": "gpt-6-astra",
-      "gpt-6-sol": "gpt-6-sol",
-      "6-sol": "gpt-6-sol",
-      "gpt-6-luna": "gpt-6-luna",
-      "6-luna": "gpt-6-luna",
-      "gpt-5.6-sol": "gpt-5.6-sol",
-      "5.6-sol": "gpt-5.6-sol",
-      "gpt-5.6-terra": "gpt-5.6-terra",
-      "5.6-terra": "gpt-5.6-terra",
-      "gpt-5.6-luna": "gpt-5.6-luna",
-      "5.6-luna": "gpt-5.6-luna",
-      "gpt-5.5": "gpt-5.5",
-      "5.5": "gpt-5.5",
-    },
   },
   {
     prefix: "gptweb/",
@@ -138,9 +66,6 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "OpenRouter",
     aliases: ["openrouter/"],
     defaultUpstreamModel: "openrouter/free",
-    virtualModelMap: {
-      "free": "openrouter/free",
-    },
   },
   {
     prefix: "oc/",
@@ -168,17 +93,6 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "DeepSeek",
     aliases: ["ds/"],
     defaultUpstreamModel: "deepseek-chat",
-    virtualModelMap: {
-      "deepseek-v4-flash": "deepseek-v4-flash",
-      "deepseek-v4-flash-vision-exp": "deepseek-v4-flash-vision-exp",
-      "deepseek-v4.1-flash": "deepseek-v4.1-flash",
-      "deepseek-v4": "deepseek-v4",
-      "deepseek-v4-pro": "deepseek-v4-pro",
-      "deepseek-flash": "deepseek-flash",
-      "deepseek-r1": "deepseek-r1",
-      "deepseek-reasoner": "deepseek-reasoner",
-      "deepseek-chat": "deepseek-chat",
-    },
   },
   {
     prefix: "qwen/",
@@ -312,13 +226,8 @@ export function normalizeModelRequest(rawModel?: string | null): NormalizedModel
           thinkingBudget = 16384;
         }
 
-        // Map virtual alias to true upstream model if mapped, otherwise use clean model
-        let upstreamModel = cleanModel;
-        if (config.providerId === "NINE_ROUTER") {
-          upstreamModel = trimmed;
-        } else if (config.virtualModelMap && config.virtualModelMap[cleanLower]) {
-          upstreamModel = config.virtualModelMap[cleanLower];
-        }
+        // Keep upstream model transparent - no artificial redirection or virtualization
+        const upstreamModel = cleanModel;
 
         return {
           rawModel: trimmed,
@@ -337,9 +246,9 @@ export function normalizeModelRequest(rawModel?: string | null): NormalizedModel
   // 2. Fallback heuristic: Detect provider from standard model name patterns
   let inferredProvider: string | null = null;
   let inferredName: string | null = null;
-  let inferredUpstream = trimmed;
+  const inferredUpstream = trimmed;
 
-if (
+  if (
     lower.startsWith("gpt-") ||
     lower.startsWith("o1") ||
     lower.startsWith("o3") ||
@@ -350,16 +259,6 @@ if (
   ) {
     inferredProvider = "OPENAI";
     inferredName = "OpenAI";
-    if (
-      lower === "codex-6.1-sol" ||
-      lower === "codex-6.1" ||
-      lower === "codex 6.1 sol" ||
-      lower === "codex 6.1" ||
-      lower === "6.1-sol" ||
-      lower.includes("6.1")
-    ) {
-      inferredUpstream = "gpt-6.1-sol";
-    }
   } else if (lower.startsWith("claude-")) {
     inferredProvider = "CLAUDE_CODE";
     inferredName = "Claude Code";
@@ -459,11 +358,8 @@ export function normalizeRequestBody(rawBody: string | undefined): {
   }
 }
 
-import { SHARED_PROVIDER_MODELS } from "./oauth/config";
-
 /**
  * Validates whether a model ID is valid and supported for a given provider.
- * Checks against prefix standards, SHARED_PROVIDER_MODELS, virtualModelMap, and known patterns.
  */
 export function validateModelForProvider(
   modelId: string,

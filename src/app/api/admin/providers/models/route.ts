@@ -294,20 +294,13 @@ export async function GET(req: NextRequest) {
     } catch {}
   }
 
-  // 2. Default fallback from SHARED_PROVIDER_MODELS
-  const catalogList =
-    SHARED_PROVIDER_MODELS[providerKey] ||
-    SHARED_PROVIDER_MODELS[providerParam.toUpperCase()] || [
-      { id: "default-model", name: `${providerParam} Default Model` },
-    ];
-
-  // 3. Load custom models and inactive tracking from database for this provider
+  // 2. Load models from database for this provider
   let customDbModels: { id: string; name: string }[] = [];
-  const inactiveSet = new Set<string>();
 
   try {
     const dbList = await prisma.aiModel.findMany({
       where: {
+        isActive: true,
         OR: [
           { provider: providerKey },
           { provider: providerParam.toUpperCase() },
@@ -317,32 +310,16 @@ export async function GET(req: NextRequest) {
     });
 
     for (const m of dbList) {
-      if (m.isActive) {
-        customDbModels.push({ id: m.modelId, name: m.name });
-      } else {
-        inactiveSet.add(m.modelId.toLowerCase());
-      }
+      customDbModels.push({ id: m.modelId, name: m.name });
     }
   } catch {}
-
-  // Merge unique by model ID, excluding inactive models
-  const seen = new Set<string>();
-  const merged: { id: string; name: string }[] = [];
-
-  for (const m of [...customDbModels, ...catalogList]) {
-    const lower = m.id.toLowerCase();
-    if (!inactiveSet.has(lower) && !seen.has(lower)) {
-      seen.add(lower);
-      merged.push(m);
-    }
-  }
 
   return NextResponse.json({
     success: true,
     provider: providerKey,
-    models: merged,
-    source: customDbModels.length > 0 ? "DATABASE_MERGED" : "CATALOG",
-    count: merged.length,
+    models: customDbModels,
+    source: "DATABASE",
+    count: customDbModels.length,
   });
 }
 
@@ -415,22 +392,13 @@ export async function DELETE(req: NextRequest) {
     const providerMeta = findProviderBySlugOrId(providerParam);
     const providerKey = (providerMeta ? providerMeta.id : providerParam).toUpperCase().trim();
 
-    // Mark as inactive in AiModel (upsert so even preset models are persisted as inactive)
-    await prisma.aiModel.upsert({
+    // Delete from AiModel
+    await prisma.aiModel.deleteMany({
       where: { modelId: cleanModelId },
-      create: {
-        modelId: cleanModelId,
-        name: cleanModelId,
-        provider: providerKey || "CUSTOM",
-        promptCost: 0,
-        completionCost: 0,
-        contextWindow: "128k",
-        isActive: false,
-      },
-      update: {
-        isActive: false,
-      },
     });
+
+    const { invalidateModelsCache } = await import("@/lib/models-cache");
+    invalidateModelsCache();
 
     return NextResponse.json({
       success: true,

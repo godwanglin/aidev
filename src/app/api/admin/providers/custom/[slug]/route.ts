@@ -6,7 +6,11 @@ import {
   getCustomProviderBySlug,
   saveCustomProvider,
   deleteCustomProvider,
+  invalidateCustomProvidersCache,
 } from "@/lib/custom-providers";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -31,7 +35,7 @@ export async function GET(
     }
 
     const { slug } = await params;
-    const provider = await getCustomProviderBySlug(slug);
+    const provider = await getCustomProviderBySlug(slug, true);
     if (!provider) {
       return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
     }
@@ -42,6 +46,7 @@ export async function GET(
         OR: [
           { provider: providerKey },
           { provider: provider.slug.toUpperCase() },
+          { provider: provider.slug },
           { provider: "CUSTOM", baseUrl: provider.baseUrl },
         ],
       },
@@ -65,11 +70,18 @@ export async function GET(
       };
     });
 
-    return NextResponse.json({
-      success: true,
-      provider,
-      connections,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        provider,
+        connections,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed to fetch custom provider" },
@@ -93,7 +105,7 @@ export async function PUT(
     }
 
     const { slug } = await params;
-    const existing = await getCustomProviderBySlug(slug);
+    const existing = await getCustomProviderBySlug(slug, true);
     if (!existing) {
       return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
     }
@@ -112,10 +124,19 @@ export async function PUT(
       createdAt: existing.createdAt,
     });
 
-    return NextResponse.json({
-      success: true,
-      provider: updated,
-    });
+    invalidateCustomProvidersCache();
+
+    return NextResponse.json(
+      {
+        success: true,
+        provider: updated,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed to update custom provider" },
@@ -139,7 +160,7 @@ export async function DELETE(
     }
 
     const { slug } = await params;
-    const existing = await getCustomProviderBySlug(slug);
+    const existing = await getCustomProviderBySlug(slug, true);
     if (!existing) {
       return NextResponse.json({ error: "Custom provider not found" }, { status: 404 });
     }
@@ -152,22 +173,38 @@ export async function DELETE(
         OR: [
           { provider: providerKey },
           { provider: existing.slug.toUpperCase() },
+          { provider: existing.slug },
+          { provider: "CUSTOM", baseUrl: existing.baseUrl },
         ],
       },
     });
 
     // 2. Delete all models associated with this custom provider
     await prisma.aiModel.deleteMany({
-      where: { provider: providerKey },
+      where: {
+        OR: [
+          { provider: providerKey },
+          { provider: existing.slug.toUpperCase() },
+          { provider: existing.slug },
+        ],
+      },
     });
 
     // 3. Remove from custom providers registry
     await deleteCustomProvider(slug);
+    invalidateCustomProvidersCache();
 
-    return NextResponse.json({
-      success: true,
-      message: `Custom provider ${existing.name} deleted successfully`,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        message: `Custom provider ${existing.name} deleted successfully`,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed to delete custom provider" },

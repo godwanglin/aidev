@@ -218,9 +218,10 @@ export default function ProviderDetailPage() {
   async function fetchConnections() {
     setLoading(true);
     try {
+      const ts = Date.now();
       // Only check custom provider if this slug is NOT in the built-in catalog (avoids unnecessary 404 for codex, antigravity, etc.)
       if (!catalogItem) {
-        const cpRes = await fetch(`/api/admin/providers/custom/${providerSlug}`);
+        const cpRes = await fetch(`/api/admin/providers/custom/${providerSlug}?_t=${ts}`, { cache: "no-store" });
         if (cpRes.ok) {
           const cpJson = await cpRes.json();
           if (cpJson.success && cpJson.provider) {
@@ -238,7 +239,7 @@ export default function ProviderDetailPage() {
       }
 
       setIsCustomProvider(false);
-      const res = await fetch("/api/admin/providers");
+      const res = await fetch(`/api/admin/providers?_t=${ts}`, { cache: "no-store" });
       const json = await res.json();
       if (json.connections) {
         const matching = json.connections.filter(
@@ -429,7 +430,7 @@ export default function ProviderDetailPage() {
       });
       const json = await res.json();
       if (json.success) {
-        router.push("/admin/providers");
+        window.location.href = "/admin/providers";
       } else {
         setError(json.error || "Gagal menghapus custom provider.");
       }

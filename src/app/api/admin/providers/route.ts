@@ -5,6 +5,9 @@ import { maskApiKey, decryptCredential, encryptCredential } from "@/lib/crypto";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
 import { parseCookieInput, verifyAndFetchChatGptSession } from "@/lib/web-providers/chatgpt-session";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 async function verifyAdmin() {
   const user = await getCurrentUser();
   if (!user || (user.role !== "ADMIN" && user.email !== "admin@devportal.local")) return null;
@@ -53,10 +56,17 @@ export async function GET(req: NextRequest) {
       if (conn.syncStatus === 'LOW_QUOTA' || (conn.cooldownUntil && new Date(conn.cooldownUntil) > new Date())) stats.rateLimited++;
     }
 
-    return NextResponse.json({
-      connections: processedConnections,
-      summary: Array.from(summaryMap.values())
-    });
+    return NextResponse.json(
+      {
+        connections: processedConnections,
+        summary: Array.from(summaryMap.values())
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

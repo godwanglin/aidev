@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { encryptCredential } from "@/lib/crypto";
-import { getCustomProviders, saveCustomProvider } from "@/lib/custom-providers";
+import { getCustomProviders, saveCustomProvider, invalidateCustomProvidersCache } from "@/lib/custom-providers";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -15,7 +18,7 @@ export async function GET(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const customProviders = await getCustomProviders();
+    const customProviders = await getCustomProviders(true);
     const connections = await prisma.providerConnection.findMany({
       where: {
         OR: [
@@ -45,10 +48,17 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({
-      success: true,
-      customProviders: enriched,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        customProviders: enriched,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to fetch custom providers" }, { status: 500 });
   }
@@ -133,12 +143,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    invalidateCustomProvidersCache();
+
     return NextResponse.json(
       {
         success: true,
         provider: savedProvider,
       },
-      { status: 201 }
+      {
+        status: 201,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
     );
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to create custom provider" }, { status: 500 });

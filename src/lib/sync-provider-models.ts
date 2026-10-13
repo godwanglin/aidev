@@ -1,13 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { SHARED_PROVIDER_MODELS } from "@/lib/oauth/config";
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { decryptCredential } from "@/lib/crypto";
+import { getCustomProviders } from "@/lib/custom-providers";
+import { findProviderBySlugOrId } from "@/lib/oauth/config";
 
 /**
- * Syncs real models ONLY for providers that currently have active connections in the system.
- * Providers that haven't been connected/used yet are completely excluded.
- * Also purges obsolete / non-existent providers (Gemini CLI, OpenCode, IPEENK)
- * and unifies duplicate OPENAI into OPENAI_CODEX.
+ * Syncs real models ONLY from active upstream provider endpoints currently connected in the system.
+ * Zero hardcoded models, zero artificial virtualization. Transparent upstream sync.
  */
 export async function syncProviderModelsToDatabase(): Promise<{
   synced: number;
@@ -18,43 +17,33 @@ export async function syncProviderModelsToDatabase(): Promise<{
   let errors = 0;
   const models: string[] = [];
 
-  // 1. Fetch configured provider connections to know strictly which providers are in the system
-  const connections = await prisma.providerConnection.findMany();
-
-  const connectedProviders = new Set<string>();
-  for (const conn of connections) {
-    const p = conn.provider.toUpperCase().trim();
-    if (p === "OPENAI") {
-      connectedProviders.add("OPENAI_CODEX");
-    } else {
-      connectedProviders.add(p);
-    }
-  }
-
-  // 2. Purge obsolete providers, duplicate OPENAI, and any models for providers that are NOT connected
+  // 1. Bersihkan seluruh AiModel di database sebelum sync ulang
   try {
-    // Delete obsolete providers + any provider not in connectedProviders
-    await prisma.aiModel.deleteMany({
-      where: {
-        OR: [
-          { provider: { notIn: Array.from(connectedProviders) } },
-          { provider: { in: ["GEMINI_CLI", "OPENCODE_FREE", "OPENCODE", "IPEENK", "OPENAI"] } },
-          { modelId: { in: ["default-model", "deepseek/deepseek-v4-pro-max", "deepseek/deepseek-chat", "deepseek/deepseek-reasoner"] } },
-        ],
-      },
-    });
-
-    // Unify any remaining legacy "OPENAI" provider models into "OPENAI_CODEX"
-    await prisma.aiModel.updateMany({
-      where: { provider: "OPENAI" },
-      data: { provider: "OPENAI_CODEX" },
-    });
+    await prisma.aiModel.deleteMany({});
   } catch (err) {
-    console.error("Error during obsolete model cleanup:", err);
+    console.error("Error during aiModel cleanup:", err);
   }
 
-  // 3. Live sync for connected providers with baseUrl (DeepSeek, Ollama Cloud, OpenRouter, etc.)
-  const liveSyncedProviders = new Set<string>();
+  // 2. Ambil seluruh koneksi provider yang aktif
+  const connections = await prisma.providerConnection.findMany({
+    where: { isActive: true },
+    orderBy: { priority: "asc" },
+  });
+
+  const customProviders = await getCustomProviders(true);
+  const customProviderMap = new Map(
+    customProviders.map((cp) => [
+      `CUSTOM_${cp.slug.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`,
+      cp,
+    ])
+  );
+  for (const cp of customProviders) {
+    customProviderMap.set(cp.slug.toUpperCase(), cp);
+    customProviderMap.set(cp.name.toUpperCase(), cp);
+  }
+
+  // 3. Live sync langsung dari endpoint upstream
+  const processedEndpoints = new Set<string>();
 
   for (const conn of connections) {
     let token = "";
@@ -68,30 +57,66 @@ export async function syncProviderModelsToDatabase(): Promise<{
       } catch {}
     }
 
-    if (conn.baseUrl && token) {
-      const baseUrl = conn.baseUrl.replace(/\/+$/, "");
+    const rawProv = conn.provider.toUpperCase().trim();
+    const provUpper = rawProv === "OPENAI" ? "OPENAI_CODEX" : rawProv;
+    const customProv = customProviderMap.get(provUpper) || customProviderMap.get(rawProv);
+    const catalogItem = findProviderBySlugOrId(rawProv);
+
+    const baseUrlRaw = conn.baseUrl || customProv?.baseUrl || "";
+    if (baseUrlRaw && token) {
+      let baseUrl = baseUrlRaw.replace(/\/+$/, "");
+      if (baseUrl.endsWith("/chat/completions")) {
+        baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
+      } else if (baseUrl.endsWith("/messages")) {
+        baseUrl = baseUrl.replace(/\/messages$/, "");
+      }
       const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : `${baseUrl}/models`;
+      const endpointKey = `${modelsUrl}::${token.slice(0, 15)}`;
+
+      if (processedEndpoints.has(endpointKey)) {
+        continue;
+      }
+      processedEndpoints.add(endpointKey);
 
       try {
-        const res = await fetch(modelsUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const isAnthropic =
+          conn.compatibility === "ANTHROPIC" ||
+          customProv?.compatibility === "ANTHROPIC" ||
+          customProv?.apiType === "Anthropic Messages";
+
+        const headers: Record<string, string> = {};
+        if (isAnthropic) {
+          headers["x-api-key"] = token;
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+
+        const res = await fetch(modelsUrl, { headers });
 
         if (res.ok) {
           const data = await res.json();
-          const list = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+          const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : Array.isArray(data) ? data : [];
 
           if (list.length > 0) {
-            const rawProv = conn.provider.toUpperCase().trim();
-            const provUpper = rawProv === "OPENAI" ? "OPENAI_CODEX" : rawProv;
             let prefix = "";
-            if (provUpper === "DEEPSEEK") prefix = "deepseek/";
-            else if (provUpper === "OLLAMA_CLOUD" || provUpper === "OLLAMA") prefix = "ollama/";
-            else if (provUpper === "OPENROUTER") prefix = "or/";
-            else if (provUpper === "OPENAI_CODEX") prefix = "cx/";
-            else if (provUpper === "GEMINI" || provUpper === "GOOGLE") prefix = "gem/";
+            if (customProv?.prefix) {
+              prefix = `${customProv.prefix.replace(/\/+$/, "")}/`;
+            } else if (provUpper === "DEEPSEEK") {
+              prefix = "deepseek/";
+            } else if (provUpper === "OLLAMA_CLOUD" || provUpper === "OLLAMA") {
+              prefix = "ollama/";
+            } else if (provUpper === "OPENROUTER") {
+              prefix = "or/";
+            } else if (provUpper === "OPENAI_CODEX") {
+              prefix = "cx/";
+            } else if (provUpper === "GEMINI" || provUpper === "GOOGLE") {
+              prefix = "gem/";
+            } else if (catalogItem?.defaultPrefix) {
+              prefix = catalogItem.defaultPrefix;
+            }
 
-            // For OpenRouter: filter free models only
+            // Untuk OpenRouter: ambil model free jika ada filter atau seluruh list
             let itemsToSync = list;
             if (provUpper === "OPENROUTER") {
               const freeList = list.filter(
@@ -117,6 +142,7 @@ export async function syncProviderModelsToDatabase(): Promise<{
                   update: {
                     name: rawName,
                     provider: provUpper,
+                    isActive: true,
                   },
                   create: {
                     modelId,
@@ -135,61 +161,57 @@ export async function syncProviderModelsToDatabase(): Promise<{
                 errors++;
               }
             }
-
-            liveSyncedProviders.add(provUpper);
           }
         }
       } catch (err) {
         console.error(`Live models sync failed for ${conn.provider}:`, err);
       }
     }
-  }
 
-  // 4. Upsert predefined models from SHARED_PROVIDER_MODELS ONLY for connected providers
-  for (const [providerKey, modelList] of Object.entries(SHARED_PROVIDER_MODELS)) {
-    // STRICT FILTER: If this provider is NOT currently connected, DO NOT import it!
-    if (!connectedProviders.has(providerKey)) {
-      continue;
-    }
-
-    // If already synced live, skip static fallback unless it's Antigravity or Codex
-    if (liveSyncedProviders.has(providerKey) && providerKey !== "ANTIGRAVITY" && providerKey !== "OPENAI_CODEX") {
-      continue;
-    }
-
-    for (const item of modelList) {
+    // ChatGPT Web session models pull jika ada cookie
+    if (provUpper === "CHATGPT_WEB" && token) {
       try {
-        await prisma.aiModel.upsert({
-          where: { modelId: item.id },
-          update: {
-            name: item.name,
-            provider: providerKey,
-          },
-          create: {
-            modelId: item.id,
-            name: item.name,
-            provider: providerKey,
-            contextWindow: item.id.includes("flash") || item.id.includes("gemini") ? "1M" : "128k",
-            promptCost: 0,
-            completionCost: 0,
-            isActive: true,
-            isPublic: true,
+        const res = await fetch("https://chatgpt.com/backend-api/models", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+            Accept: "application/json",
+            Referer: "https://chatgpt.com/",
           },
         });
-        synced++;
-        models.push(item.id);
-      } catch (err) {
-        errors++;
-        console.error(`Failed to sync model ${item.id}:`, err);
-      }
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.models)) {
+            const prefix = "gptweb/";
+            for (const m of data.models) {
+              const modelId = !m.slug.includes("/") ? `${prefix}${m.slug}` : m.slug;
+              const rawName = m.title || m.slug;
+              try {
+                await prisma.aiModel.upsert({
+                  where: { modelId },
+                  update: { name: rawName, provider: provUpper, isActive: true },
+                  create: {
+                    modelId,
+                    name: rawName,
+                    provider: provUpper,
+                    contextWindow: "128k",
+                    promptCost: 0,
+                    completionCost: 0,
+                    isActive: true,
+                    isPublic: true,
+                  },
+                });
+                synced++;
+                models.push(modelId);
+              } catch {
+                errors++;
+              }
+            }
+          }
+        }
+      } catch {}
     }
   }
-
-  // 5. Fix Combo Model Items to point to real existing models
-  await prisma.comboModelItem.updateMany({
-    where: { modelId: "deepseek/deepseek-v4-pro-max" },
-    data: { modelId: "deepseek/deepseek-flash" },
-  });
 
   invalidateModelsCache();
   return { synced, errors, models };

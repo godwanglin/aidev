@@ -59,9 +59,10 @@ export default function ProvidersCatalogPage() {
   async function fetchAll() {
     setLoading(true);
     try {
+      const timestamp = Date.now();
       const [connRes, cpRes] = await Promise.all([
-        fetch("/api/admin/providers"),
-        fetch("/api/admin/providers/custom"),
+        fetch(`/api/admin/providers?_t=${timestamp}`, { cache: "no-store" }),
+        fetch(`/api/admin/providers/custom?_t=${timestamp}`, { cache: "no-store" }),
       ]);
       const [connJson, cpJson] = await Promise.all([
         connRes.json(),

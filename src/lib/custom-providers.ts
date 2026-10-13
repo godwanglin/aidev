@@ -26,9 +26,9 @@ export function invalidateCustomProvidersCache() {
 /**
  * Get all custom providers registered in the system (with memory caching)
  */
-export async function getCustomProviders(): Promise<CustomProvider[]> {
+export async function getCustomProviders(forceFresh = false): Promise<CustomProvider[]> {
   const now = Date.now();
-  if (customProvidersCache && cacheExpiresAt > now) {
+  if (!forceFresh && customProvidersCache && cacheExpiresAt > now) {
     return customProvidersCache;
   }
 
@@ -93,8 +93,8 @@ export async function matchCustomProviderForModel(modelName?: string | null): Pr
 /**
  * Find a custom provider by slug or ID
  */
-export async function getCustomProviderBySlug(slugOrId: string): Promise<CustomProvider | null> {
-  const providers = await getCustomProviders();
+export async function getCustomProviderBySlug(slugOrId: string, forceFresh = false): Promise<CustomProvider | null> {
+  const providers = await getCustomProviders(forceFresh);
   const search = slugOrId.toLowerCase().trim();
   return (
     providers.find(
@@ -113,7 +113,8 @@ export async function getCustomProviderBySlug(slugOrId: string): Promise<CustomP
 export async function saveCustomProvider(
   provider: Omit<CustomProvider, "createdAt" | "id"> & { id?: string; createdAt?: string }
 ): Promise<CustomProvider> {
-  const providers = await getCustomProviders();
+  // Always fetch fresh list to prevent overwriting with stale data
+  const providers = await getCustomProviders(true);
   const cleanSlug = provider.slug
     .toLowerCase()
     .trim()
@@ -163,6 +164,10 @@ export async function saveCustomProvider(
     },
   });
 
+  // Immediately synchronize memory cache so subsequent queries reflect changes instantly
+  customProvidersCache = updatedList;
+  cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+
   return fullProvider;
 }
 
@@ -170,7 +175,8 @@ export async function saveCustomProvider(
  * Delete a custom provider from the registry
  */
 export async function deleteCustomProvider(slugOrId: string): Promise<boolean> {
-  const providers = await getCustomProviders();
+  // Always fetch fresh list to prevent stale filtering
+  const providers = await getCustomProviders(true);
   const search = slugOrId.toLowerCase().trim();
 
   const filtered = providers.filter(
@@ -194,6 +200,10 @@ export async function deleteCustomProvider(slugOrId: string): Promise<boolean> {
       discordWebhookUrl: JSON.stringify(filtered),
     },
   });
+
+  // Immediately synchronize memory cache so subsequent queries reflect deletion instantly
+  customProvidersCache = filtered;
+  cacheExpiresAt = Date.now() + CACHE_TTL_MS;
 
   return true;
 }

@@ -91,40 +91,6 @@ export function resolveCodexModelAndEffort(rawModel: string): { model: string; i
   if (baseModel === "default" || baseModel === "default-model" || !baseModel) {
     return { model: "gpt-5.5", inferredEffort };
   }
-  if (
-    baseModel === "gpt-6.1" ||
-    baseModel === "gpt-6.1-sol" ||
-    baseModel === "codex-6.1" ||
-    baseModel === "codex-6.1-sol" ||
-    baseModel === "codex 6.1 sol" ||
-    baseModel === "codex 6.1" ||
-    baseModel === "6.1-sol" ||
-    baseModel === "6.1 sol" ||
-    baseModel === "6.1"
-  ) {
-    return { model: "gpt-6.1-sol", inferredEffort };
-  }
-  if (baseModel === "gpt-6-astra" || baseModel === "6-astra" || baseModel === "astra") {
-    return { model: "gpt-6-astra", inferredEffort };
-  }
-  if (baseModel === "gpt-6-sol" || baseModel === "6-sol") {
-    return { model: "gpt-6-sol", inferredEffort };
-  }
-  if (baseModel === "gpt-6-luna" || baseModel === "6-luna") {
-    return { model: "gpt-6-luna", inferredEffort };
-  }
-  if (baseModel === "gpt-5.6-sol" || baseModel === "5.6-sol") {
-    return { model: "gpt-5.6-sol", inferredEffort };
-  }
-  if (baseModel === "gpt-5.6-terra" || baseModel === "5.6-terra") {
-    return { model: "gpt-5.6-terra", inferredEffort };
-  }
-  if (baseModel === "gpt-5.6-luna" || baseModel === "5.6-luna") {
-    return { model: "gpt-5.6-luna", inferredEffort };
-  }
-  if (baseModel === "gpt-5.5" || baseModel === "5.5") {
-    return { model: "gpt-5.5", inferredEffort };
-  }
 
   return { model: baseModel || clean, inferredEffort };
 }

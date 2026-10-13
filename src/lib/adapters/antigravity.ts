@@ -464,63 +464,10 @@ const ANTIGRAVITY_PROMPT_REWRITES = [
  * Maps model alias to internal Antigravity wire model name
  */
 function mapToWireModel(model: string, effortStr?: string): string {
-  let lower = model.toLowerCase().replace(/^(ag\/|antigravity\/|google-ag\/|gem\/|gemini\/|gcli\/|gemini-cli\/|google\/)/i, "");
-  // Normalize dot version notation, e.g. 5.5 -> 5-5
-  lower = lower.replace(/\./g, "-");
-
-  // --- Claude Opus Handling ---
-  if (lower.includes("claude") && (lower.includes("opus") || lower.includes("opus-5-5") || lower.includes("opus-4-6"))) {
-    if (lower.endsWith("-low")) return "claude-opus-5-5-low";
-    if (lower.endsWith("-medium")) return "claude-opus-5-5-medium";
-    if (lower.endsWith("-high")) return "claude-opus-5-5-high";
-
-    if (effortStr === "low" || effortStr === "minimal") return "claude-opus-5-5-low";
-    if (effortStr === "medium") return "claude-opus-5-5-medium";
-    return "claude-opus-5-5-high";
-  }
-
-  // --- Claude Sonnet Handling ---
-  if (lower.includes("claude") && (lower.includes("sonnet") || lower.includes("3-7-sonnet"))) {
-    if (lower.endsWith("-low")) return "claude-sonnet-5-5-low";
-    if (lower.endsWith("-medium")) return "claude-sonnet-5-5-medium";
-    if (lower.endsWith("-high")) return "claude-sonnet-5-5-high";
-
-    if (effortStr === "low" || effortStr === "minimal") return "claude-sonnet-5-5-low";
-    if (effortStr === "medium") return "claude-sonnet-5-5-medium";
-    return "claude-sonnet-5-5-high";
-  }
-
-  // Generic Claude fallback
-  if (lower.startsWith("claude-")) return lower;
-
-  if (lower.startsWith("gemini-3.8-flash-high")) return "gemini-3.8-flash-high";
-  if (lower.startsWith("gemini-3.8-flash-medium")) return "gemini-3.8-flash-medium";
-  if (lower.startsWith("gemini-3.8-flash-low")) return "gemini-3.8-flash-low";
-  if (lower.startsWith("gemini-3.8-flash")) return "gemini-3.8-flash-medium";
-  if (lower.startsWith("gemini-3.7-flash-high")) return "gemini-3.7-flash-high";
-  if (lower.startsWith("gemini-3.7-flash-medium")) return "gemini-3.7-flash-medium";
-  if (lower.startsWith("gemini-3.7-flash-low")) return "gemini-3.7-flash-low";
-  if (lower.startsWith("gemini-3.7-flash")) return "gemini-3.7-flash-medium";
-  if (lower.startsWith("gemini-3.6-flash-high")) return "gemini-3.6-flash-high";
-  if (lower.startsWith("gemini-3.6-flash-medium")) return "gemini-3.6-flash-medium";
-  if (lower.startsWith("gemini-3.6-flash-low")) return "gemini-3.6-flash-low";
-  if (lower.startsWith("gemini-3.5-flash-high")) return "gemini-3.5-flash-high";
-  if (lower.startsWith("gemini-3.5-flash-medium")) return "gemini-3.5-flash-medium";
-  if (lower.startsWith("gemini-3.5-flash-low")) return "gemini-3.5-flash-low";
-  if (lower.startsWith("gemini-3.5-flash-extra-low")) return "gemini-3.5-flash-extra-low";
-  if (lower.startsWith("gemini-3.5-flash-lite")) return "gemini-3.5-flash-lite";
-  if (lower.startsWith("gemini-3-flash-agent")) return "gemini-3-flash-agent";
-  if (lower.startsWith("gemini-3-flash")) return "gemini-3-flash";
-  if (lower.startsWith("gemini-3.1-pro-high")) return "gemini-3.1-pro-high";
-  if (lower.startsWith("gemini-3.1-pro-low")) return "gemini-3.1-pro-low";
-  if (lower.startsWith("gemini-pro-agent")) return "gemini-pro-agent";
-  if (lower.startsWith("gpt-oss-120b-medium")) return "gpt-oss-120b-medium";
-  if (lower.startsWith("gemini-2.5-flash")) return "gemini-2.5-flash";
-  if (lower.startsWith("gemini-2.5-pro")) return "gemini-2.5-pro";
-  if (lower.startsWith("gemini-2.0-flash")) return "gemini-2.0-flash";
-  if (lower.startsWith("gemini-1.5-flash")) return "gemini-1.5-flash";
-  if (lower.startsWith("gemini-1.5-pro")) return "gemini-1.5-pro";
-  return lower || "gemini-2.5-flash";
+  const clean = model
+    .replace(/^(ag\/|antigravity\/|google-ag\/|gem\/|gemini\/|gcli\/|gemini-cli\/|google\/)/i, "")
+    .trim();
+  return clean || "gemini-2.5-flash";
 }
 
 /**
