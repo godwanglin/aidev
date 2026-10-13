@@ -62,6 +62,16 @@ export async function syncProviderModelsToDatabase(): Promise<{
     const customProv = customProviderMap.get(provUpper) || customProviderMap.get(rawProv);
     const catalogItem = findProviderBySlugOrId(rawProv);
 
+    // Skip student-premium and gemini-cli from entering AiModel
+    if (
+      provUpper === "CUSTOM_STUDENT_PREMIUM" ||
+      provUpper === "STUDENT_PREMIUM" ||
+      provUpper === "GEMINI_CLI" ||
+      customProv?.slug === "student-premium"
+    ) {
+      continue;
+    }
+
     const baseUrlRaw = conn.baseUrl || customProv?.baseUrl || "";
     if (baseUrlRaw && token) {
       let baseUrl = baseUrlRaw.replace(/\/+$/, "");

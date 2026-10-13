@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const providerParam = searchParams.get("provider") || "";
   const doPull = searchParams.get("pull") === "true";
-  const persistImport = searchParams.get("persist") === "true" || doPull;
+  const persistImport = searchParams.get("persist") === "true";
 
   if (!providerParam) {
     return NextResponse.json({ error: "Provider is required" }, { status: 400 });
@@ -73,17 +73,30 @@ export async function GET(req: NextRequest) {
           const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : `${baseUrl}/models`;
 
           try {
-            const res = await fetch(modelsUrl, {
-              headers: token ? { Authorization: `Bearer ${token}` } : {},
-            });
+            const isAnthropic =
+              conn?.compatibility === "ANTHROPIC" ||
+              customProvider?.compatibility === "ANTHROPIC" ||
+              customProvider?.apiType === "Anthropic Messages";
+
+            const headers: Record<string, string> = {};
+            if (token) {
+              if (isAnthropic) {
+                headers["x-api-key"] = token;
+                headers["anthropic-version"] = "2023-06-01";
+              } else {
+                headers["Authorization"] = `Bearer ${token}`;
+              }
+            }
+
+            const res = await fetch(modelsUrl, { headers });
             if (res.ok) {
               const data = await res.json();
-              const list = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+              const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : Array.isArray(data) ? data : [];
               if (list.length > 0) {
                 const prefix = providerMeta?.defaultPrefix || (customProvider?.prefix ? `${customProvider.prefix.replace(/\/+$/, "")}/` : "");
                 const liveModels = list.map((m: any) => {
                   const rawId = typeof m === "string" ? m : m.id || m.name;
-                  const rawName = typeof m === "string" ? m : m.name || m.id;
+                  const rawName = typeof m === "string" ? m : m.displayName || m.name || m.id;
                   const finalId = prefix && !rawId.includes("/") ? `${prefix}${rawId}` : rawId;
                   return {
                     id: finalId,
@@ -91,25 +104,27 @@ export async function GET(req: NextRequest) {
                   };
                 });
 
-                // Otomatis simpan ke database agar setelah reload tidak hilang
-                for (const m of liveModels) {
-                  await prisma.aiModel.upsert({
-                    where: { modelId: m.id },
-                    create: {
-                      modelId: m.id,
-                      name: m.name,
-                      provider: providerKey,
-                      promptCost: 0,
-                      completionCost: 0,
-                      contextWindow: "128k",
-                      isActive: true,
-                    },
-                    update: {
-                      name: m.name,
-                      provider: providerKey,
-                      isActive: true,
-                    },
-                  }).catch(() => null);
+                // Hanya simpan ke database jika persist diminta
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "128k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
                 }
 
                 return NextResponse.json({
@@ -161,24 +176,26 @@ export async function GET(req: NextRequest) {
                   }))
                   .sort((a: any, b: any) => a.id.localeCompare(b.id));
 
-                for (const m of liveModels) {
-                  await prisma.aiModel.upsert({
-                    where: { modelId: m.id },
-                    create: {
-                      modelId: m.id,
-                      name: m.name,
-                      provider: providerKey,
-                      promptCost: 0,
-                      completionCost: 0,
-                      contextWindow: "128k",
-                      isActive: true,
-                    },
-                    update: {
-                      name: m.name,
-                      provider: providerKey,
-                      isActive: true,
-                    },
-                  }).catch(() => null);
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "128k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
                 }
 
                 return NextResponse.json({
@@ -209,24 +226,26 @@ export async function GET(req: NextRequest) {
                   }))
                   .sort((a: any, b: any) => a.id.localeCompare(b.id));
 
-                for (const m of liveModels) {
-                  await prisma.aiModel.upsert({
-                    where: { modelId: m.id },
-                    create: {
-                      modelId: m.id,
-                      name: m.name,
-                      provider: providerKey,
-                      promptCost: 0,
-                      completionCost: 0,
-                      contextWindow: "128k",
-                      isActive: true,
-                    },
-                    update: {
-                      name: m.name,
-                      provider: providerKey,
-                      isActive: true,
-                    },
-                  }).catch(() => null);
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "128k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
                 }
 
                 return NextResponse.json({
@@ -260,24 +279,26 @@ export async function GET(req: NextRequest) {
                 name: m.name || m.id,
               }));
 
-              for (const m of liveModels) {
-                await prisma.aiModel.upsert({
-                  where: { modelId: m.id },
-                  create: {
-                    modelId: m.id,
-                    name: m.name,
-                    provider: providerKey,
-                    promptCost: 0,
-                    completionCost: 0,
-                    contextWindow: "128k",
-                    isActive: true,
-                  },
-                  update: {
-                    name: m.name,
-                    provider: providerKey,
-                    isActive: true,
-                  },
-                }).catch(() => null);
+              if (persistImport) {
+                for (const m of liveModels) {
+                  await prisma.aiModel.upsert({
+                    where: { modelId: m.id },
+                    create: {
+                      modelId: m.id,
+                      name: m.name,
+                      provider: providerKey,
+                      promptCost: 0,
+                      completionCost: 0,
+                      contextWindow: "128k",
+                      isActive: true,
+                    },
+                    update: {
+                      name: m.name,
+                      provider: providerKey,
+                      isActive: true,
+                    },
+                  }).catch(() => null);
+                }
               }
 
               return NextResponse.json({

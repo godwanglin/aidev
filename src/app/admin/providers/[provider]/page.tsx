@@ -30,6 +30,7 @@ import {
   Cookie,
   Clock,
   RotateCcw,
+  Search,
 } from "lucide-react";
 import {
   findProviderBySlugOrId,
@@ -205,6 +206,47 @@ export default function ProviderDetailPage() {
   // Quick inline model add & import from /models
   const [quickModelId, setQuickModelId] = useState("");
   const [isImportingModels, setIsImportingModels] = useState(false);
+
+  // Upstream Live Models Inspection Popup State
+  const [showFetchPopup, setShowFetchPopup] = useState(false);
+  const [isFetchingUpstream, setIsFetchingUpstream] = useState(false);
+  const [upstreamFetchedModels, setUpstreamFetchedModels] = useState<{ id: string; name: string }[]>([]);
+  const [upstreamSearch, setUpstreamSearch] = useState("");
+  const [copiedUpstreamId, setCopiedUpstreamId] = useState<string | null>(null);
+
+  const filteredUpstreamModels = useMemo(() => {
+    if (!upstreamSearch.trim()) return upstreamFetchedModels;
+    const q = upstreamSearch.toLowerCase().trim();
+    return upstreamFetchedModels.filter(
+      (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+    );
+  }, [upstreamFetchedModels, upstreamSearch]);
+
+  async function handleFetchUpstreamModels() {
+    setIsFetchingUpstream(true);
+    setError("");
+    try {
+      const ts = Date.now();
+      const res = await fetch(
+        `/api/admin/providers/models?provider=${encodeURIComponent(providerSlug)}&pull=true&persist=false&_t=${ts}`,
+        { cache: "no-store" }
+      );
+      const json = await res.json();
+      if (json.success && Array.isArray(json.models)) {
+        setUpstreamFetchedModels(json.models);
+        setUpstreamSearch("");
+        setShowFetchPopup(true);
+      } else {
+        setError(json.error || "Gagal mengambil model dari upstream.");
+        setTimeout(() => setError(""), 4000);
+      }
+    } catch {
+      setError("Terjadi kesalahan jaringan saat mengambil model upstream.");
+      setTimeout(() => setError(""), 4000);
+    } finally {
+      setIsFetchingUpstream(false);
+    }
+  }
 
   // Normalized model routing prefix for this provider (e.g. "ag/", "cx/", "cc/", or "ipeenk/")
   const providerPrefix = useMemo(() => {
@@ -1223,6 +1265,17 @@ export default function ProviderDetailPage() {
               <div className="detail-header-actions">
                 <button
                   type="button"
+                  onClick={handleFetchUpstreamModels}
+                  disabled={isFetchingUpstream}
+                  className="btn-pull-models"
+                  style={{ background: "rgba(59, 130, 246, 0.1)", borderColor: "rgba(59, 130, 246, 0.3)", color: "var(--color-primary-400, #60a5fa)" }}
+                  title="Fetch model dari upstream secara live untuk melihat list model ID dalam popup (tanpa simpan ke database)"
+                >
+                  <Eye size={12} className={isFetchingUpstream ? "animate-spin" : ""} />
+                  <span>{isFetchingUpstream ? "Fetching Upstream..." : "Fetch Model (Preview)"}</span>
+                </button>
+                <button
+                  type="button"
                   className="btn-pull-models"
                   onClick={() => fetchModels(true)}
                   disabled={isPullingModels}
@@ -1291,6 +1344,16 @@ export default function ProviderDetailPage() {
                     >
                       <Plus size={12} />
                       <span>Add</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFetchUpstreamModels}
+                      disabled={isFetchingUpstream}
+                      className="control btn-inline text-xs font-semibold px-3.5 py-1.5 flex items-center gap-1.5"
+                      title="Fetch model dari upstream secara live untuk melihat list model ID tanpa disimpan ke database"
+                    >
+                      <Eye size={12} className={isFetchingUpstream ? "animate-spin" : ""} />
+                      <span>{isFetchingUpstream ? "Fetching Upstream..." : "Fetch Model (Preview)"}</span>
                     </button>
                     {(!customProviderData?.compatibility || customProviderData?.compatibility === "OPENAI") && (
                       <button
@@ -1841,6 +1904,149 @@ export default function ProviderDetailPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================================
+            MODAL: UPSTREAM MODELS INSPECTION (PREVIEW LIVE, NO PERSIST)
+            =================================================================== */}
+        {showFetchPopup && (
+          <div className="modal-overlay">
+            <div className="modal-card" style={{ maxWidth: "680px", width: "95%", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+              <div className="modal-header">
+                <div className="modal-title-wrap">
+                  <Eye size={16} className="text-blue shrink-0" />
+                  <div>
+                    <h3 className="modal-title-text">
+                      Live Upstream Models ({providerMeta.name})
+                    </h3>
+                    <p className="text-[11px] text-muted font-normal mt-0.5">
+                      Preview live dari upstream. Model di sini <strong>TIDAK disimpan ke database</strong>.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFetchPopup(false)}
+                  className="btn-close"
+                  title="Tutup"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Search Bar & Summary */}
+              <div className="px-4 py-3 border-b border-[var(--border)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[var(--surface-subtle)]">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+                  <input
+                    type="text"
+                    value={upstreamSearch}
+                    onChange={(e) => setUpstreamSearch(e.target.value)}
+                    placeholder="Cari nama atau model ID..."
+                    className="control w-full text-xs pl-8 py-1.5"
+                    autoFocus
+                  />
+                  {upstreamSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setUpstreamSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-white text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted shrink-0 text-right">
+                  Ditemukan: <span className="font-semibold text-[var(--foreground)]">{filteredUpstreamModels.length}</span> dari {upstreamFetchedModels.length} model
+                </div>
+              </div>
+
+              {/* Models List */}
+              <div className="p-3 overflow-y-auto flex-1 space-y-2" style={{ maxHeight: "420px" }}>
+                {filteredUpstreamModels.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-muted">
+                    {upstreamSearch ? "Tidak ada model yang cocok dengan pencarian." : "Tidak ada model upstream yang ditemukan."}
+                  </div>
+                ) : (
+                  filteredUpstreamModels.map((m) => {
+                    const isCopied = copiedUpstreamId === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-base)] hover:border-[var(--border-hover)] transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-semibold text-[var(--foreground)] truncate select-all">
+                              {m.id}
+                            </span>
+                          </div>
+                          {m.name && m.name !== m.id && (
+                            <div className="text-[11px] text-muted truncate mt-0.5">
+                              {m.name}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isCustomProvider && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickModelId(m.id);
+                                setShowFetchPopup(false);
+                              }}
+                              className="control text-[11px] font-medium px-2 py-1 flex items-center gap-1 hover:text-primary"
+                              title="Gunakan model ID ini ke form input"
+                            >
+                              <Plus size={11} />
+                              <span>Gunakan</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(m.id);
+                              setCopiedUpstreamId(m.id);
+                              setTimeout(() => setCopiedUpstreamId(null), 2000);
+                            }}
+                            className="control text-[11px] font-medium px-2 py-1 flex items-center gap-1"
+                            title="Salin Model ID ke clipboard"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check size={11} className="text-green-500" />
+                                <span className="text-green-500">Tersalin</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={11} />
+                                <span>Salin ID</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="modal-actions flex items-center justify-between p-3 border-t border-[var(--border)] bg-[var(--surface-subtle)]">
+                <span className="text-[11px] text-muted">
+                  Tips: Klik <strong>Salin ID</strong> atau <strong>Gunakan</strong> untuk menambah model secara manual.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowFetchPopup(false)}
+                  className="control text-xs px-3 py-1.5"
+                >
+                  Tutup
+                </button>
+              </div>
             </div>
           </div>
         )}
