@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { X, Download, Copy, Check, FileJson, RefreshCw, AlertCircle, Terminal } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { X, Download, Copy, Check, FileJson, RefreshCw, AlertCircle, Terminal, Layers } from "lucide-react";
 
 interface ExportCredentialsModalProps {
   isOpen: boolean;
@@ -25,7 +25,14 @@ export default function ExportCredentialsModal({
   onDownloadFile,
 }: ExportCredentialsModalProps) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"FULL" | "CODEX_AUTH">("FULL");
+  const [activeTab, setActiveTab] = useState<"NINEROUTER" | "FULL" | "CODEX_AUTH">("NINEROUTER");
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab("NINEROUTER");
+      setCopied(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -35,7 +42,15 @@ export default function ExportCredentialsModal({
 
   let displayedJson = "";
   if (exportData) {
-    if (activeTab === "CODEX_AUTH" && hasCodexAuth) {
+    if (activeTab === "NINEROUTER") {
+      const nineRouterAccounts = (exportData.accounts || []).map((a: any) => ({
+        accessToken: a.accessToken || a.apiKey || "",
+        refreshToken: a.refreshToken || "",
+        idToken: a.idToken || a.id_token || "",
+        email: a.accountEmail || a.email || "",
+      }));
+      displayedJson = JSON.stringify(nineRouterAccounts, null, 2);
+    } else if (activeTab === "CODEX_AUTH" && hasCodexAuth) {
       const codexAccounts = exportData.accounts.filter((a: any) => Boolean(a.codex_auth_json));
       if (codexAccounts.length === 1) {
         displayedJson = JSON.stringify(codexAccounts[0].codex_auth_json, null, 2);
@@ -74,11 +89,15 @@ export default function ExportCredentialsModal({
     const link = document.createElement("a");
     link.href = url;
 
-    if (activeTab === "CODEX_AUTH") {
+    const safeSlug = (providerSlug || "provider").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const dateStr = new Date().toISOString().slice(0, 10);
+
+    if (activeTab === "NINEROUTER") {
+      link.download = `9router-${safeSlug}-${dateStr}.json`;
+    } else if (activeTab === "CODEX_AUTH") {
       link.download = "auth.json";
     } else {
-      const safeSlug = (providerSlug || "provider").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-      link.download = `aidev-${safeSlug}-export-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `aidev-${safeSlug}-export-${dateStr}.json`;
     }
 
     document.body.appendChild(link);
@@ -136,23 +155,33 @@ export default function ExportCredentialsModal({
               <div className="export-modal-alert">
                 <span className="export-alert-dot" />
                 <span>
-                  {activeTab === "CODEX_AUTH"
+                  {activeTab === "NINEROUTER"
+                    ? "Format array JSON standar 9Router ([ { accessToken, refreshToken, idToken, email } ]). Siap langsung di-copy atau di-paste ke Bulk Add Accounts di 9Router."
+                    : activeTab === "CODEX_AUTH"
                     ? "Format ini siap langsung di-paste ke file ~/.codex/auth.json (lengkap dengan access_token, refresh_token, id_token, dan account_id)."
                     : "File JSON ini berisi kredensial (API Key / OAuth Access, Refresh & ID Token) asli yang sudah didekripsi. Simpan di tempat yang aman."}
                 </span>
               </div>
 
-              {/* Tabs (if Codex provider) */}
-              {hasCodexAuth && (
-                <div className="export-tabs-bar">
-                  <button
-                    type="button"
-                    className={`export-tab-btn ${activeTab === "FULL" ? "active" : ""}`}
-                    onClick={() => setActiveTab("FULL")}
-                  >
-                    <FileJson size={13} />
-                    <span>Full Export JSON</span>
-                  </button>
+              {/* Tabs */}
+              <div className="export-tabs-bar">
+                <button
+                  type="button"
+                  className={`export-tab-btn ${activeTab === "NINEROUTER" ? "active" : ""}`}
+                  onClick={() => setActiveTab("NINEROUTER")}
+                >
+                  <Layers size={13} />
+                  <span>9Router Format</span>
+                </button>
+                <button
+                  type="button"
+                  className={`export-tab-btn ${activeTab === "FULL" ? "active" : ""}`}
+                  onClick={() => setActiveTab("FULL")}
+                >
+                  <FileJson size={13} />
+                  <span>Full Export JSON</span>
+                </button>
+                {hasCodexAuth && (
                   <button
                     type="button"
                     className={`export-tab-btn ${activeTab === "CODEX_AUTH" ? "active" : ""}`}
@@ -161,14 +190,18 @@ export default function ExportCredentialsModal({
                     <Terminal size={13} />
                     <span>~/.codex/auth.json (Codex CLI)</span>
                   </button>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* JSON Code Viewer */}
               <div className="export-json-container">
                 <div className="export-json-top-bar">
                   <span className="export-json-label">
-                    {activeTab === "CODEX_AUTH" ? "~/.codex/auth.json" : "json payload"}
+                    {activeTab === "NINEROUTER"
+                      ? "9router accounts array"
+                      : activeTab === "CODEX_AUTH"
+                      ? "~/.codex/auth.json"
+                      : "json payload"}
                   </span>
                   <button
                     type="button"
@@ -214,7 +247,11 @@ export default function ExportCredentialsModal({
           >
             <Download size={14} />
             <span>
-              {activeTab === "CODEX_AUTH" ? "Download auth.json" : "Download .json"}
+              {activeTab === "NINEROUTER"
+                ? "Download 9router.json"
+                : activeTab === "CODEX_AUTH"
+                ? "Download auth.json"
+                : "Download .json"}
             </span>
           </button>
         </div>

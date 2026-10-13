@@ -24,6 +24,18 @@ function extractChatGptAccountId(token: string): string | null {
   return null;
 }
 
+function extractEmailFromJwt(token?: string | null): string | null {
+  if (!token || !token.includes(".")) return null;
+  try {
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+      return payload.email || payload["https://api.openai.com/profile"]?.email || null;
+    }
+  } catch {}
+  return null;
+}
+
 async function processConnectionsForExport(connections: any[]) {
   return await Promise.all(
     connections.map(async (conn) => {
@@ -87,6 +99,11 @@ async function processConnectionsForExport(connections: any[]) {
       }
 
       const chatgptAccountId = accessToken ? extractChatGptAccountId(accessToken) : null;
+      const extractedEmail =
+        conn.accountEmail ||
+        extractEmailFromJwt(idToken) ||
+        extractEmailFromJwt(accessToken) ||
+        null;
 
       let customHeadersParsed: any = null;
       if (conn.customHeaders) {
@@ -110,12 +127,19 @@ async function processConnectionsForExport(connections: any[]) {
             }
           : null;
 
+      const nineRouterAccount = {
+        accessToken: accessToken || apiKey || "",
+        refreshToken: refreshToken || "",
+        idToken: idToken || "",
+        email: extractedEmail || "",
+      };
+
       return {
         id: conn.id,
         name: conn.name,
         provider: conn.provider,
         authType: conn.authType,
-        accountEmail: conn.accountEmail || null,
+        accountEmail: extractedEmail,
         tier: conn.tier || null,
         isActive: conn.isActive,
         priority: conn.priority,
@@ -145,13 +169,15 @@ async function processConnectionsForExport(connections: any[]) {
                 refresh_token: refreshToken,
                 id_token: idToken || null,
                 account_id: chatgptAccountId,
-                email: conn.accountEmail || null,
+                email: extractedEmail,
                 expires_at: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
               },
             }
           : {}),
         // Exact ~/.codex/auth.json format for drop-in use
         ...(codexAuthJson ? { codex_auth_json: codexAuthJson } : {}),
+        // Standard 9Router import format item
+        nine_router_format: nineRouterAccount,
       };
     })
   );
@@ -169,6 +195,7 @@ export async function GET(req: NextRequest) {
     const singleId = searchParams.get("id");
     const idsParam = searchParams.get("ids");
     const download = searchParams.get("download") === "true";
+    const format = (searchParams.get("format") || "").toLowerCase();
 
     let idsList: string[] = [];
     if (singleId) {
@@ -209,6 +236,31 @@ export async function GET(req: NextRequest) {
 
     const exportedAccounts = await processConnectionsForExport(connections);
 
+    const nineRouterAccounts = exportedAccounts.map((a: any) => ({
+      accessToken: a.accessToken || a.apiKey || "",
+      refreshToken: a.refreshToken || "",
+      idToken: a.idToken || a.id_token || "",
+      email: a.accountEmail || "",
+    }));
+
+    if (format === "9router" || format === "ninerouter") {
+      if (download) {
+        const safeSlug = (providerParam || connections[0].provider || "accounts")
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, "-");
+        const filename = `9router-${safeSlug}-${new Date().toISOString().slice(0, 10)}.json`;
+
+        return new NextResponse(JSON.stringify(nineRouterAccounts, null, 2), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
+        });
+      }
+      return NextResponse.json(nineRouterAccounts);
+    }
+
     const exportPayload = {
       success: true,
       exportedAt: new Date().toISOString(),
@@ -216,6 +268,7 @@ export async function GET(req: NextRequest) {
       providerName,
       count: exportedAccounts.length,
       accounts: exportedAccounts,
+      nineRouterFormat: nineRouterAccounts,
     };
 
     if (download) {
@@ -250,7 +303,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { provider, id, ids } = body;
+    const { provider, id, ids, format } = body;
 
     let idsList: string[] = [];
     if (id) {
@@ -291,6 +344,17 @@ export async function POST(req: NextRequest) {
 
     const exportedAccounts = await processConnectionsForExport(connections);
 
+    const nineRouterAccounts = exportedAccounts.map((a: any) => ({
+      accessToken: a.accessToken || a.apiKey || "",
+      refreshToken: a.refreshToken || "",
+      idToken: a.idToken || a.id_token || "",
+      email: a.accountEmail || "",
+    }));
+
+    if (format === "9router" || format === "ninerouter") {
+      return NextResponse.json(nineRouterAccounts);
+    }
+
     return NextResponse.json({
       success: true,
       exportedAt: new Date().toISOString(),
@@ -298,6 +362,7 @@ export async function POST(req: NextRequest) {
       providerName,
       count: exportedAccounts.length,
       accounts: exportedAccounts,
+      nineRouterFormat: nineRouterAccounts,
     });
   } catch (error: any) {
     return NextResponse.json(
