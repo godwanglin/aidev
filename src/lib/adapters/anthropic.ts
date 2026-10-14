@@ -441,10 +441,20 @@ export async function transformChatResponseToAnthropic(
     let finishReason: string | null = null;
     let promptTokens = 20;
     let completionTokens = 0;
+    let pingInterval: NodeJS.Timeout | null = null;
+    let lastEventTime = Date.now();
 
     const emitEvent = (controller: TransformStreamDefaultController, eventType: string, data: any) => {
+      lastEventTime = Date.now();
       const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
       controller.enqueue(encoder.encode(payload));
+    };
+
+    const emitPing = (controller: TransformStreamDefaultController) => {
+      try {
+        lastEventTime = Date.now();
+        controller.enqueue(encoder.encode(`event: ping\ndata: {"type": "ping"}\n\n`));
+      } catch {}
     };
 
     const stopThinkingBlock = (controller: TransformStreamDefaultController) => {
@@ -480,6 +490,14 @@ export async function transformChatResponseToAnthropic(
     };
 
     const transformStream = new TransformStream({
+      start(controller) {
+        // Send periodic Anthropic ping events to prevent client timeout during model reasoning
+        pingInterval = setInterval(() => {
+          if (Date.now() - lastEventTime >= 7000) {
+            emitPing(controller);
+          }
+        }, 5000);
+      },
       transform(chunk, controller) {
         buffer += decoder.decode(chunk, { stream: true });
         const lines = buffer.split("\n");
@@ -487,6 +505,13 @@ export async function transformChatResponseToAnthropic(
 
         for (const line of lines) {
           const trimmed = line.trim();
+          if (trimmed.startsWith(":")) {
+            // Forward keep-alive comments from upstream proxy as Anthropic ping
+            if (Date.now() - lastEventTime >= 4000) {
+              emitPing(controller);
+            }
+            continue;
+          }
           if (!trimmed.startsWith("data: ")) continue;
           if (trimmed === "data: [DONE]") {
             continue;
@@ -713,6 +738,11 @@ export async function transformChatResponseToAnthropic(
             },
           });
           emitEvent(controller, "message_stop", { type: "message_stop" });
+        }
+
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = null;
         }
       },
     });

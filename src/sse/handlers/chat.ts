@@ -1251,16 +1251,20 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         let generatedChars = 0;
         let firstTokenTime: number | null = null;
         let accumulatedResponseText = "";
+        let streamBuffer = "";
 
         const transformStream = new TransformStream({
           transform(chunk, controller) {
             let chunkToEnqueue = chunk;
             try {
-              const text = new TextDecoder().decode(chunk);
+              const text = new TextDecoder().decode(chunk, { stream: true });
               if (accumulatedResponseText.length < 50000) {
                 accumulatedResponseText += text;
               }
-              const lines = text.split("\n");
+              streamBuffer += text;
+              const lines = streamBuffer.split("\n");
+              streamBuffer = lines.pop() || "";
+
               let modified = false;
               const newLines = lines.map((line) => {
                 const trimmed = line.trim();
@@ -1270,12 +1274,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
                 try {
                   const data = JSON.parse(jsonStr);
                   const delta =
+                    (typeof data.delta === "string" ? data.delta : "") ||
+                    (typeof data.text === "string" ? data.text : "") ||
                     data.choices?.[0]?.delta?.content ||
                     data.choices?.[0]?.delta?.reasoning_content ||
                     data.choices?.[0]?.delta?.reasoning ||
                     data.delta?.text ||
-                    data.text ||
-                    (data.type?.includes("delta") ? data.delta?.content || data.delta?.text : "") ||
+                    data.delta?.content ||
+                    (data.type?.includes("delta") ? (typeof data.delta === "string" ? data.delta : data.delta?.content || data.delta?.text) : "") ||
                     "";
                   if (delta) {
                     generatedChars += delta.length;
@@ -1311,22 +1317,44 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               });
 
               if (modified) {
-                chunkToEnqueue = new TextEncoder().encode(newLines.join("\n"));
+                chunkToEnqueue = new TextEncoder().encode(newLines.join("\n") + "\n");
               }
             } catch {}
             controller.enqueue(chunkToEnqueue);
           },
           flush() {
+            if (streamBuffer.trim()) {
+              try {
+                const trimmed = streamBuffer.trim();
+                const jsonStr = trimmed.startsWith("data: ") ? trimmed.slice(6) : trimmed;
+                const data = JSON.parse(jsonStr);
+                const delta =
+                  (typeof data.delta === "string" ? data.delta : "") ||
+                  (typeof data.text === "string" ? data.text : "") ||
+                  data.choices?.[0]?.delta?.content ||
+                  data.choices?.[0]?.delta?.reasoning_content ||
+                  data.delta?.text ||
+                  "";
+                if (delta) generatedChars += delta.length;
+                const usage = data.usage || data.response?.usage;
+                if (usage) {
+                  promptTokens = usage.input_tokens || usage.prompt_tokens || promptTokens;
+                  completionTokens = usage.output_tokens || usage.completion_tokens || completionTokens;
+                  totalTokens = usage.total_tokens || (promptTokens + completionTokens);
+                }
+              } catch {}
+            }
+
             const durationMs = Date.now() - startTime;
             const ttftMs = firstTokenTime ? firstTokenTime - startTime : undefined;
-            const hasGenerated = completionTokens > 0 || generatedChars > 0;
+            const hasGenerated = completionTokens > 0 || generatedChars > 0 || Boolean(firstTokenTime) || (accumulatedResponseText.length > 50 && upstreamRes.ok);
             const upstreamPromptTokens = promptTokens || Math.max(1, (estimatedPromptTokens || 10) - tokensSavedRtk);
             const upstreamCompletionTokens = hasGenerated ? (completionTokens || Math.max(1, Math.ceil(generatedChars / 3.5))) : 0;
             const upstreamTotalTokens = totalTokens || (upstreamPromptTokens + upstreamCompletionTokens);
 
             const clientPromptTokens = upstreamPromptTokens + tokensSavedRtk;
             const clientTotalTokens = upstreamTotalTokens + tokensSavedRtk;
-            const finalStatus = hasGenerated ? upstreamRes.status : 502;
+            const finalStatus = (upstreamRes.status === 200 && (hasGenerated || upstreamRes.ok)) ? 200 : (hasGenerated ? upstreamRes.status : 502);
 
             if (finalStatus < 400) {
               adminLogger.done({
