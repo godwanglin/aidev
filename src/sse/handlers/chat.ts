@@ -8,7 +8,11 @@ import { normalizeRequestBody } from "@/lib/model-normalizer";
 import { isAntigravityProvider, dispatchAntigravityChat } from "@/lib/adapters/antigravity";
 import { isCodexProvider, dispatchCodexChat, dispatchCodexResponsesDirect } from "@/lib/adapters/codex";
 import { isChatGptWebProvider, dispatchChatGptWebChat } from "@/lib/adapters/chatgpt-web";
-import { convertAnthropicToOpenAiMessages, transformChatResponseToAnthropic } from "@/lib/adapters/anthropic";
+import {
+  convertAnthropicToOpenAiMessages,
+  convertAnthropicToOpenAiPayload,
+  transformChatResponseToAnthropic,
+} from "@/lib/adapters/anthropic";
 import {
   convertResponsesToChatMessages,
   convertResponsesToolsToChatTools,
@@ -382,20 +386,11 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
     if (subPath === "messages") {
       if (!isCustomProvider) {
-        const openAiMessages = convertAnthropicToOpenAiMessages(parsedCandidateJson);
-        const chatPayload = {
-          ...parsedCandidateJson,
-          model: candidateModel,
-          messages: openAiMessages,
-          stream: clientWantsStream,
-        };
-        delete chatPayload.system;
-
-        // Ensure token headroom for reasoning
-        if (!chatPayload.max_tokens || chatPayload.max_tokens < MIN_REASONING_HEADROOM) {
-          chatPayload.max_tokens = MIN_REASONING_HEADROOM;
-        }
-
+        const chatPayload = convertAnthropicToOpenAiPayload(
+          parsedCandidateJson,
+          candidateModel,
+          clientWantsStream
+        );
         candidateChatBody = JSON.stringify(chatPayload);
         parsedCandidateJson = chatPayload;
       }
@@ -707,6 +702,10 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           });
           markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
           continue;
+        }
+
+        if (subPath === "messages") {
+          return await transformChatResponseToAnthropic(codexResponse, { model: clientRequestedModel, clientWantsStream });
         }
 
         return codexResponse;
