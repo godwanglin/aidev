@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { maskApiKey, decryptCredential, encryptCredential } from "@/lib/crypto";
 import { parseCookieInput, verifyAndFetchChatGptSession } from "@/lib/web-providers/chatgpt-session";
+import { invalidateProviderConnectionsCache } from "@/lib/router";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -93,6 +94,26 @@ export async function PUT(
       updateData.cooldownUntil = body.cooldownUntil ? new Date(body.cooldownUntil) : null;
     }
 
+    if (body.customModels !== undefined) {
+      if (Array.isArray(body.customModels)) {
+        updateData.customModels = JSON.stringify(body.customModels.map((m: any) => String(m).trim()).filter(Boolean));
+      } else if (typeof body.customModels === "string") {
+        updateData.customModels = body.customModels.trim() || null;
+      } else {
+        updateData.customModels = null;
+      }
+    }
+
+    if (body.disallowedModels !== undefined) {
+      if (Array.isArray(body.disallowedModels)) {
+        updateData.disallowedModels = JSON.stringify(body.disallowedModels.map((m: any) => String(m).trim()).filter(Boolean));
+      } else if (typeof body.disallowedModels === "string") {
+        updateData.disallowedModels = body.disallowedModels.trim() || null;
+      } else {
+        updateData.disallowedModels = null;
+      }
+    }
+
     // Handle updating API key or cookie credential if provided
     if (body.apiKey && typeof body.apiKey === "string" && body.apiKey.trim().length > 0) {
       const rawKey = body.apiKey.trim();
@@ -128,6 +149,8 @@ export async function PUT(
       data: updateData,
     });
 
+    invalidateProviderConnectionsCache(existing.provider);
+
     return NextResponse.json({
       success: true,
       connection: updated,
@@ -159,6 +182,8 @@ export async function DELETE(
     await prisma.providerConnection.delete({
       where: { id },
     });
+
+    invalidateProviderConnectionsCache(existing.provider);
 
     return NextResponse.json({
       success: true,

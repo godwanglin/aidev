@@ -230,6 +230,10 @@ model ProviderConnection {
   weight        Int       @default(1) // Round-Robin weight
   cooldownUntil DateTime? // Temporary cooldown if 429 occurs
 
+  // Model Access Controls (Whitelist & Blacklist)
+  customModels     String?   @db.Text
+  disallowedModels String?   @db.Text
+
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   upstreamLogs UpstreamLog[]

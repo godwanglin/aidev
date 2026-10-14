@@ -25,6 +25,69 @@ export interface RouteContext {
   excludeConnectionIds?: string[];
 }
 
+interface CachedProviderConnections {
+  connections: any[];
+  cachedAt: number;
+}
+const providerConnectionsCache = new Map<string, CachedProviderConnections>();
+const CONNECTIONS_CACHE_TTL_MS = 5000; // 5 seconds in-memory cache
+
+export function invalidateProviderConnectionsCache(provider?: string) {
+  if (provider) {
+    providerConnectionsCache.delete(provider.toUpperCase());
+    providerConnectionsCache.delete('ALL');
+  } else {
+    providerConnectionsCache.clear();
+  }
+}
+
+export function parseModelList(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map(String).map((s) => s.trim()).filter(Boolean);
+      } catch {}
+    }
+    return trimmed.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+export function normalizeModelName(m: string): string {
+  if (!m) return "";
+  return m
+    .toLowerCase()
+    .trim()
+    .replace(/^(ag|cx|cc|gem|copilot|cb|kimi|or|qwen|groq|mistral|together|gptweb|chatgpt|deepseek|ollama)\//i, "");
+}
+
+export function matchesModel(configuredModel: string, targetModel?: string): boolean {
+  if (!targetModel || !configuredModel) return false;
+  const rawConf = configuredModel.toLowerCase().trim();
+  const rawTarget = targetModel.toLowerCase().trim();
+  if (rawConf === rawTarget) return true;
+
+  const normConf = normalizeModelName(rawConf);
+  const normTarget = normalizeModelName(rawTarget);
+  return normConf === normTarget;
+}
+
+function matchesAnyTargetModel(
+  configuredModel: string,
+  contextModel?: string,
+  cleanModel?: string,
+  upstreamModel?: string
+): boolean {
+  if (contextModel && matchesModel(configuredModel, contextModel)) return true;
+  if (cleanModel && matchesModel(configuredModel, cleanModel)) return true;
+  if (upstreamModel && matchesModel(configuredModel, upstreamModel)) return true;
+  return false;
+}
+
 const roundRobinCounters = new Map<string, number>();
 
 export async function resolveUpstreamConnection(context: RouteContext): Promise<RouteResult | null> {
@@ -85,19 +148,6 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     strategy = (globalConfig as any)?.defaultRoutingStrategy || 'SMART_FALLBACK';
   }
 
-  const whereClause: any = {
-    isActive: true,
-    syncStatus: { not: 'EXHAUSTED' },
-    OR: [
-      { cooldownUntil: null },
-      { cooldownUntil: { lt: new Date() } }
-    ]
-  };
-
-  if (context.excludeConnectionIds && context.excludeConnectionIds.length > 0) {
-    whereClause.id = { notIn: context.excludeConnectionIds };
-  }
-
   if (!targetProvider) {
     // Never silently route unknown models to an arbitrary provider connection!
     // Multi-model fallbacks are strictly reserved for explicit Combo Models.
@@ -106,64 +156,88 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
 
   const isCustom = targetProvider.startsWith('CUSTOM_');
   const customSlug = isCustom ? targetProvider.replace(/^CUSTOM_/, '') : '';
-  whereClause.provider = {
-    in: [
-      targetProvider,
-      targetProvider.toUpperCase(),
-      ...(isCustom ? [customSlug, customSlug.toLowerCase(), 'CUSTOM'] : []),
-      ...(targetProvider === 'OPENAI' || targetProvider === 'OPENAI_CODEX' || targetProvider === 'CODEX' ? ['OPENAI_CODEX', 'OPENAI', 'CODEX'] : []),
-      ...(targetProvider === 'CHATGPT_WEB' || targetProvider === 'CHATGPT' || targetProvider === 'GPTWEB' ? ['CHATGPT_WEB', 'CHATGPT', 'GPTWEB'] : []),
-      ...(targetProvider === 'GOOGLE' || targetProvider === 'GEMINI' || targetProvider === 'GEMINI_CLI' ? ['GEMINI', 'GOOGLE', 'GEMINI_CLI'] : []),
-      ...(targetProvider === 'ANTIGRAVITY' ? ['ANTIGRAVITY'] : []),
-      ...(targetProvider === 'DEEPSEEK' ? ['DEEPSEEK'] : []),
-      ...(targetProvider === 'ALIBABA' || targetProvider === 'QWEN' ? ['ALIBABA', 'QWEN', 'DASHSCOPE'] : []),
-      ...(targetProvider === 'OLLAMA_CLOUD' || targetProvider === 'OLLAMA' ? ['OLLAMA_CLOUD', 'OLLAMA'] : []),
-      ...(targetProvider === 'GROQ' ? ['GROQ'] : []),
-      ...(targetProvider === 'MISTRAL' ? ['MISTRAL'] : []),
-      ...(targetProvider === 'TOGETHER' ? ['TOGETHER'] : []),
-    ]
-  };
+  const providerInList = [
+    targetProvider,
+    targetProvider.toUpperCase(),
+    ...(isCustom ? [customSlug, customSlug.toLowerCase(), 'CUSTOM'] : []),
+    ...(targetProvider === 'OPENAI' || targetProvider === 'OPENAI_CODEX' || targetProvider === 'CODEX' ? ['OPENAI_CODEX', 'OPENAI', 'CODEX'] : []),
+    ...(targetProvider === 'CHATGPT_WEB' || targetProvider === 'CHATGPT' || targetProvider === 'GPTWEB' ? ['CHATGPT_WEB', 'CHATGPT', 'GPTWEB'] : []),
+    ...(targetProvider === 'GOOGLE' || targetProvider === 'GEMINI' || targetProvider === 'GEMINI_CLI' ? ['GEMINI', 'GOOGLE', 'GEMINI_CLI'] : []),
+    ...(targetProvider === 'ANTIGRAVITY' ? ['ANTIGRAVITY'] : []),
+    ...(targetProvider === 'DEEPSEEK' ? ['DEEPSEEK'] : []),
+    ...(targetProvider === 'ALIBABA' || targetProvider === 'QWEN' ? ['ALIBABA', 'QWEN', 'DASHSCOPE'] : []),
+    ...(targetProvider === 'OLLAMA_CLOUD' || targetProvider === 'OLLAMA' ? ['OLLAMA_CLOUD', 'OLLAMA'] : []),
+    ...(targetProvider === 'GROQ' ? ['GROQ'] : []),
+    ...(targetProvider === 'MISTRAL' ? ['MISTRAL'] : []),
+    ...(targetProvider === 'TOGETHER' ? ['TOGETHER'] : []),
+  ];
 
-  const connections = await prisma.providerConnection.findMany({
-    where: whereClause,
-    orderBy: [
-      { priority: 'asc' },
-      { weight: 'desc' }
-    ]
-  });
+  // 1. In-memory cache scan: fetch all active connections for this provider set
+  const cacheKey = providerInList.slice().sort().join(',');
+  const now = Date.now();
+  const cachedEntry = providerConnectionsCache.get(cacheKey);
+  let allActiveConnections: any[] = [];
 
-
-  if (connections.length === 0) {
-    if (targetProvider) {
-      // If all connections are in temporary cooldown, find active connections ignoring cooldown,
-      // ordered by earliest cooldown expiry so the request doesn't drop to an incompatible fallback provider!
-      const fallbackWhereClause: any = {
+  if (cachedEntry && (now - cachedEntry.cachedAt) < CONNECTIONS_CACHE_TTL_MS) {
+    allActiveConnections = cachedEntry.connections;
+  } else {
+    allActiveConnections = await prisma.providerConnection.findMany({
+      where: {
         isActive: true,
-        provider: whereClause.provider,
-      };
-      if (context.excludeConnectionIds && context.excludeConnectionIds.length > 0) {
-        fallbackWhereClause.id = { notIn: context.excludeConnectionIds };
-      }
-      const fallbackConnections = await prisma.providerConnection.findMany({
-        where: fallbackWhereClause,
-        orderBy: [
-          { cooldownUntil: 'asc' },
-          { priority: 'asc' },
-          { weight: 'desc' }
-        ]
-      });
-      if (fallbackConnections.length > 0) {
-        const nonExhausted = fallbackConnections.filter(c => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
-        const eligible = nonExhausted.length > 0 ? nonExhausted : fallbackConnections;
-        return await buildRouteResult(eligible[0], norm);
-      }
-    }
+        provider: { in: providerInList },
+      },
+      orderBy: [
+        { priority: 'asc' },
+        { weight: 'desc' }
+      ]
+    });
+    providerConnectionsCache.set(cacheKey, {
+      connections: allActiveConnections,
+      cachedAt: now,
+    });
+  }
+
+  if (allActiveConnections.length === 0) {
     return null;
   }
 
+  // 2. In-memory filter for current request session:
+  // Exclude connections specified in excludeConnectionIds (e.g. from failover/retries)
+  const excludedIds = new Set(context.excludeConnectionIds || []);
+  const pool = allActiveConnections.filter((c) => !excludedIds.has(c.id));
+
+  // Filter out temporary cooldown unless all are in cooldown
+  const nowTime = Date.now();
+  const nonCooldown = pool.filter((c) => !c.cooldownUntil || new Date(c.cooldownUntil).getTime() <= nowTime);
+  const activePool = nonCooldown.length > 0 ? nonCooldown : pool;
+
+  // 3. Blacklist filter (Disallowed Models):
+  // If an account blocks this model, remove it completely from primary and fallback candidate pool
+  const nonBlocked = activePool.filter((conn) => {
+    const disallowed = parseModelList(conn.disallowedModels);
+    if (disallowed.length === 0) return true;
+    return !disallowed.some((dm) => matchesAnyTargetModel(dm, context.model, norm.cleanModel, norm.upstreamModel));
+  });
+
+  // 4. Whitelist filter (Exclusive Custom Models):
+  // Check if ANY active connection explicitly registered this model in customModels
+  const whitelisted = nonBlocked.filter((conn) => {
+    const custom = parseModelList(conn.customModels);
+    if (custom.length === 0) return false;
+    return custom.some((cm) => matchesAnyTargetModel(cm, context.model, norm.cleanModel, norm.upstreamModel));
+  });
+
+  // If at least 1 account claims this model -> ONLY route to those whitelisted accounts!
+  // If NO account claims this model -> Skip whitelist rule, keep all non-blocked accounts!
+  const candidatePool = whitelisted.length > 0 ? whitelisted : nonBlocked;
+
   // Filter out EXHAUSTED and FAILED connections if other healthy connections are available
-  const nonExhausted = connections.filter(c => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
-  const eligibleConnections = nonExhausted.length > 0 ? nonExhausted : connections;
+  const healthy = candidatePool.filter((c) => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
+  const eligibleConnections = healthy.length > 0 ? healthy : candidatePool;
+
+  if (eligibleConnections.length === 0) {
+    return null;
+  }
 
   let selectedConnection = eligibleConnections[0];
 

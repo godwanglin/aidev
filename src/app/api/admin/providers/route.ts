@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { maskApiKey, decryptCredential, encryptCredential } from "@/lib/crypto";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
 import { parseCookieInput, verifyAndFetchChatGptSession } from "@/lib/web-providers/chatgpt-session";
+import { invalidateProviderConnectionsCache } from "@/lib/router";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -157,6 +158,8 @@ export async function POST(req: NextRequest) {
         syncStatus: 'NORMAL'
       }
     });
+
+    invalidateProviderConnectionsCache(providerKey);
 
     return NextResponse.json(newConnection, { status: 201 });
   } catch (error: any) {

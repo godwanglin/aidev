@@ -1130,6 +1130,53 @@ export default function ProviderDetailPage() {
                             <span className="priority-chip">
                               #{conn.priority || idx + 1}
                             </span>
+                            {(() => {
+                              let customCount = 0;
+                              let disallowCount = 0;
+                              let customTitles = "";
+                              let disallowTitles = "";
+
+                              try {
+                                const cList = Array.isArray(conn.customModels)
+                                  ? conn.customModels
+                                  : typeof conn.customModels === "string" && conn.customModels.startsWith("[")
+                                  ? JSON.parse(conn.customModels)
+                                  : [];
+                                customCount = cList.length;
+                                customTitles = cList.join(", ");
+                              } catch {}
+
+                              try {
+                                const dList = Array.isArray(conn.disallowedModels)
+                                  ? conn.disallowedModels
+                                  : typeof conn.disallowedModels === "string" && conn.disallowedModels.startsWith("[")
+                                  ? JSON.parse(conn.disallowedModels)
+                                  : [];
+                                disallowCount = dList.length;
+                                disallowTitles = dList.join(", ");
+                              } catch {}
+
+                              return (
+                                <>
+                                  {customCount > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 border border-emerald-800 text-emerald-300 cursor-help"
+                                      title={`Model Khusus: ${customTitles}`}
+                                    >
+                                      +{customCount} Khusus
+                                    </span>
+                                  )}
+                                  {disallowCount > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-rose-950/60 border border-rose-800 text-rose-300 cursor-help"
+                                      title={`Model Diblokir: ${disallowTitles}`}
+                                    >
+                                      -{disallowCount} Blokir
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
