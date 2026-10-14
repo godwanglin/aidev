@@ -52,7 +52,10 @@ export function parseModelList(raw: any): string[] {
         if (Array.isArray(parsed)) return parsed.map(String).map((s) => s.trim()).filter(Boolean);
       } catch {}
     }
-    return trimmed.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+    return trimmed
+      .split(/[,\n]+/)
+      .map((s) => s.trim().replace(/^["'\s\[]+|["'\s\]]+$/g, ""))
+      .filter(Boolean);
   }
   return [];
 }
