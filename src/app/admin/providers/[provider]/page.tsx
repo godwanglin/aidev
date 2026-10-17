@@ -1868,8 +1868,8 @@ export default function ProviderDetailPage() {
             =================================================================== */}
         {showEditCustomModal && (
           <div className="modal-overlay">
-            <div className="modal-card" style={{ width: "480px" }}>
-              <div className="modal-header">
+            <div className="modal-card" style={{ width: "480px", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+              <div className="modal-header shrink-0">
                 <div className="modal-title-wrap">
                   <Bot size={15} className="text-blue shrink-0" />
                   <h3 className="modal-title-text">
@@ -1886,54 +1886,56 @@ export default function ProviderDetailPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveCustomProvider} className="p-1">
-                <div className="form-group mb-3">
-                  <label className="text-xs font-semibold mb-1 block">Provider Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="control w-full text-xs"
-                  />
+              <form onSubmit={handleSaveCustomProvider} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ overscrollBehavior: "contain" }}>
+                  <div className="form-group mb-3">
+                    <label className="text-xs font-semibold mb-1 block">Provider Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="control w-full text-xs"
+                    />
+                  </div>
+
+                  <div className="form-group mb-3">
+                    <label className="text-xs font-semibold mb-1 block">Prefix</label>
+                    <input
+                      type="text"
+                      value={editPrefix}
+                      onChange={(e) => setEditPrefix(e.target.value)}
+                      className="control w-full text-xs mono"
+                    />
+                  </div>
+
+                  <div className="form-group mb-3">
+                    <label className="text-xs font-semibold mb-1 block">API Type</label>
+                    <CustomDropdown
+                      size="md"
+                      width="100%"
+                      value={editApiType}
+                      onChange={(val) => setEditApiType(val as any)}
+                      options={[
+                        { value: "Chat Completions", label: "Chat Completions" },
+                        { value: "Anthropic Messages", label: "Anthropic Messages" },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="form-group mb-3">
+                    <label className="text-xs font-semibold mb-1 block">Base URL *</label>
+                    <input
+                      type="url"
+                      required
+                      value={editBaseUrl}
+                      onChange={(e) => setEditBaseUrl(e.target.value)}
+                      className="control w-full text-xs mono"
+                    />
+                  </div>
                 </div>
 
-                <div className="form-group mb-3">
-                  <label className="text-xs font-semibold mb-1 block">Prefix</label>
-                  <input
-                    type="text"
-                    value={editPrefix}
-                    onChange={(e) => setEditPrefix(e.target.value)}
-                    className="control w-full text-xs mono"
-                  />
-                </div>
-
-                <div className="form-group mb-3">
-                  <label className="text-xs font-semibold mb-1 block">API Type</label>
-                  <CustomDropdown
-                    size="md"
-                    width="100%"
-                    value={editApiType}
-                    onChange={(val) => setEditApiType(val as any)}
-                    options={[
-                      { value: "Chat Completions", label: "Chat Completions" },
-                      { value: "Anthropic Messages", label: "Anthropic Messages" },
-                    ]}
-                  />
-                </div>
-
-                <div className="form-group mb-3">
-                  <label className="text-xs font-semibold mb-1 block">Base URL *</label>
-                  <input
-                    type="url"
-                    required
-                    value={editBaseUrl}
-                    onChange={(e) => setEditBaseUrl(e.target.value)}
-                    className="control w-full text-xs mono"
-                  />
-                </div>
-
-                <div className="modal-actions flex justify-end gap-2 pt-3 border-t border-[var(--border)]">
+                <div className="modal-actions flex justify-end gap-2 p-3 border-t border-[var(--border)] bg-[var(--surface-subtle,#18181b)] shrink-0">
                   <button
                     type="button"
                     onClick={() => setShowEditCustomModal(false)}

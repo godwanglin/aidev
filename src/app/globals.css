@@ -4169,12 +4169,14 @@ select.control {
   justify-content: center;
   z-index: 1000;
   padding: 16px;
+  overflow-y: auto;
   animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .oauth-modal-card {
   width: 520px;
   max-width: 95vw;
+  max-height: 90vh;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -4183,6 +4185,7 @@ select.control {
   flex-direction: column;
   overflow: hidden;
   color: var(--ink);
+  margin: auto;
   animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -4258,6 +4261,9 @@ select.control {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .oauth-status-banner-light {
@@ -4949,6 +4955,7 @@ select.control {
   justify-content: center;
   z-index: 9999;
   padding: 16px;
+  overflow-y: auto;
   animation: fadeIn 0.15s ease;
 }
 
@@ -4965,6 +4972,7 @@ select.control {
   overflow: hidden;
   max-width: 95vw;
   color: var(--ink);
+  margin: auto;
   animation: scaleUp 0.15s ease;
 }
 

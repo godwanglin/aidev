@@ -151,9 +151,9 @@ export default function CustomProviderModal({
 
   return (
     <div className="modal-overlay">
-      <div className="modal-card" style={{ width: "500px", maxWidth: "94vw" }}>
+      <div className="modal-card" style={{ width: "500px", maxWidth: "94vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
         {/* Modal Header */}
-        <div className="modal-header">
+        <div className="modal-header shrink-0">
           <div className="modal-title-wrap">
             <Bot size={16} className="text-blue shrink-0" />
             <h3 className="modal-title-text">
@@ -174,13 +174,14 @@ export default function CustomProviderModal({
 
         {/* Error Alert */}
         {formError && (
-          <div className="login-error text-xs p-2.5 mb-3 flex items-center gap-2">
+          <div className="login-error text-xs p-2.5 mx-4 mt-3 flex items-center gap-2 shrink-0">
             <AlertCircle size={14} className="shrink-0 text-red" />
             <span>{formError}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="p-1">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ overscrollBehavior: "contain" }}>
           {/* 1. Name */}
           <div className="form-group mb-3">
             <label className="text-xs font-semibold mb-1 block">Provider Name *</label>
@@ -321,8 +322,10 @@ export default function CustomProviderModal({
             )}
           </div>
 
+          </div>
+
           {/* Modal Actions */}
-          <div className="modal-actions flex justify-end gap-2 pt-3 border-t border-[var(--border)]">
+          <div className="modal-actions flex justify-end gap-2 p-3 border-t border-[var(--border)] bg-[var(--surface-subtle,#18181b)] shrink-0">
             <button
               type="button"
               onClick={onClose}
