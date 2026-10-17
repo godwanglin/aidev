@@ -141,9 +141,13 @@ export default function OAuthDarkModal({
       const json = await res.json();
       if (json.success) {
         onSuccess(
-          `Berhasil menghubungkan ${provider.name}${
-            json.data?.accountEmail ? ` (${json.data.accountEmail})` : ""
-          } via OAuth!`
+          json.data?.replaced
+            ? `Berhasil memperbarui akun ${provider.name}${
+                json.data?.accountEmail ? ` (${json.data.accountEmail})` : ""
+              } (OAuth lama digantikan)!`
+            : `Berhasil menghubungkan ${provider.name}${
+                json.data?.accountEmail ? ` (${json.data.accountEmail})` : ""
+              } via OAuth!`
         );
         onClose();
       } else {

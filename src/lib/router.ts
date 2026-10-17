@@ -32,13 +32,8 @@ interface CachedProviderConnections {
 const providerConnectionsCache = new Map<string, CachedProviderConnections>();
 const CONNECTIONS_CACHE_TTL_MS = 5000; // 5 seconds in-memory cache
 
-export function invalidateProviderConnectionsCache(provider?: string) {
-  if (provider) {
-    providerConnectionsCache.delete(provider.toUpperCase());
-    providerConnectionsCache.delete('ALL');
-  } else {
-    providerConnectionsCache.clear();
-  }
+export function invalidateProviderConnectionsCache(_provider?: string) {
+  providerConnectionsCache.clear();
 }
 
 export function parseModelList(raw: any): string[] {

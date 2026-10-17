@@ -141,27 +141,77 @@ export async function POST(req: NextRequest) {
       apiKeyEncrypted = encryptCredential(apiKey);
     }
 
-    const newConnection = await prisma.providerConnection.create({
-      data: {
-        provider: providerKey,
-        name: name?.trim() || `${catalogItem?.name || providerKey} Account`,
-        authType: authType === "COOKIE" ? "COOKIE" : authType,
-        apiKeyEncrypted,
-        accessTokenEnc,
-        tokenExpiresAt,
-        baseUrl: effectiveBaseUrl,
-        compatibility: compatibility || "OPENAI",
-        customHeaders,
-        accountEmail: finalAccountEmail,
-        priority: Number(priority) || 1,
-        weight: Number(weight) || 1,
-        syncStatus: 'NORMAL'
+    let existingMatches: any[] = [];
+    if (finalAccountEmail && String(finalAccountEmail).trim()) {
+      const normalizedEmail = String(finalAccountEmail).trim().toLowerCase();
+      const candidates = await prisma.providerConnection.findMany({
+        where: { provider: providerKey },
+        orderBy: { createdAt: "asc" },
+      });
+      existingMatches = candidates.filter(
+        (c) => c.accountEmail && c.accountEmail.trim().toLowerCase() === normalizedEmail
+      );
+    }
+
+    let savedConnection;
+    if (existingMatches.length > 0) {
+      const primaryConn = existingMatches[0];
+      savedConnection = await prisma.providerConnection.update({
+        where: { id: primaryConn.id },
+        data: {
+          provider: providerKey,
+          name: name?.trim() || primaryConn.name || `${catalogItem?.name || providerKey} Account`,
+          authType: authType === "COOKIE" ? "COOKIE" : authType,
+          apiKeyEncrypted: apiKeyEncrypted ?? primaryConn.apiKeyEncrypted,
+          accessTokenEnc: accessTokenEnc ?? primaryConn.accessTokenEnc,
+          tokenExpiresAt: tokenExpiresAt ?? primaryConn.tokenExpiresAt,
+          baseUrl: effectiveBaseUrl ?? primaryConn.baseUrl,
+          compatibility: compatibility || primaryConn.compatibility || "OPENAI",
+          customHeaders: customHeaders ?? primaryConn.customHeaders,
+          accountEmail: String(finalAccountEmail).trim(),
+          isActive: true,
+          syncStatus: "NORMAL",
+          cooldownUntil: null,
+        },
+      });
+
+      const duplicateIds = existingMatches.slice(1).map((c) => c.id);
+      if (duplicateIds.length > 0) {
+        await prisma.upstreamLog
+          .updateMany({
+            where: { connectionId: { in: duplicateIds } },
+            data: { connectionId: primaryConn.id },
+          })
+          .catch(() => {});
+        await prisma.providerConnection
+          .deleteMany({
+            where: { id: { in: duplicateIds } },
+          })
+          .catch(() => {});
       }
-    });
+    } else {
+      savedConnection = await prisma.providerConnection.create({
+        data: {
+          provider: providerKey,
+          name: name?.trim() || `${catalogItem?.name || providerKey} Account`,
+          authType: authType === "COOKIE" ? "COOKIE" : authType,
+          apiKeyEncrypted,
+          accessTokenEnc,
+          tokenExpiresAt,
+          baseUrl: effectiveBaseUrl,
+          compatibility: compatibility || "OPENAI",
+          customHeaders,
+          accountEmail: finalAccountEmail ? String(finalAccountEmail).trim() : null,
+          priority: Number(priority) || 1,
+          weight: Number(weight) || 1,
+          syncStatus: "NORMAL",
+        },
+      });
+    }
 
     invalidateProviderConnectionsCache(providerKey);
 
-    return NextResponse.json(newConnection, { status: 201 });
+    return NextResponse.json(savedConnection, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

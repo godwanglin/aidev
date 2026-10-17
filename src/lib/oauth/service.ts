@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { encryptCredential, decryptCredential } from "@/lib/crypto";
+import { invalidateProviderConnectionsCache } from "@/lib/router";
 import { getProviderOAuthConfig, OAUTH_PROVIDERS } from "./config";
 import {
   generateCodeVerifier,
@@ -221,25 +222,39 @@ export async function exchangeAndSaveOAuthToken({
   const expiresIn = Number(tokenData.expires_in) || 3600;
   const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
 
-  // Attempt to extract account email from id_token (JWT) if available
-  let accountEmail: string | null = null;
-  if (tokenData.id_token) {
+  // Helper to extract email/sub from a JWT token
+  const extractJwtProfile = (jwt?: string | null): { email: string | null; sub: string | null } => {
+    if (!jwt || typeof jwt !== "string" || !jwt.includes(".")) {
+      return { email: null, sub: null };
+    }
     try {
-      const parts = tokenData.id_token.split(".");
+      const parts = jwt.split(".");
       if (parts.length >= 2) {
         const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
-        accountEmail =
+        const email =
           payload.email ||
           payload["https://api.openai.com/profile"]?.email ||
           payload.preferred_username ||
-          payload.sub ||
           null;
+        const sub = payload.sub || null;
+        return {
+          email: typeof email === "string" && email.trim() ? email.trim() : null,
+          sub: typeof sub === "string" && sub.trim() ? sub.trim() : null,
+        };
       }
     } catch {}
-  }
+    return { email: null, sub: null };
+  };
+
+  // Attempt to extract account email from id_token or access_token (JWT) if available
+  const idJwt = extractJwtProfile(tokenData.id_token);
+  const accJwt = extractJwtProfile(accessToken);
+  let accountEmail: string | null = idJwt.email || accJwt.email || null;
+
+  const providerKey = provider.toUpperCase().trim();
 
   // Fallback for Google/Antigravity if email not present in token payload
-  if (!accountEmail && accessToken && (provider.toUpperCase() === "ANTIGRAVITY" || provider.toUpperCase() === "GOOGLE")) {
+  if (!accountEmail && accessToken && (providerKey === "ANTIGRAVITY" || providerKey === "GOOGLE" || providerKey === "GEMINI" || providerKey === "GEMINI_CLI")) {
     try {
       const infoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -251,28 +266,118 @@ export async function exchangeAndSaveOAuthToken({
     } catch {}
   }
 
+  // Fallback for OpenAI Codex if email not present in JWT
+  if (!accountEmail && accessToken && (providerKey === "OPENAI_CODEX" || providerKey === "OPENAI" || providerKey === "CODEX")) {
+    try {
+      const usageRes = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (usageRes.ok) {
+        const usageData = await usageRes.json();
+        if (usageData?.email) accountEmail = String(usageData.email).trim();
+      }
+    } catch {}
+  }
+
+  if (!accountEmail) {
+    accountEmail = idJwt.sub || accJwt.sub || null;
+  }
+
   // Encrypt tokens using AES-256-GCM
   const accessTokenEnc = encryptCredential(accessToken);
   const refreshTokenEnc = refreshToken ? encryptCredential(refreshToken) : null;
   const idTokenEnc = tokenData.id_token ? encryptCredential(tokenData.id_token) : null;
 
-  // Persist into database
-  const connection = await prisma.providerConnection.create({
-    data: {
-      provider: provider.toUpperCase(),
-      name,
-      authType: "OAUTH",
-      accessTokenEnc,
-      refreshTokenEnc,
-      idTokenEnc,
-      tokenExpiresAt,
-      accountEmail,
-      priority,
-      weight,
-      isActive: true,
-      syncStatus: "NORMAL",
-    },
-  });
+  // Check if a connection with the same email already exists for this provider
+  const providerVariants =
+    providerKey === "OPENAI_CODEX" || providerKey === "OPENAI" || providerKey === "CODEX"
+      ? ["OPENAI_CODEX", "OPENAI", "CODEX"]
+      : providerKey === "GOOGLE" || providerKey === "GEMINI" || providerKey === "GEMINI_CLI"
+      ? ["GOOGLE", "GEMINI", "GEMINI_CLI"]
+      : [providerKey];
+
+  let existingMatches: any[] = [];
+  if (accountEmail && accountEmail.trim()) {
+    const normalizedTargetEmail = accountEmail.trim().toLowerCase();
+    const candidates = await prisma.providerConnection.findMany({
+      where: { provider: { in: providerVariants } },
+      orderBy: { createdAt: "asc" },
+    });
+    existingMatches = candidates.filter(
+      (c) => c.accountEmail && c.accountEmail.trim().toLowerCase() === normalizedTargetEmail
+    );
+  }
+
+  let connection;
+  let replaced = false;
+
+  if (existingMatches.length > 0) {
+    const primaryConn = existingMatches[0];
+    const isGenericName =
+      !name ||
+      name.trim().toLowerCase().startsWith("akun ") ||
+      name.trim().toLowerCase().endsWith(" account");
+    const finalName = !isGenericName ? name.trim() : primaryConn.name || name;
+
+    connection = await prisma.providerConnection.update({
+      where: { id: primaryConn.id },
+      data: {
+        provider: providerKey,
+        name: finalName,
+        authType: "OAUTH",
+        accessTokenEnc,
+        refreshTokenEnc: refreshTokenEnc ?? primaryConn.refreshTokenEnc,
+        idTokenEnc: idTokenEnc ?? primaryConn.idTokenEnc,
+        tokenExpiresAt,
+        accountEmail: accountEmail ? accountEmail.trim() : primaryConn.accountEmail,
+        isActive: true,
+        syncStatus: "NORMAL",
+        cooldownUntil: null,
+      },
+    });
+
+    // Clean up any older duplicate rows with the same email if they exist
+    const duplicateIds = existingMatches.slice(1).map((c) => c.id);
+    if (duplicateIds.length > 0) {
+      await prisma.upstreamLog
+        .updateMany({
+          where: { connectionId: { in: duplicateIds } },
+          data: { connectionId: primaryConn.id },
+        })
+        .catch(() => {});
+      await prisma.providerConnection
+        .deleteMany({
+          where: { id: { in: duplicateIds } },
+        })
+        .catch(() => {});
+    }
+
+    replaced = true;
+  } else {
+    // Persist new connection into database
+    connection = await prisma.providerConnection.create({
+      data: {
+        provider: providerKey,
+        name,
+        authType: "OAUTH",
+        accessTokenEnc,
+        refreshTokenEnc,
+        idTokenEnc,
+        tokenExpiresAt,
+        accountEmail: accountEmail ? accountEmail.trim() : null,
+        priority,
+        weight,
+        isActive: true,
+        syncStatus: "NORMAL",
+      },
+    });
+  }
+
+  invalidateProviderConnectionsCache(providerKey);
 
   return {
     id: connection.id,
@@ -282,6 +387,7 @@ export async function exchangeAndSaveOAuthToken({
     accountEmail: connection.accountEmail,
     tokenExpiresAt: connection.tokenExpiresAt,
     isActive: connection.isActive,
+    replaced,
   };
 }
 
