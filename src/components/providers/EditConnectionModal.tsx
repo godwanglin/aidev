@@ -273,7 +273,7 @@ export default function EditConnectionModal({
                   <input
                     type="text"
                     className="control w-full text-xs mono"
-                    placeholder="e.g. claude-opus-5-5-high, gemini-4-argon"
+                    placeholder="e.g. claude-opus-5-5-high, gemini-3.8-flash-high"
                     value={newCustomModelInput}
                     onChange={(e) => setNewCustomModelInput(e.target.value)}
                     onKeyDown={(e) => {
