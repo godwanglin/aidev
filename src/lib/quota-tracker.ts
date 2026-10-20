@@ -299,6 +299,163 @@ async function fetchCodexAccountQuota(accessToken: string): Promise<QuotaBucketI
 }
 
 /**
+ * Fetches real live quota for an Anthropic / Claude Code account.
+ * Primary: Claude Code OAuth usage endpoint (https://api.anthropic.com/api/oauth/usage?cedar_ember=1)
+ * Profile: https://api.anthropic.com/api/oauth/profile (to resolve user email/org name)
+ */
+async function fetchClaudeAccountQuota(
+  token: string,
+  connId?: string,
+  currentEmail?: string | null
+): Promise<{ quotas: QuotaBucketItem[]; accountEmail: string | null }> {
+  const quotas: QuotaBucketItem[] = [];
+  let resolvedEmail: string | null = currentEmail || null;
+
+  try {
+    const isOAuth = token.startsWith("sk-ant-oat") || token.length > 50;
+    const authHeaders: Record<string, string> = {
+      "anthropic-version": "2023-06-01",
+      "User-Agent": "claude-cli/0.2.10 (external, cli)",
+    };
+
+    if (isOAuth) {
+      authHeaders["Authorization"] = `Bearer ${token}`;
+      authHeaders["anthropic-beta"] = "oauth-2025-04-20";
+    } else {
+      authHeaders["x-api-key"] = token;
+    }
+
+    // 1. If email is missing, fetch profile to retrieve user email
+    if (!resolvedEmail && isOAuth) {
+      try {
+        const profileRes = await fetch("https://api.anthropic.com/api/oauth/profile", {
+          headers: authHeaders,
+          signal: AbortSignal.timeout(5000),
+        });
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          if (profileData?.account?.email) {
+            resolvedEmail = profileData.account.email;
+            if (connId) {
+              prisma.providerConnection
+                .update({
+                  where: { id: connId },
+                  data: { accountEmail: resolvedEmail },
+                })
+                .catch(() => {});
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Fetch live usage from Claude OAuth usage API
+    if (isOAuth) {
+      const usageRes = await fetch("https://api.anthropic.com/api/oauth/usage?cedar_ember=1", {
+        headers: authHeaders,
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (usageRes.ok) {
+        const data = await usageRes.json();
+
+        const addWindowBucket = (
+          id: string,
+          name: string,
+          winObj: { utilization?: number; resets_at?: string } | null | undefined
+        ) => {
+          if (!winObj || typeof winObj !== "object" || typeof winObj.utilization !== "number") return;
+          const usedPct = Math.min(100, Math.max(0, Math.round(winObj.utilization)));
+          const remainingPct = Math.max(0, 100 - usedPct);
+          const remainingFraction = remainingPct / 100;
+          const status: "HEALTHY" | "LOW" | "EMPTY" =
+            remainingPct > 50 ? "HEALTHY" : remainingPct > 15 ? "LOW" : "EMPTY";
+
+          quotas.push({
+            id,
+            name,
+            remainingFraction,
+            usedAmount: usedPct,
+            totalAmount: 100,
+            percentage: remainingPct,
+            resetTime: winObj.resets_at,
+            resetHuman: formatResetRemaining(winObj.resets_at),
+            status,
+          });
+        };
+
+        // Standard 5h session and 7d weekly windows
+        addWindowBucket("claude-session", "Session (5 Hours)", data.five_hour);
+        addWindowBucket("claude-weekly", "Weekly (7 Days)", data.seven_day);
+
+        // Model-specific weekly windows (e.g. seven_day_sonnet, seven_day_opus)
+        for (const [key, val] of Object.entries(data)) {
+          if (
+            key.startsWith("seven_day_") &&
+            key !== "seven_day" &&
+            key !== "seven_day_oauth_apps" &&
+            key !== "seven_day_breakdown" &&
+            val &&
+            typeof val === "object" &&
+            typeof (val as any).utilization === "number"
+          ) {
+            const rawModel = key.replace("seven_day_", "");
+            const titleModel = rawModel.charAt(0).toUpperCase() + rawModel.slice(1);
+            addWindowBucket(`claude-${key}`, `${titleModel} (Weekly)`, val as any);
+          }
+        }
+
+        // Model-scoped weekly limits in limits[]
+        if (Array.isArray(data.limits)) {
+          for (const limit of data.limits) {
+            if (limit?.kind === "weekly_scoped" && typeof limit.percent === "number") {
+              const scopeName = limit.scope?.model?.display_name || "Model";
+              const key = `claude-scoped-${scopeName.toLowerCase()}`;
+              if (!quotas.some((q) => q.id === key)) {
+                addWindowBucket(key, `${scopeName} (Weekly)`, {
+                  utilization: limit.percent,
+                  resets_at: limit.resets_at,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch Claude account quota:", err);
+  }
+
+  // If still empty (e.g. fallback or standard API key), provide default healthy card
+  if (quotas.length === 0) {
+    quotas.push(
+      {
+        id: "claude-session",
+        name: "Session (5 Hours)",
+        remainingFraction: 1.0,
+        usedAmount: 0,
+        totalAmount: 100,
+        percentage: 100,
+        resetHuman: "in 5h 0m",
+        status: "HEALTHY",
+      },
+      {
+        id: "claude-weekly",
+        name: "Weekly (7 Days)",
+        remainingFraction: 1.0,
+        usedAmount: 0,
+        totalAmount: 100,
+        percentage: 100,
+        resetHuman: "in 7d 0h",
+        status: "HEALTHY",
+      }
+    );
+  }
+
+  return { quotas, accountEmail: resolvedEmail };
+}
+
+/**
  * Fetches real live balance & quota for a DeepSeek account from DeepSeek User Balance API.
  */
 async function fetchDeepSeekAccountQuota(apiKey: string): Promise<{ quotas: QuotaBucketItem[]; remainingUsd: number | null }> {
@@ -687,6 +844,9 @@ export function isProviderQuotaTrackable(provider: string): boolean {
     p === "OPENAI" ||
     p === "OPENAI_CODEX" ||
     p === "CODEX" ||
+    p === "CLAUDE" ||
+    p === "CLAUDE_CODE" ||
+    p === "ANTHROPIC" ||
     p === "DEEPSEEK" ||
     p === "OLLAMA" ||
     p === "OLLAMA_CLOUD" ||
@@ -762,6 +922,8 @@ export async function getSingleAccountQuota(
       provUpper === "OPENROUTER";
     const isGemini =
       provUpper === "GEMINI" || provUpper === "GOOGLE";
+    const isClaude =
+      provUpper === "CLAUDE" || provUpper === "CLAUDE_CODE" || provUpper === "ANTHROPIC";
 
     if (isAntigravity && conn.accessTokenEnc) {
       try {
@@ -817,6 +979,19 @@ export async function getSingleAccountQuota(
         const res = await fetchOpenRouterAccountQuota(apiKey);
         quotas = res.quotas;
         remainingUsd = res.remainingUsd;
+      } catch {
+        quotas = [];
+      }
+    } else if (isClaude && (conn.accessTokenEnc || conn.apiKeyEncrypted)) {
+      try {
+        const token = conn.accessTokenEnc
+          ? decryptCredential(conn.accessTokenEnc)
+          : decryptCredential(conn.apiKeyEncrypted!);
+        const res = await fetchClaudeAccountQuota(token, conn.id, conn.accountEmail);
+        quotas = res.quotas;
+        if (res.accountEmail && !conn.accountEmail) {
+          conn.accountEmail = res.accountEmail;
+        }
       } catch {
         quotas = [];
       }

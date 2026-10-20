@@ -464,9 +464,40 @@ const ANTIGRAVITY_PROMPT_REWRITES = [
  * Maps model alias to internal Antigravity wire model name
  */
 function mapToWireModel(model: string, effortStr?: string): string {
-  const clean = model
+  let clean = model
     .replace(/^(ag\/|antigravity\/|google-ag\/|gem\/|gemini\/|gcli\/|gemini-cli\/|google\/)/i, "")
-    .trim();
+    .trim()
+    .toLowerCase();
+
+  // Keep Gemini 4 Argon wire model names
+  if (clean.includes("argon")) {
+    if (clean.includes("low") || effortStr === "low") {
+      return "gemini-4-argon-low";
+    }
+    if (clean.includes("medium") || effortStr === "medium") {
+      return "gemini-4-argon-medium";
+    }
+    return "gemini-4-argon-high";
+  }
+
+  // Claude 3.7 / 4.6 aliases on Cloud Code assist (Google mapped 3.7/4.6 to 5.5)
+  if (clean.includes("claude-opus-4-6") || clean.includes("claude-3-7-opus") || clean.includes("claude-opus-3-7")) {
+    if (clean.includes("low") || effortStr === "low") return "claude-opus-5-5-low";
+    if (clean.includes("medium") || effortStr === "medium") return "claude-opus-5-5-medium";
+    return "claude-opus-5-5-high";
+  }
+
+  if (clean.includes("claude-sonnet-4-6") || clean.includes("claude-3-7-sonnet") || clean.includes("claude-sonnet-3-7")) {
+    if (clean.includes("high") || effortStr === "high") return "claude-sonnet-5-5-high";
+    if (clean.includes("low") || effortStr === "low") return "claude-sonnet-5-5-low";
+    return "claude-sonnet-5-5-medium";
+  }
+
+  // Gemini 2.0 sunset fallback to 2.5 flash
+  if (clean === "gemini-2.0-flash" || clean === "gemini-2.0-flash-thinking") {
+    return "gemini-2.5-flash";
+  }
+
   return clean || "gemini-2.5-flash";
 }
 
@@ -640,11 +671,11 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
         console.error("[ANTIGRAVITY REJECT]", res.status, endpoint, errText);
         console.error("[ANTIGRAVITY ENVELOPE KEYS]", Object.keys(envelope.request || {}));
         lastError = `Upstream ${endpoint} returned HTTP ${res.status}: ${errText.slice(0, 500)}`;
-        if (res.status === 429) {
-          // If 429 on daily, try next endpoint
+        if (res.status === 429 || res.status === 404) {
+          // If 429 (quota) or 404 (model only exists on PROD), try next endpoint
           continue;
         }
-        // Don't retry non-429 errors (e.g. 400) on PROD to prevent false quota exhaustion
+        // Don't retry non-transient errors (e.g. 400 bad payload) on PROD
         break;
       }
     } catch (err: any) {

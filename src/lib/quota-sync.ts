@@ -191,35 +191,88 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
         break;
       }
 
+      case "CLAUDE":
       case "ANTHROPIC":
       case "CLAUDE_CODE": {
         let token = apiKey;
-        if (connection.authType === "OAUTH" && connection.accessTokenEnc) {
+        if (connection.accessTokenEnc) {
           token = decryptCredential(connection.accessTokenEnc);
+        } else if (connection.apiKeyEncrypted) {
+          token = decryptCredential(connection.apiKeyEncrypted);
         }
         if (token) {
           try {
+            const isOAuth = token.startsWith("sk-ant-oat") || connection.authType === "OAUTH";
             const authHeaders: Record<string, string> = {
               "anthropic-version": "2023-06-01",
+              "User-Agent": "claude-cli/0.2.10 (external, cli)",
             };
-            if (token.startsWith("sk-ant-oat")) {
+            if (isOAuth) {
               authHeaders["Authorization"] = `Bearer ${token}`;
+              authHeaders["anthropic-beta"] = "oauth-2025-04-20";
+
+              // 1. Fetch profile email if missing
+              if (!accountEmail) {
+                try {
+                  const profRes = await fetch("https://api.anthropic.com/api/oauth/profile", {
+                    headers: authHeaders,
+                    signal: AbortSignal.timeout(5000),
+                  });
+                  if (profRes.ok) {
+                    const profData = await profRes.json();
+                    if (profData?.account?.email) {
+                      accountEmail = profData.account.email;
+                    }
+                  }
+                } catch {}
+              }
+
+              // 2. Fetch live usage
+              const usageRes = await fetch("https://api.anthropic.com/api/oauth/usage?cedar_ember=1", {
+                headers: authHeaders,
+                signal: AbortSignal.timeout(6000),
+              });
+
+              if (usageRes.status === 200) {
+                const data = await usageRes.json();
+                const sessionUtil = typeof data.five_hour?.utilization === "number" ? data.five_hour.utilization : 0;
+                const weeklyUtil = typeof data.seven_day?.utilization === "number" ? data.seven_day.utilization : 0;
+
+                if (sessionUtil >= 100 || weeklyUtil >= 100) {
+                  status = "EXHAUSTED";
+                  errorMsg = sessionUtil >= 100 ? "Claude 5-hour limit reached" : "Claude 7-day limit reached";
+                } else if (sessionUtil >= 85 || weeklyUtil >= 85) {
+                  status = "LOW_QUOTA";
+                  errorMsg = `Claude quota high utilization (5h: ${sessionUtil}%, 7d: ${weeklyUtil}%)`;
+                } else {
+                  status = "NORMAL";
+                }
+              } else if (usageRes.status === 429) {
+                status = "LOW_QUOTA";
+                errorMsg = "Claude API rate limit reached (429)";
+              } else if (usageRes.status === 401 || usageRes.status === 403) {
+                status = "ERROR";
+                errorMsg = "Claude OAuth token invalid or expired";
+              } else {
+                status = "NORMAL";
+              }
             } else {
               authHeaders["x-api-key"] = token;
-            }
-            const res = await fetch("https://api.anthropic.com/v1/models", {
-              headers: authHeaders,
-            });
-            if (res.status === 200 || res.status === 404) {
-              status = "NORMAL";
-            } else if (res.status === 429) {
-              status = "LOW_QUOTA";
-              errorMsg = "Rate limited";
-            } else if (res.status === 401 || res.status === 403) {
-              status = "ERROR";
-              errorMsg = "Invalid credentials";
-            } else {
-              status = "NORMAL";
+              const res = await fetch("https://api.anthropic.com/v1/models", {
+                headers: authHeaders,
+                signal: AbortSignal.timeout(6000),
+              });
+              if (res.status === 200 || res.status === 404) {
+                status = "NORMAL";
+              } else if (res.status === 429) {
+                status = "LOW_QUOTA";
+                errorMsg = "Rate limited";
+              } else if (res.status === 401 || res.status === 403) {
+                status = "ERROR";
+                errorMsg = "Invalid credentials";
+              } else {
+                status = "NORMAL";
+              }
             }
           } catch {
             status = "NORMAL";
