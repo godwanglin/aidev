@@ -912,7 +912,172 @@ export function applyClaudeCodeCloaking(body: any, apiKey: string, sessionId: st
     result.metadata = { ...result.metadata, user_id: generateFakeClaudeUserId(sessionId, apiKey) };
   }
 
+  // Sanitize any tool schemas against top-level combinators
+  if (Array.isArray(result.tools)) {
+    result.tools = result.tools.map((t: any) => {
+      if (!t || typeof t !== "object") return t;
+      if (t.type && t.type !== "function" && t.type !== "custom") return t;
+      return {
+        ...t,
+        input_schema: sanitizeAnthropicInputSchema(t.input_schema || t.parameters),
+      };
+    });
+  }
+
   return result;
+}
+
+/**
+ * Recursively extracts properties and required fields from combinator branches (allOf, anyOf, oneOf).
+ */
+function extractPropertiesAndRequired(branch: any): { properties: Record<string, any>; required: string[] } {
+  const props: Record<string, any> = {};
+  const req: string[] = [];
+
+  if (!branch || typeof branch !== "object" || Array.isArray(branch)) {
+    return { properties: props, required: req };
+  }
+
+  if (branch.properties && typeof branch.properties === "object" && !Array.isArray(branch.properties)) {
+    Object.assign(props, branch.properties);
+  }
+
+  if (Array.isArray(branch.required)) {
+    for (const r of branch.required) {
+      if (typeof r === "string" && !req.includes(r)) req.push(r);
+    }
+  }
+
+  if (Array.isArray(branch.allOf)) {
+    for (const sub of branch.allOf) {
+      const res = extractPropertiesAndRequired(sub);
+      Object.assign(props, res.properties);
+      for (const r of res.required) {
+        if (!req.includes(r)) req.push(r);
+      }
+    }
+  }
+
+  const subComb = branch.anyOf || branch.oneOf;
+  if (Array.isArray(subComb)) {
+    for (const sub of subComb) {
+      if (sub && sub.type !== "null") {
+        const res = extractPropertiesAndRequired(sub);
+        Object.assign(props, res.properties);
+      }
+    }
+  }
+
+  return { properties: props, required: req };
+}
+
+/**
+ * Sanitizes and normalizes tool input schemas for Anthropic Messages API.
+ * Anthropic strictly rejects top-level combinators: "input_schema does not support oneOf, allOf, or anyOf at the top level".
+ * It also requires top-level type: "object", valid properties dict, and valid required list.
+ */
+export function sanitizeAnthropicInputSchema(rawSchema: any): Record<string, any> {
+  if (!rawSchema || typeof rawSchema !== "object" || Array.isArray(rawSchema)) {
+    return { type: "object", properties: {} };
+  }
+
+  let schema: Record<string, any>;
+  try {
+    schema = JSON.parse(JSON.stringify(rawSchema));
+  } catch {
+    schema = { ...rawSchema };
+  }
+
+  // 1. Process top-level allOf: merge properties and required from all parts
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    const mergedProps: Record<string, any> = {};
+    const mergedReq: string[] = [];
+
+    for (const item of schema.allOf) {
+      const res = extractPropertiesAndRequired(item);
+      Object.assign(mergedProps, res.properties);
+      for (const r of res.required) {
+        if (!mergedReq.includes(r)) mergedReq.push(r);
+      }
+    }
+
+    schema.properties = { ...mergedProps, ...(schema.properties || {}) };
+    if (mergedReq.length > 0 || Array.isArray(schema.required)) {
+      schema.required = Array.from(new Set([...(schema.required || []), ...mergedReq]));
+    }
+    delete schema.allOf;
+  }
+
+  // 2. Process top-level anyOf / oneOf
+  const combinator = schema.anyOf || schema.oneOf;
+  if (Array.isArray(combinator) && combinator.length > 0) {
+    const nonNullVariants = combinator.filter(
+      (v: any) => v && typeof v === "object" && v.type !== "null"
+    );
+
+    if (nonNullVariants.length > 0) {
+      const mergedProps: Record<string, any> = {};
+      const variantReqLists: string[][] = [];
+
+      for (const variant of nonNullVariants) {
+        const res = extractPropertiesAndRequired(variant);
+        Object.assign(mergedProps, res.properties);
+        if (res.required.length > 0) {
+          variantReqLists.push(res.required);
+        }
+      }
+
+      schema.properties = { ...mergedProps, ...(schema.properties || {}) };
+
+      // For required: if all variants define required fields, take intersection
+      if (variantReqLists.length === nonNullVariants.length && variantReqLists.length > 0) {
+        const commonReq = variantReqLists[0].filter((k) =>
+          variantReqLists.every((list) => list.includes(k))
+        );
+        if (commonReq.length > 0 || Array.isArray(schema.required)) {
+          schema.required = Array.from(new Set([...(schema.required || []), ...commonReq]));
+        }
+      }
+
+      if (!schema.description && nonNullVariants[0]?.description) {
+        schema.description = nonNullVariants[0].description;
+      }
+    }
+
+    delete schema.anyOf;
+    delete schema.oneOf;
+  }
+
+  // 3. Ensure top-level type is strictly "object"
+  schema.type = "object";
+
+  // 4. Ensure properties is a plain object
+  if (!schema.properties || typeof schema.properties !== "object" || Array.isArray(schema.properties)) {
+    schema.properties = {};
+  }
+
+  // 5. Clean up required array (must only contain keys present in properties)
+  if (Array.isArray(schema.required)) {
+    const validRequired = schema.required.filter(
+      (k: any) => typeof k === "string" && Object.prototype.hasOwnProperty.call(schema.properties, k)
+    );
+    if (validRequired.length > 0) {
+      schema.required = validRequired;
+    } else {
+      delete schema.required;
+    }
+  } else {
+    delete schema.required;
+  }
+
+  // 6. Delete forbidden root-level keywords
+  delete schema.anyOf;
+  delete schema.oneOf;
+  delete schema.allOf;
+  delete schema["$schema"];
+  delete schema["$id"];
+
+  return schema;
 }
 
 /**
@@ -1063,13 +1228,41 @@ export function convertOpenAiToAnthropicPayload(
 
   // 3. Convert tools
   if (Array.isArray(openAiBody.tools) && openAiBody.tools.length > 0) {
-    result.tools = openAiBody.tools
-      .filter((t: any) => t.type === "function" && t.function?.name)
-      .map((t: any) => ({
-        name: t.function.name,
-        description: t.function.description || "",
-        input_schema: t.function.parameters || { type: "object", properties: {} },
-      }));
+    result.tools = [];
+    for (const t of openAiBody.tools) {
+      if (!t || typeof t !== "object") continue;
+      // Pass-through built-in server tools
+      if (t.type && t.type !== "function") {
+        result.tools.push(t);
+        continue;
+      }
+      const toolData = t.function ?? t;
+      if (!toolData.name) continue;
+      result.tools.push({
+        name: toolData.name,
+        description: toolData.description || "",
+        input_schema: sanitizeAnthropicInputSchema(toolData.parameters || toolData.input_schema),
+      });
+    }
+  }
+
+  // 4. Convert tool_choice
+  if (openAiBody.tool_choice) {
+    if (typeof openAiBody.tool_choice === "string") {
+      if (openAiBody.tool_choice === "none") {
+        delete result.tools;
+      } else if (openAiBody.tool_choice === "required") {
+        result.tool_choice = { type: "any" };
+      } else if (openAiBody.tool_choice === "auto") {
+        result.tool_choice = { type: "auto" };
+      }
+    } else if (typeof openAiBody.tool_choice === "object") {
+      if (openAiBody.tool_choice.type === "function" && openAiBody.tool_choice.function?.name) {
+        result.tool_choice = { type: "tool", name: openAiBody.tool_choice.function.name };
+      } else if (openAiBody.tool_choice.type) {
+        result.tool_choice = openAiBody.tool_choice;
+      }
+    }
   }
 
   return result;

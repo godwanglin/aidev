@@ -13,6 +13,7 @@ import {
   convertAnthropicToOpenAiPayload,
   convertOpenAiToAnthropicPayload,
   applyClaudeCodeCloaking,
+  sanitizeAnthropicInputSchema,
   transformAnthropicResponseToOpenAi,
   transformChatResponseToAnthropic,
 } from "@/lib/adapters/anthropic";
@@ -743,6 +744,18 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             cleanTargetModel,
             clientWantsStream
           );
+        }
+
+        // Sanitize any tool schemas against top-level combinators (oneOf, allOf, anyOf)
+        if (Array.isArray(anthropicPayload.tools)) {
+          anthropicPayload.tools = anthropicPayload.tools.map((t: any) => {
+            if (!t || typeof t !== "object") return t;
+            if (t.type && t.type !== "function" && t.type !== "custom") return t;
+            return {
+              ...t,
+              input_schema: sanitizeAnthropicInputSchema(t.input_schema || t.parameters),
+            };
+          });
         }
 
         const isOAuth = targetKey.startsWith("sk-ant-oat") || activeProvider === "CLAUDE_CODE";
