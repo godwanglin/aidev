@@ -1081,6 +1081,58 @@ export function sanitizeAnthropicInputSchema(rawSchema: any): Record<string, any
 }
 
 /**
+ * Normalizes tool_choice for Anthropic Messages API.
+ * Models with thinking or without forcedToolChoice support (e.g. claude-opus-5-5, claude-sonnet-5-5, or when thinking is active)
+ * strictly reject type: "tool" and "any" with HTTP 400.
+ * In those cases, tool_choice is safely converted to { type: "auto" } and a system instruction is injected.
+ */
+export function normalizeAnthropicToolChoice(
+  toolChoice: any,
+  targetModel: string,
+  hasThinking = false
+): { normalizedChoice: any; systemGuidance?: string } {
+  if (!toolChoice) return { normalizedChoice: undefined };
+
+  let choice = toolChoice;
+  if (typeof choice === "string") {
+    if (choice === "auto") choice = { type: "auto" };
+    else if (choice === "required") choice = { type: "any" };
+    else if (choice === "none") return { normalizedChoice: undefined };
+    else choice = { type: "auto" };
+  } else if (typeof choice === "object" && choice.type === "function" && choice.function?.name) {
+    choice = { type: "tool", name: choice.function.name };
+  }
+
+  const modelLower = (targetModel || "").toLowerCase();
+  const forbidsForced =
+    hasThinking ||
+    modelLower.includes("5-5") ||
+    modelLower.includes("5.5") ||
+    modelLower.includes("opus-5") ||
+    modelLower.includes("sonnet-5") ||
+    modelLower.includes("thinking");
+
+  if (forbidsForced && (choice.type === "any" || choice.type === "tool")) {
+    const forcedToolName = choice.type === "tool" ? choice.name : null;
+    const guidance = forcedToolName
+      ? `You must call the tool '${forcedToolName}' to complete this user request.`
+      : `You must call an appropriate tool from the provided tools to complete this user request.`;
+
+    const normalized: Record<string, any> = { type: "auto" };
+    if (choice.disable_parallel_tool_use !== undefined) {
+      normalized.disable_parallel_tool_use = choice.disable_parallel_tool_use;
+    }
+
+    return {
+      normalizedChoice: normalized,
+      systemGuidance: guidance,
+    };
+  }
+
+  return { normalizedChoice: choice };
+}
+
+/**
  * Converts standard OpenAI Chat Completion request payload into Anthropic Messages format.
  */
 export function convertOpenAiToAnthropicPayload(
@@ -1248,21 +1300,31 @@ export function convertOpenAiToAnthropicPayload(
 
   // 4. Convert tool_choice
   if (openAiBody.tool_choice) {
-    if (typeof openAiBody.tool_choice === "string") {
-      if (openAiBody.tool_choice === "none") {
-        delete result.tools;
-      } else if (openAiBody.tool_choice === "required") {
-        result.tool_choice = { type: "any" };
-      } else if (openAiBody.tool_choice === "auto") {
-        result.tool_choice = { type: "auto" };
+    if (openAiBody.tool_choice === "none" || openAiBody.tool_choice?.type === "none") {
+      delete result.tools;
+      delete result.tool_choice;
+    } else {
+      const { normalizedChoice, systemGuidance } = normalizeAnthropicToolChoice(
+        openAiBody.tool_choice,
+        cleanModel,
+        Boolean(result.thinking)
+      );
+      if (normalizedChoice) {
+        result.tool_choice = normalizedChoice;
+      } else {
+        delete result.tool_choice;
       }
-    } else if (typeof openAiBody.tool_choice === "object") {
-      if (openAiBody.tool_choice.type === "function" && openAiBody.tool_choice.function?.name) {
-        result.tool_choice = { type: "tool", name: openAiBody.tool_choice.function.name };
-      } else if (openAiBody.tool_choice.type) {
-        result.tool_choice = openAiBody.tool_choice;
+      if (systemGuidance) {
+        if (!result.system) result.system = [];
+        result.system.push({ type: "text", text: systemGuidance });
       }
     }
+  }
+
+  // Ensure tool_choice is removed if no tools exist
+  if (!result.tools || result.tools.length === 0) {
+    delete result.tools;
+    delete result.tool_choice;
   }
 
   return result;

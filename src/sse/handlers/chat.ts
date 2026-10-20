@@ -14,6 +14,7 @@ import {
   convertOpenAiToAnthropicPayload,
   applyClaudeCodeCloaking,
   sanitizeAnthropicInputSchema,
+  normalizeAnthropicToolChoice,
   transformAnthropicResponseToOpenAi,
   transformChatResponseToAnthropic,
 } from "@/lib/adapters/anthropic";
@@ -756,6 +757,40 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               input_schema: sanitizeAnthropicInputSchema(t.input_schema || t.parameters),
             };
           });
+        }
+
+        // Normalize tool_choice if model rejects forced tool choice (e.g. claude-opus-5-5)
+        if (anthropicPayload.tool_choice) {
+          if (anthropicPayload.tool_choice === "none" || anthropicPayload.tool_choice?.type === "none") {
+            delete anthropicPayload.tools;
+            delete anthropicPayload.tool_choice;
+          } else {
+            const { normalizedChoice, systemGuidance } = normalizeAnthropicToolChoice(
+              anthropicPayload.tool_choice,
+              cleanTargetModel,
+              Boolean(anthropicPayload.thinking)
+            );
+            if (normalizedChoice) {
+              anthropicPayload.tool_choice = normalizedChoice;
+            } else {
+              delete anthropicPayload.tool_choice;
+            }
+            if (systemGuidance) {
+              if (Array.isArray(anthropicPayload.system)) {
+                anthropicPayload.system.push({ type: "text", text: systemGuidance });
+              } else if (typeof anthropicPayload.system === "string") {
+                anthropicPayload.system += `\n\n${systemGuidance}`;
+              } else {
+                anthropicPayload.system = [{ type: "text", text: systemGuidance }];
+              }
+            }
+          }
+        }
+
+        // Ensure tool_choice is removed if no tools exist
+        if (!anthropicPayload.tools || anthropicPayload.tools.length === 0) {
+          delete anthropicPayload.tools;
+          delete anthropicPayload.tool_choice;
         }
 
         const isOAuth = targetKey.startsWith("sk-ant-oat") || activeProvider === "CLAUDE_CODE";
