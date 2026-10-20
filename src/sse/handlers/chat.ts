@@ -11,6 +11,9 @@ import { isChatGptWebProvider, dispatchChatGptWebChat } from "@/lib/adapters/cha
 import {
   convertAnthropicToOpenAiMessages,
   convertAnthropicToOpenAiPayload,
+  convertOpenAiToAnthropicPayload,
+  applyClaudeCodeCloaking,
+  transformAnthropicResponseToOpenAi,
   transformChatResponseToAnthropic,
 } from "@/lib/adapters/anthropic";
 import {
@@ -339,7 +342,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       ? "openai"
       : isAntigravityProvider(activeProvider)
       ? "gemini"
-      : activeProvider === "ANTHROPIC"
+      : activeProvider === "ANTHROPIC" || activeProvider === "CLAUDE_CODE"
       ? "anthropic"
       : "openai";
 
@@ -717,23 +720,56 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
     }
 
-    // Direct Native 2: Anthropic Messages API
-    if (subPath === "messages" && (activeProvider === "ANTHROPIC" || activeProvider === "CLAUDE_CODE") && targetKey) {
+    // Direct Native 2: Anthropic / Claude Code Messages API
+    const isClaudeProvider = activeProvider === "ANTHROPIC" || activeProvider === "CLAUDE_CODE";
+    if (isClaudeProvider && targetKey) {
       try {
+        const cleanTargetModel = (resolvedRoute?.cleanModel || candidateModel)
+          .replace(/^(cc\/|claude\/|anthropic\/)/i, "")
+          .trim();
+        const sessionId = req.headers.get("x-claude-code-session-id") || crypto.randomUUID();
+
+        let anthropicPayload: any;
+        if (subPath === "messages") {
+          try {
+            anthropicPayload = JSON.parse(candidateRawBody || "{}");
+          } catch {
+            anthropicPayload = parsedCandidateJson || {};
+          }
+          anthropicPayload.model = cleanTargetModel;
+        } else {
+          anthropicPayload = convertOpenAiToAnthropicPayload(
+            parsedCandidateJson || {},
+            cleanTargetModel,
+            clientWantsStream
+          );
+        }
+
+        const isOAuth = targetKey.startsWith("sk-ant-oat") || activeProvider === "CLAUDE_CODE";
         const forwardHeaders = new Headers();
-        if (targetKey.startsWith("sk-ant-oat")) {
+
+        if (isOAuth) {
           forwardHeaders.set("Authorization", `Bearer ${targetKey}`);
+          forwardHeaders.set("anthropic-version", "2023-06-01");
+          forwardHeaders.set(
+            "anthropic-beta",
+            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
+          );
+          forwardHeaders.set("User-Agent", "claude-cli/2.1.280 (external, cli)");
+          forwardHeaders.set("x-claude-code-session-id", sessionId);
+          anthropicPayload = applyClaudeCodeCloaking(anthropicPayload, targetKey, sessionId);
         } else {
           forwardHeaders.set("x-api-key", targetKey);
+          forwardHeaders.set("anthropic-version", "2023-06-01");
         }
-        forwardHeaders.set("anthropic-version", "2023-06-01");
+
         forwardHeaders.set("Content-Type", "application/json");
 
         const targetUrl = `${targetBase}/messages`;
         const upstreamRes = await fetch(targetUrl, {
           method: "POST",
           headers: forwardHeaders,
-          body: candidateRawBody,
+          body: JSON.stringify(anthropicPayload),
         });
 
         if (!upstreamRes.ok) {
@@ -830,7 +866,25 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           durationMs: Date.now() - startTime,
         });
 
-        return upstreamRes;
+        if (subPath === "messages") {
+          return upstreamRes;
+        } else if (subPath === "responses") {
+          const chatRes = await transformAnthropicResponseToOpenAi(upstreamRes, {
+            model: clientRequestedModel,
+            clientWantsStream,
+          });
+          return await transformChatResponseToResponses(chatRes, {
+            model: clientRequestedModel,
+            upstreamModel: candidateModel,
+            provider: activeProvider,
+            clientWantsStream,
+          });
+        } else {
+          return await transformAnthropicResponseToOpenAi(upstreamRes, {
+            model: clientRequestedModel,
+            clientWantsStream,
+          });
+        }
       } catch (err: any) {
         if (!isLastCandidate) {
           adminLogger.fallback({

@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 export interface AnthropicDispatchParams {
   rawBody: string;
   parsedBody: any;
@@ -854,4 +856,574 @@ export async function transformChatResponseToAnthropic(
       headers: { "Content-Type": "application/json; charset=utf-8" },
     }
   );
+}
+
+/**
+ * === CLAUDE CODE OAUTH CLOAKING ===
+ * Spoofs official Claude Code client fingerprint so Anthropic allows access to
+ * high-tier models (Opus 5.5, Sonnet 5.5, etc.) via Claude Code OAuth tokens.
+ */
+export function deriveClaudeUuid(seed: string): string {
+  const h = crypto.createHash("sha256").update(seed).digest("hex");
+  return (
+    h.slice(0, 8) + "-" +
+    h.slice(8, 12) + "-4" +
+    h.slice(13, 16) + "-" +
+    ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16) +
+    h.slice(17, 20) + "-" +
+    h.slice(20, 32)
+  );
+}
+
+export function generateFakeClaudeUserId(sessionId: string, apiKey: string): string {
+  const deviceId = crypto.createHash("sha256").update(`device:${apiKey}`).digest("hex");
+  const accountUuid = deriveClaudeUuid(`account:${apiKey}`);
+  return JSON.stringify({ device_id: deviceId, account_uuid: accountUuid, session_id: sessionId });
+}
+
+export function generateClaudeBillingHeader(payload: any, version = "2.1.280"): string {
+  const content = JSON.stringify(payload);
+  const cch = crypto.createHash("sha256").update(content).digest("hex").slice(0, 5);
+  const buildHash = crypto.randomBytes(2).toString("hex").slice(0, 3);
+  return `x-anthropic-billing-header: cc_version=${version}.${buildHash}; cc_entrypoint=sdk-cli; cch=${cch};`;
+}
+
+export function applyClaudeCodeCloaking(body: any, apiKey: string, sessionId: string): any {
+  if (!apiKey || !apiKey.includes("sk-ant-oat")) return body;
+
+  const result = { ...body };
+
+  // Inject billing header as system[0]
+  const billingText = generateClaudeBillingHeader(body, "2.1.280");
+  const billingBlock = { type: "text", text: billingText };
+
+  if (Array.isArray(result.system)) {
+    if (!result.system[0]?.text?.startsWith("x-anthropic-billing-header:")) {
+      result.system = [billingBlock, ...result.system];
+    }
+  } else if (typeof result.system === "string") {
+    result.system = [billingBlock, { type: "text", text: result.system }];
+  } else {
+    result.system = [billingBlock];
+  }
+
+  // Inject fake user ID into metadata
+  if (!result.metadata?.user_id) {
+    result.metadata = { ...result.metadata, user_id: generateFakeClaudeUserId(sessionId, apiKey) };
+  }
+
+  return result;
+}
+
+/**
+ * Converts standard OpenAI Chat Completion request payload into Anthropic Messages format.
+ */
+export function convertOpenAiToAnthropicPayload(
+  openAiBody: any,
+  targetModel: string,
+  stream = false
+): any {
+  const cleanModel = (targetModel || "").replace(/^(cc\/|claude\/|anthropic\/)/i, "").trim() || "claude-3-7-sonnet-20250219";
+  const maxTokens = openAiBody.max_tokens || openAiBody.max_completion_tokens || 4096;
+
+  const result: any = {
+    model: cleanModel,
+    max_tokens: maxTokens,
+    stream: Boolean(stream || openAiBody.stream),
+  };
+
+  if (typeof openAiBody.temperature === "number") {
+    result.temperature = openAiBody.temperature;
+  }
+
+  const systemParts: string[] = [];
+  const messages: any[] = [];
+
+  if (Array.isArray(openAiBody.messages)) {
+    // 1. Extract system / developer messages
+    for (const msg of openAiBody.messages) {
+      if (msg.role === "system" || msg.role === "developer") {
+        if (typeof msg.content === "string") {
+          systemParts.push(msg.content);
+        } else if (Array.isArray(msg.content)) {
+          const text = msg.content
+            .map((c: any) => (typeof c === "string" ? c : c?.text || ""))
+            .filter(Boolean)
+            .join("\n");
+          if (text) systemParts.push(text);
+        }
+      }
+    }
+
+    if (systemParts.length > 0) {
+      result.system = [{ type: "text", text: systemParts.join("\n\n") }];
+    }
+
+    // 2. Process non-system messages
+    const nonSystem = openAiBody.messages.filter(
+      (m: any) => m.role !== "system" && m.role !== "developer"
+    );
+
+    let currentRole: string | null = null;
+    let currentBlocks: any[] = [];
+
+    const flush = () => {
+      if (currentRole && currentBlocks.length > 0) {
+        messages.push({ role: currentRole, content: currentBlocks });
+        currentBlocks = [];
+      }
+    };
+
+    for (const msg of nonSystem) {
+      if (msg.role === "tool") {
+        flush();
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id,
+              content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content || ""),
+            },
+          ],
+        });
+        currentRole = null;
+        continue;
+      }
+
+      const role = msg.role === "assistant" ? "assistant" : "user";
+      const blocks: any[] = [];
+
+      // Text / multimodal content
+      if (typeof msg.content === "string") {
+        if (msg.content) blocks.push({ type: "text", text: msg.content });
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === "text" && part.text) {
+            blocks.push({ type: "text", text: part.text });
+          } else if (part.type === "image_url" && part.image_url?.url) {
+            const url: string = part.image_url.url;
+            if (url.startsWith("data:")) {
+              const match = url.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                blocks.push({
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: match[1],
+                    data: match[2],
+                  },
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Assistant tool calls
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          let inputObj = {};
+          if (typeof tc.function?.arguments === "string") {
+            try {
+              inputObj = JSON.parse(tc.function.arguments);
+            } catch {
+              inputObj = {};
+            }
+          } else if (tc.function?.arguments && typeof tc.function.arguments === "object") {
+            inputObj = tc.function.arguments;
+          }
+          blocks.push({
+            type: "tool_use",
+            id: tc.id || `call_${Date.now()}`,
+            name: tc.function?.name || tc.name || "",
+            input: inputObj,
+          });
+        }
+      }
+
+      if (blocks.length === 0) continue;
+
+      if (currentRole !== role) {
+        flush();
+        currentRole = role;
+      }
+      currentBlocks.push(...blocks);
+    }
+
+    flush();
+  }
+
+  // Ensure conversation has at least one message
+  if (messages.length === 0) {
+    messages.push({ role: "user", content: [{ type: "text", text: "Hello" }] });
+  }
+
+  result.messages = messages;
+
+  // 3. Convert tools
+  if (Array.isArray(openAiBody.tools) && openAiBody.tools.length > 0) {
+    result.tools = openAiBody.tools
+      .filter((t: any) => t.type === "function" && t.function?.name)
+      .map((t: any) => ({
+        name: t.function.name,
+        description: t.function.description || "",
+        input_schema: t.function.parameters || { type: "object", properties: {} },
+      }));
+  }
+
+  return result;
+}
+
+/**
+ * Transforms an Anthropic Messages Response (stream or JSON) into OpenAI Chat Completion Response.
+ */
+export async function transformAnthropicResponseToOpenAi(
+  anthropicResponse: Response,
+  options: {
+    model: string;
+    clientWantsStream: boolean;
+  }
+): Promise<Response> {
+  const modelName = options.model;
+  const created = Math.floor(Date.now() / 1000);
+
+  if (!anthropicResponse.ok) {
+    const errText = await anthropicResponse.text().catch(() => "");
+    let errMsg = errText;
+    let errType = "api_error";
+    let errCode: any = anthropicResponse.status;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.error) {
+        errMsg = errJson.error.message || errMsg;
+        errType = errJson.error.type || errType;
+      }
+    } catch {}
+
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: errMsg || `Anthropic returned HTTP ${anthropicResponse.status}`,
+          type: errType,
+          code: errCode,
+        },
+      }),
+      {
+        status: anthropicResponse.status,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  // Case 1: Streaming SSE
+  if (options.clientWantsStream && anthropicResponse.body) {
+    let buffer = "";
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    let messageId = `chatcmpl-${Date.now()}`;
+    let roleSent = false;
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let finishReason: string | null = null;
+    let finishSent = false;
+
+    // Track active tool call by block index
+    const toolCallsMap = new Map<number, { index: number; id: string; name: string }>();
+    let nextToolIndex = 0;
+
+    const transformStream = new TransformStream({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith("event:")) {
+            currentEvent = trimmed.slice(6).trim();
+            continue;
+          }
+
+          if (trimmed.startsWith("data:")) {
+            const dataStr = trimmed.slice(5).trim();
+            if (!dataStr || dataStr === "[DONE]") continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+              const eventType = data.type || currentEvent;
+
+              if (eventType === "message_start") {
+                if (data.message?.id) {
+                  messageId = `chatcmpl-${data.message.id}`;
+                }
+                if (data.message?.usage?.input_tokens) {
+                  promptTokens = data.message.usage.input_tokens;
+                }
+                if (!roleSent) {
+                  roleSent = true;
+                  const firstChunk = {
+                    id: messageId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: modelName,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { role: "assistant", content: "" },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(firstChunk)}\n\n`));
+                }
+              } else if (eventType === "content_block_start") {
+                const block = data.content_block;
+                if (block?.type === "tool_use") {
+                  const idx = nextToolIndex++;
+                  toolCallsMap.set(data.index, { index: idx, id: block.id, name: block.name });
+                  const toolStartChunk = {
+                    id: messageId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: modelName,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {
+                          tool_calls: [
+                            {
+                              index: idx,
+                              id: block.id,
+                              type: "function",
+                              function: { name: block.name, arguments: "" },
+                            },
+                          ],
+                        },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(toolStartChunk)}\n\n`));
+                }
+              } else if (eventType === "content_block_delta") {
+                const delta = data.delta;
+                if (delta?.type === "text_delta" && delta.text) {
+                  const textChunk = {
+                    id: messageId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: modelName,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: delta.text },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(textChunk)}\n\n`));
+                } else if (delta?.type === "thinking_delta" && delta.thinking) {
+                  const thinkingChunk = {
+                    id: messageId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: modelName,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { reasoning_content: delta.thinking },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(thinkingChunk)}\n\n`));
+                } else if (delta?.type === "input_json_delta" && delta.partial_json) {
+                  const activeTool = toolCallsMap.get(data.index);
+                  if (activeTool) {
+                    const argChunk = {
+                      id: messageId,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: modelName,
+                      choices: [
+                        {
+                          index: 0,
+                          delta: {
+                            tool_calls: [
+                              {
+                                index: activeTool.index,
+                                function: { arguments: delta.partial_json },
+                              },
+                            ],
+                          },
+                          finish_reason: null,
+                        },
+                      ],
+                    };
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(argChunk)}\n\n`));
+                  }
+                }
+              } else if (eventType === "message_delta") {
+                if (data.usage?.output_tokens) {
+                  completionTokens = data.usage.output_tokens;
+                }
+                if (data.delta?.stop_reason) {
+                  finishReason =
+                    data.delta.stop_reason === "tool_use"
+                      ? "tool_calls"
+                      : data.delta.stop_reason === "max_tokens"
+                      ? "length"
+                      : "stop";
+                }
+              } else if (eventType === "message_stop") {
+                if (!finishSent) {
+                  finishSent = true;
+                  const finalChunk = {
+                    id: messageId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: modelName,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {},
+                        finish_reason: finishReason || (toolCallsMap.size > 0 ? "tool_calls" : "stop"),
+                      },
+                    ],
+                    usage: {
+                      prompt_tokens: promptTokens,
+                      completion_tokens: completionTokens,
+                      total_tokens: promptTokens + completionTokens,
+                    },
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+                  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                }
+              }
+            } catch {}
+          }
+        }
+      },
+      flush(controller) {
+        if (!finishSent) {
+          finishSent = true;
+          const finalChunk = {
+            id: messageId,
+            object: "chat.completion.chunk",
+            created,
+            model: modelName,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: finishReason || "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: promptTokens,
+              completion_tokens: completionTokens,
+              total_tokens: promptTokens + completionTokens,
+            },
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
+      },
+    });
+
+    const stream = anthropicResponse.body.pipeThrough(transformStream);
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
+  // Case 2: Non-Streaming JSON
+  const rawText = await anthropicResponse.text();
+  try {
+    const data = JSON.parse(rawText);
+    let textContent = "";
+    let reasoningContent = "";
+    const toolCalls: any[] = [];
+
+    if (Array.isArray(data.content)) {
+      for (const part of data.content) {
+        if (part.type === "text") {
+          textContent += part.text || "";
+        } else if (part.type === "thinking") {
+          reasoningContent += part.thinking || "";
+        } else if (part.type === "tool_use") {
+          toolCalls.push({
+            id: part.id,
+            type: "function",
+            function: {
+              name: part.name,
+              arguments: JSON.stringify(part.input || {}),
+            },
+          });
+        }
+      }
+    }
+
+    const stopReason =
+      data.stop_reason === "tool_use"
+        ? "tool_calls"
+        : data.stop_reason === "max_tokens"
+        ? "length"
+        : "stop";
+
+    const promptTokens = data.usage?.input_tokens || 0;
+    const completionTokens = data.usage?.output_tokens || 0;
+
+    const message: any = {
+      role: "assistant",
+      content: textContent || (toolCalls.length > 0 ? null : ""),
+    };
+    if (reasoningContent) {
+      message.reasoning_content = reasoningContent;
+    }
+    if (toolCalls.length > 0) {
+      message.tool_calls = toolCalls;
+    }
+
+    return new Response(
+      JSON.stringify({
+        id: `chatcmpl-${data.id || Date.now()}`,
+        object: "chat.completion",
+        created,
+        model: modelName,
+        choices: [
+          {
+            index: 0,
+            message,
+            finish_reason: stopReason,
+          },
+        ],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      }
+    );
+  } catch {
+    return new Response(rawText, {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
 }
