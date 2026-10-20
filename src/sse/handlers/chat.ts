@@ -867,7 +867,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         });
 
         if (subPath === "messages") {
-          return upstreamRes;
+          const responseHeaders = new Headers(upstreamRes.headers);
+          responseHeaders.delete("content-encoding");
+          responseHeaders.delete("content-length");
+          responseHeaders.delete("transfer-encoding");
+          return new Response(upstreamRes.body, {
+            status: upstreamRes.status,
+            headers: responseHeaders,
+          });
         } else if (subPath === "responses") {
           const chatRes = await transformAnthropicResponseToOpenAi(upstreamRes, {
             model: clientRequestedModel,
