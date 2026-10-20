@@ -258,6 +258,66 @@ export async function GET(req: NextRequest) {
               }
             }
           }
+        } else if (providerKey === "CLAUDE_CODE" || providerKey === "ANTHROPIC" || providerKey === "CLAUDE") {
+          if (token) {
+            const anthropicHeaders: Record<string, string> = {
+              "anthropic-version": "2023-06-01",
+            };
+            if (token.startsWith("sk-ant-oat") || conn?.authType === "OAUTH") {
+              anthropicHeaders["Authorization"] = `Bearer ${token}`;
+              anthropicHeaders["anthropic-beta"] = "oauth-2025-04-20,claude-code-20250219";
+              anthropicHeaders["User-Agent"] = "claude-cli/2.1.280 (external, cli)";
+            } else {
+              anthropicHeaders["x-api-key"] = token;
+            }
+
+            const res = await fetch("https://api.anthropic.com/v1/models", {
+              headers: anthropicHeaders,
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data.data)) {
+                const prefix = "cc/";
+                const liveModels = data.data
+                  .map((m: any) => ({
+                    id: !m.id.includes("/") ? `${prefix}${m.id}` : m.id,
+                    name: m.display_name || m.id,
+                  }))
+                  .sort((a: any, b: any) => a.id.localeCompare(b.id));
+
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "200k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
+                }
+
+                return NextResponse.json({
+                  success: true,
+                  provider: providerKey,
+                  models: liveModels,
+                  source: "LIVE_UPSTREAM",
+                  count: liveModels.length,
+                });
+              }
+            }
+          }
         } else if (providerKey === "OPENROUTER") {
           const headers: Record<string, string> = {};
           if (token) headers["Authorization"] = `Bearer ${token}`;

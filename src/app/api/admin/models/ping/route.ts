@@ -95,6 +95,16 @@ export async function POST(req: NextRequest) {
       if (route.cookieString) {
         headers["Cookie"] = route.cookieString;
       }
+    } else if (providerName === "ANTHROPIC" || providerName === "CLAUDE_CODE" || providerName === "CLAUDE") {
+      pingUrl = "https://api.anthropic.com/v1/models";
+      headers["anthropic-version"] = "2023-06-01";
+      if (targetKey.startsWith("sk-ant-oat") || route.authType === "OAUTH") {
+        headers["Authorization"] = `Bearer ${targetKey}`;
+        headers["anthropic-beta"] = "oauth-2025-04-20,claude-code-20250219";
+        headers["User-Agent"] = "claude-cli/2.1.280 (external, cli)";
+      } else {
+        headers["x-api-key"] = targetKey;
+      }
     } else {
       if (targetKey) headers["Authorization"] = `Bearer ${targetKey}`;
     }
