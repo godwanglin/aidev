@@ -1762,6 +1762,18 @@ export default function AdminUsagePage() {
     return "latency-critical";
   };
 
+  const formatLatency = (ms: number) => {
+    if (typeof ms !== "number" || isNaN(ms)) return "—";
+    return `${(ms / 1000).toFixed(2)}s`;
+  };
+
+  const getLatencyColor = (ms: number) => {
+    if (ms <= 1000) return "#10b981"; // fast (green)
+    if (ms <= 3000) return "#3b82f6"; // normal (blue)
+    if (ms <= 8000) return "#f59e0b"; // moderate/slow (amber)
+    return "#f43f5e"; // critical/very slow (rose/red)
+  };
+
   // Code snippets for developer empty state
   const codeSnippets = {
     curl: `curl -X POST http://localhost:3000/v1/chat/completions \\
@@ -2526,15 +2538,13 @@ print(response.choices[0].message.content)`,
               <table className="table">
                 <thead>
                   <tr>
-                    <th>TIME</th>
+                    <th style={{ whiteSpace: "nowrap" }}>TIME</th>
                     <th>PROVIDER</th>
-                    <th>ACCOUNT / CONNECTION</th>
+                    <th>ACCOUNT / API KEY</th>
                     <th>MODEL</th>
-                    <th>TOKENS (IN/OUT)</th>
-                    <th>TOTAL</th>
-                    <th title="Format: Total Asli / Setelah Kompres / Total Hemat">RTK (ORI/COMP/SAVED)</th>
-                    <th>LATENCY</th>
-                    <th>STATUS</th>
+                    <th style={{ whiteSpace: "nowrap" }}>TOKENS (IN/OUT)</th>
+                    <th style={{ width: "70px", whiteSpace: "nowrap" }}>LATENCY</th>
+                    <th style={{ whiteSpace: "nowrap" }}>STATUS</th>
                     <th style={{ width: "78px", textAlign: "center" }}>ACTION</th>
                   </tr>
                 </thead>
@@ -2550,56 +2560,60 @@ print(response.choices[0].message.content)`,
                         {new Date(ev.createdAt).toLocaleTimeString()}
                       </td>
 
-                      {/* Provider */}
+                      {/* Provider & Upstream Account */}
                       <td>
-                        <span className="flex items-center gap-2">
-                          <ProviderAvatar
-                            slugOrId={getProviderSlug(ev.provider)}
-                            name={getProviderDisplayName(ev.provider)}
-                            size={20}
-                            imgSize={14}
-                            className="shrink-0 rounded"
-                            style={{
-                              backgroundColor: "var(--surface-hover)",
-                              borderColor: "var(--line)",
-                            }}
-                          />
-                          <span className="text-xs font-semibold">
-                            {getProviderDisplayName(ev.provider)}
-                          </span>
-                        </span>
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <ProviderAvatar
+                              slugOrId={getProviderSlug(ev.provider)}
+                              name={getProviderDisplayName(ev.provider)}
+                              size={18}
+                              imgSize={13}
+                              className="shrink-0 rounded"
+                              style={{
+                                backgroundColor: "var(--surface-hover)",
+                                borderColor: "var(--line)",
+                              }}
+                            />
+                            <span className="text-xs font-semibold" style={{ color: "var(--ink)" }}>
+                              {getProviderDisplayName(ev.provider)}
+                            </span>
+                          </div>
+                          {(ev.connection?.accountEmail || (ev.connection?.name && ev.connection.name !== "Direct Upstream")) ? (
+                            <span
+                              className="text-muted truncate max-w-[190px]"
+                              style={{ fontSize: "11px" }}
+                              title={ev.connection.accountEmail || ev.connection.name}
+                            >
+                              {ev.connection.accountEmail || ev.connection.name}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
 
-                      {/* Account / Connection & Client Requester */}
+                      {/* Client User Email & API Key Name */}
                       <td>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-semibold" style={{ color: "var(--ink)" }}>
-                              {ev.connection?.name || "Direct Upstream"}
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span
+                            className="text-xs font-semibold truncate max-w-[200px]"
+                            style={{ color: "var(--ink)" }}
+                            title={ev.clientUser?.email || ev.clientUserEmail || "Direct API"}
+                          >
+                            {ev.clientUser?.email || ev.clientUserEmail || "Direct API"}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span
+                              className="px-1.5 py-0.2 rounded text-[10.5px] font-medium mono truncate max-w-[190px]"
+                              style={{
+                                backgroundColor: "rgba(59, 130, 246, 0.1)",
+                                color: "#3b82f6",
+                                border: "1px solid rgba(59, 130, 246, 0.25)",
+                              }}
+                              title={`API Key: ${ev.clientUser?.keyName || ev.clientUser?.keyPrefix || ev.clientApiKeyId || "Default Key"}`}
+                            >
+                              🔑 {ev.clientUser?.keyName || ev.clientUser?.keyPrefix || (ev.clientApiKeyId ? `Key (${ev.clientApiKeyId.slice(-6)})` : "Default Key")}
                             </span>
-                            {ev.connection?.accountEmail && (
-                              <span className="text-muted" style={{ fontSize: "11px" }}>
-                                {ev.connection.accountEmail}
-                              </span>
-                            )}
                           </div>
-
-                          {/* Client Requester Account */}
-                          {(ev.clientUser?.email || ev.clientUserEmail) && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span
-                                className="px-1.5 py-0.5 rounded text-[10.5px] font-medium mono"
-                                style={{
-                                  backgroundColor: "rgba(59, 130, 246, 0.1)",
-                                  color: "#3b82f6",
-                                  border: "1px solid rgba(59, 130, 246, 0.25)",
-                                }}
-                                title={`Client Requester User: ${ev.clientUser?.email || ev.clientUserEmail} (${ev.clientUser?.tier || "FREE"})`}
-                              >
-                                👤 {ev.clientUser?.email || ev.clientUserEmail}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       </td>
 
@@ -2682,45 +2696,14 @@ print(response.choices[0].message.content)`,
                         </span>
                       </td>
 
-                      {/* Total */}
-                      <td className="mono text-xs font-bold" style={{ color: "var(--ink)" }}>
-                        {ev.totalTokens.toLocaleString()}
-                      </td>
-
-                      {/* RTK (Original / Compressed / Saved) */}
-                      <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
-                        {ev.tokensSavedRtk && ev.tokensSavedRtk > 0 ? (
-                          <span
-                            title={`Token Asli: ${(ev.totalTokens + ev.tokensSavedRtk).toLocaleString()} | Setelah Kompres: ${ev.totalTokens.toLocaleString()} | Total Hemat: -${ev.tokensSavedRtk.toLocaleString()}`}
-                          >
-                            <span className="text-muted font-medium">
-                              {(ev.totalTokens + ev.tokensSavedRtk).toLocaleString()}
-                            </span>
-                            <span className="text-muted mx-1">/</span>
-                            <span style={{ color: "var(--ink)", fontWeight: 600 }}>
-                              {ev.totalTokens.toLocaleString()}
-                            </span>
-                            <span className="text-muted mx-1">/</span>
-                            <span style={{ color: "#059669", fontWeight: 700 }}>
-                              -{ev.tokensSavedRtk.toLocaleString()}
-                            </span>
-                          </span>
-                        ) : (
-                          <span
-                            className="text-muted"
-                            style={{ opacity: 0.55 }}
-                            title="Tidak ada kompresi RTK pada request ini (0 token hemat)"
-                          >
-                            {ev.totalTokens ? `${ev.totalTokens.toLocaleString()} / ${ev.totalTokens.toLocaleString()} / 0` : "—"}
-                          </span>
-                        )}
-                      </td>
-
                       {/* Latency */}
-                      <td className="mono text-xs">
-                        <span className={`latency-badge ${getLatencyClass(ev.latencyMs)}`}>
-                          <Clock size={10} />
-                          <span>{ev.latencyMs}ms</span>
+                      <td className="mono text-xs" style={{ whiteSpace: "nowrap", width: "70px" }}>
+                        <span
+                          className="font-semibold"
+                          style={{ color: getLatencyColor(ev.latencyMs) }}
+                          title={`${ev.latencyMs.toLocaleString()} ms`}
+                        >
+                          {formatLatency(ev.latencyMs)}
                         </span>
                       </td>
 
