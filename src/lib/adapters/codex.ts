@@ -141,8 +141,28 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
       content = m.content;
     } else if (Array.isArray(m.content)) {
       content = m.content
-        .map((c: any) => (typeof c === "string" ? c : c.text || JSON.stringify(c)))
+        .map((c: any) => {
+          if (typeof c === "string") return c;
+          if (c.text) return c.text;
+          if (c.type === "image_url" || c.image_url || c.type === "image") {
+            const mediaType = c.source?.media_type || c.image_url?.media_type || "image/png";
+            return `[Attached Image: ${mediaType}]`;
+          }
+          if (c.type === "tool_result") {
+            if (typeof c.content === "string") return c.content;
+            if (Array.isArray(c.content)) {
+              return c.content.map((sub: any) => sub.text || (sub.type === "image" ? "[Tool Screenshot]" : JSON.stringify(sub))).join("\n");
+            }
+          }
+          return JSON.stringify(c);
+        })
         .join("\n");
+    }
+
+    // Strip any massive inline base64 image data that might have leaked into text/tool content
+    if (content.length > 500 && (content.includes("data:image/") || content.includes('"source":{"type":"base64"'))) {
+      content = content.replace(/data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]{100,}/g, "[Attached Image Base64 Data]");
+      content = content.replace(/"data"\s*:\s*"[A-Za-z0-9+/=]{100,}"/g, '"data":"[Attached Image Base64 Data]"');
     }
 
     if (m.role === "system" || m.role === "developer") {
@@ -245,8 +265,6 @@ const CODEX_SSE_ERROR_PATTERNS = [
 const CODEX_SSE_USER_OUTPUT_PATTERNS = [
   "event: response.output_text.delta",
   "event: response.function_call_arguments.delta",
-  "event: response.output_item.added",
-  "event: response.content_part.added",
   "event: response.reasoning_text.delta",
   "event: response.thinking_text.delta",
   '"type":"response.output_text.delta"',

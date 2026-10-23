@@ -169,7 +169,12 @@ export function convertClaudeMessage(msg: any): any[] {
         const texts = block.content
           .filter((c: any) => c?.type === "text" && c.text)
           .map((c: any) => c.text);
-        resultContent = texts.length > 0 ? texts.join("\n") : JSON.stringify(block.content);
+        if (texts.length > 0) {
+          resultContent = texts.join("\n");
+        } else {
+          const hasImage = block.content.some((c: any) => c?.type === "image");
+          resultContent = hasImage ? "[Tool Image Result]" : JSON.stringify(block.content);
+        }
       } else if (block.content !== undefined) {
         try {
           resultContent = JSON.stringify(block.content);
