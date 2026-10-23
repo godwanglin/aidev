@@ -228,7 +228,21 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
     try {
       bodyObj = JSON.parse(rawBody);
     } catch {
-      bodyObj = null;
+      // Auto-repair truncated JSON string (e.g. cut off by MAX_LOG_PAYLOAD)
+      try {
+        let repaired = rawBody.trim();
+        const quoteCount = (repaired.match(/(?<!\\)"/g) || []).length;
+        if (quoteCount % 2 !== 0) repaired += '"';
+        const openBraces = (repaired.match(/{/g) || []).length;
+        const closeBraces = (repaired.match(/}/g) || []).length;
+        const openBrackets = (repaired.match(/\[/g) || []).length;
+        const closeBrackets = (repaired.match(/\]/g) || []).length;
+        for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += "]";
+        for (let i = 0; i < openBraces - closeBraces; i++) repaired += "}";
+        bodyObj = JSON.parse(repaired);
+      } catch {
+        bodyObj = null;
+      }
     }
   } else {
     bodyObj = rawBody;
@@ -543,6 +557,30 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
       const p = typeof bodyObj.prompt === "string" ? bodyObj.prompt : JSON.stringify(bodyObj.prompt, null, 2);
       messages.push({ id: "prompt-0", role: "user", content: p });
     }
+  } else if (typeof rawBody === "string" && rawBody.trim()) {
+    // Fallback extraction when JSON is truncated/unparseable:
+    // Extract system instructions and latest user prompt via regex
+    const sysMatch = rawBody.match(/"role":\s*"system",\s*"content":\s*"((?:\\.|[^"\\])*)"/);
+    if (sysMatch) {
+      try {
+        messages.push({ id: "sys-fallback", role: "system", content: JSON.parse(`"${sysMatch[1]}"`) });
+      } catch {
+        messages.push({ id: "sys-fallback", role: "system", content: sysMatch[1] });
+      }
+    }
+    const userMatches = [...rawBody.matchAll(/"role":\s*"user",\s*"content":\s*"((?:\\.|[^"\\])*)"/g)];
+    if (userMatches.length > 0) {
+      const lastUser = userMatches[userMatches.length - 1][1];
+      let userContent = lastUser;
+      try { userContent = JSON.parse(`"${lastUser}"`); } catch {}
+      messages.push({ id: "user-fallback", role: "user", content: userContent });
+    } else {
+      messages.push({
+        id: "raw-preview",
+        role: "user",
+        content: rawBody.slice(0, 1500) + (rawBody.length > 1500 ? "\n\n[... preview payload mentah dipotong ...]" : ""),
+      });
+    }
   }
 
   // Parse rawResponse for the Final Assistant Output
@@ -633,6 +671,10 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
           }
         }
       } catch {}
+    }
+
+    if (!accText && !accReasoning && accToolCalls.length === 0 && typeof rawResponse === "string" && rawResponse.trim()) {
+      accText = rawResponse.trim();
     }
 
     if (accText || accReasoning || accToolCalls.length > 0) {
@@ -1140,8 +1182,27 @@ function ChatConversationView({
               );
             }
 
-            // 4. SYSTEM PROMPT BUBBLE
+            // 4. SYSTEM PROMPT BUBBLE OR OMITTED HISTORY DIVIDER
             if (msg.role === "system") {
+              const isHistoryOmitted = msg.content.includes("[Riwayat percakapan:") || msg.content.includes("pesan riwayat sebelumnya dilewati") || (msg as any)._isHistoryOmittedNote;
+              if (isHistoryOmitted) {
+                return (
+                  <div key={msg.id || idx} className="w-full flex items-center justify-center my-2">
+                    <div
+                      className="px-3.5 py-1 rounded-full text-[11px] font-medium flex items-center gap-1.5 shadow-sm"
+                      style={{
+                        background: "rgba(148, 163, 184, 0.08)",
+                        border: "1px dashed rgba(148, 163, 184, 0.3)",
+                        color: "var(--muted)",
+                      }}
+                    >
+                      <span>💬</span>
+                      <span>{msg.content.replace(/^\[|\]$/g, "")}</span>
+                    </div>
+                  </div>
+                );
+              }
+
               const isLong = msg.content.length > 300;
               const isExpanded = expandedSystem[msg.id] ?? false;
               const displayContent = isLong && !isExpanded ? msg.content.slice(0, 300) + "..." : msg.content;

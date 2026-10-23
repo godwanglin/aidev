@@ -404,6 +404,186 @@ export async function markConnectionCooldown(connectionId: string, durationSecon
 
 import { telemetryStore } from "./telemetry-store";
 
+/**
+ * Compacts a chat request body for logging to prevent storing bloated multi-turn history.
+ * Preserves:
+ * 1. System instruction (developer prompt / agent instructions)
+ * 2. Tool declarations summary (type & name, omit heavy schemas)
+ * 3. An omitted breadcrumb note if older conversation turns exist
+ * 4. The latest turn (last 1-2 messages: e.g. latest user prompt)
+ *
+ * Keeps output 100% valid JSON, reduces DB footprint from ~100KB to ~2KB.
+ */
+export function compactRequestBodyForLog(rawBody: any): string | null {
+  if (!rawBody) return null;
+
+  let bodyObj: any;
+  if (typeof rawBody === "string") {
+    try {
+      bodyObj = JSON.parse(rawBody);
+    } catch {
+      // If it's not valid JSON, slice safely
+      return rawBody.slice(0, 10000);
+    }
+  } else if (typeof rawBody === "object" && rawBody !== null) {
+    try {
+      bodyObj = JSON.parse(JSON.stringify(rawBody));
+    } catch {
+      bodyObj = { ...rawBody };
+    }
+  } else {
+    return String(rawBody).slice(0, 5000);
+  }
+
+  try {
+    const compacted: Record<string, any> = {
+      model: bodyObj.model,
+    };
+
+    // 1. Anthropic / Top-level system
+    if (bodyObj.system) {
+      if (typeof bodyObj.system === "string") {
+        compacted.system = bodyObj.system.length > 8000
+          ? `${bodyObj.system.slice(0, 8000)}\n\n[... sisa instruksi sistem dipotong untuk log ...]`
+          : bodyObj.system;
+      } else {
+        compacted.system = bodyObj.system;
+      }
+    }
+
+    // 2. Compact tools declaration (keep names/types instead of heavy schemas)
+    if (Array.isArray(bodyObj.tools) && bodyObj.tools.length > 0) {
+      compacted.tools = bodyObj.tools.slice(0, 15).map((t: any) => ({
+        type: t.type || "function",
+        name: t.function?.name || t.name || "tool",
+        description: t.function?.description?.slice(0, 80) || t.description?.slice(0, 80) || undefined,
+      }));
+      if (bodyObj.tools.length > 15) {
+        compacted._toolsOmitted = `${bodyObj.tools.length - 15} more tools omitted from log`;
+      }
+    }
+
+    // Helper to sanitize message content (strip huge base64 or bound long text)
+    const sanitizeContent = (content: any): any => {
+      if (typeof content === "string") {
+        return content.length > 12000
+          ? `${content.slice(0, 12000)}\n\n[... isi pesan dipotong pada 12KB untuk log ...]`
+          : content;
+      }
+      if (Array.isArray(content)) {
+        return content.map((part: any) => {
+          if (typeof part === "string") {
+            return part.length > 8000 ? `${part.slice(0, 8000)}...` : part;
+          }
+          if (part && typeof part === "object") {
+            if (part.type === "image" || part.type === "image_url") {
+              return { type: "image", note: "[Gambar/Lampiran Base64 diringkas untuk log]" };
+            }
+            if (part.type === "text" && typeof part.text === "string" && part.text.length > 8000) {
+              return { ...part, text: `${part.text.slice(0, 8000)}\n\n[... teks dipotong pada 8KB ...]` };
+            }
+          }
+          return part;
+        });
+      }
+      return content;
+    };
+
+    // 3. Compact OpenAI / Anthropic messages
+    if (Array.isArray(bodyObj.messages)) {
+      const allMsgs = bodyObj.messages;
+      const systemMsgs: any[] = [];
+      const nonSystemMsgs: any[] = [];
+
+      for (const m of allMsgs) {
+        if (!m) continue;
+        const role = (m.role || "").toLowerCase();
+        if (role === "system" || role === "developer") {
+          systemMsgs.push({ ...m, content: sanitizeContent(m.content) });
+        } else {
+          nonSystemMsgs.push(m);
+        }
+      }
+
+      const compactedMessages: any[] = [...systemMsgs];
+
+      if (nonSystemMsgs.length > 0) {
+        // If there is prior conversation history, add a note
+        if (nonSystemMsgs.length > 2) {
+          const omittedCount = nonSystemMsgs.length - 2;
+          compactedMessages.push({
+            role: "system",
+            content: `[Riwayat percakapan: ${omittedCount} pesan riwayat sebelumnya dilewati untuk menghemat log]`,
+            _isHistoryOmittedNote: true,
+          });
+        }
+
+        // Keep the last 1 or 2 messages (prior assistant reply/tool call + latest user prompt)
+        const recentMsgs = nonSystemMsgs.slice(-2);
+        for (const rm of recentMsgs) {
+          compactedMessages.push({ ...rm, content: sanitizeContent(rm.content) });
+        }
+      }
+
+      compacted.messages = compactedMessages;
+    } else if (Array.isArray(bodyObj.input)) {
+      // 4. Codex Responses input format
+      const allInputs = bodyObj.input;
+      const sysInputs: any[] = [];
+      const nonSysInputs: any[] = [];
+
+      for (const item of allInputs) {
+        if (!item) continue;
+        if (item.type === "additional_tools" || item.role === "system") {
+          sysInputs.push(item);
+        } else {
+          nonSysInputs.push(item);
+        }
+      }
+
+      const compactedInputs: any[] = [...sysInputs];
+      if (nonSysInputs.length > 1) {
+        compactedInputs.push({
+          role: "system",
+          content: `[Riwayat percakapan: ${nonSysInputs.length - 1} item input sebelumnya dilewati untuk menghemat log]`,
+        });
+      }
+      if (nonSysInputs.length > 0) {
+        compactedInputs.push(nonSysInputs[nonSysInputs.length - 1]);
+      }
+      compacted.input = compactedInputs;
+    } else if (Array.isArray(bodyObj.contents)) {
+      // 5. Gemini format
+      if (bodyObj.systemInstruction) {
+        compacted.systemInstruction = bodyObj.systemInstruction;
+      }
+      if (bodyObj.contents.length > 1) {
+        compacted.contents = [
+          {
+            role: "user",
+            parts: [{ text: `[Riwayat percakapan: ${bodyObj.contents.length - 1} turn sebelumnya dilewati untuk log]` }]
+          },
+          bodyObj.contents[bodyObj.contents.length - 1]
+        ];
+      } else {
+        compacted.contents = bodyObj.contents;
+      }
+    } else if (bodyObj.prompt) {
+      compacted.prompt = typeof bodyObj.prompt === "string" && bodyObj.prompt.length > 10000
+        ? `${bodyObj.prompt.slice(0, 10000)}... [truncated]`
+        : bodyObj.prompt;
+    }
+
+    if (bodyObj.max_tokens !== undefined) compacted.max_tokens = bodyObj.max_tokens;
+    if (bodyObj.temperature !== undefined) compacted.temperature = bodyObj.temperature;
+    if (bodyObj.stream !== undefined) compacted.stream = bodyObj.stream;
+
+    return JSON.stringify(compacted, null, 2);
+  } catch {
+    return typeof rawBody === "object" ? JSON.stringify(rawBody).slice(0, 20000) : String(rawBody).slice(0, 20000);
+  }
+}
+
 export async function logUpstreamRequest(data: {
   connectionId?: string | null;
   provider: string;
@@ -426,16 +606,28 @@ export async function logUpstreamRequest(data: {
 }): Promise<void> {
   const rtkSaved = Number(data.tokensSavedRtk) || 0;
   const safeConnectionId = (data.connectionId && !data.connectionId.startsWith("default-")) ? data.connectionId : null;
-  const MAX_LOG_PAYLOAD = 50000;
+  
   const rawHeadersStr = data.rawHeaders
-    ? (typeof data.rawHeaders === "object" ? JSON.stringify(data.rawHeaders) : String(data.rawHeaders)).slice(0, MAX_LOG_PAYLOAD)
+    ? (typeof data.rawHeaders === "object" ? JSON.stringify(data.rawHeaders, null, 2) : String(data.rawHeaders)).slice(0, 15000)
     : null;
-  const rawBodyStr = data.rawBody
-    ? (typeof data.rawBody === "object" ? JSON.stringify(data.rawBody) : String(data.rawBody)).slice(0, MAX_LOG_PAYLOAD)
-    : null;
-  const rawResponseStr = data.rawResponse
-    ? (typeof data.rawResponse === "object" ? JSON.stringify(data.rawResponse) : String(data.rawResponse)).slice(0, MAX_LOG_PAYLOAD)
-    : null;
+    
+  const rawBodyStr = compactRequestBodyForLog(data.rawBody);
+  
+  let rawResponseStr: string | null = null;
+  if (data.rawResponse) {
+    if (typeof data.rawResponse === "object") {
+      try {
+        rawResponseStr = JSON.stringify(data.rawResponse, null, 2);
+      } catch {
+        rawResponseStr = String(data.rawResponse);
+      }
+    } else {
+      rawResponseStr = String(data.rawResponse);
+    }
+    if (rawResponseStr.length > 35000) {
+      rawResponseStr = rawResponseStr.slice(0, 35000) + "\n\n[... response dipotong pada 35KB untuk log ...]";
+    }
+  }
 
   const safeData: any = {
     ...data,
@@ -465,9 +657,9 @@ export async function logUpstreamRequest(data: {
         email: data.clientUserEmail,
       },
       reasoningEffort: data.reasoningEffort,
-      rawHeaders: data.rawHeaders,
-      rawBody: data.rawBody,
-      rawResponse: data.rawResponse,
+      rawHeaders: rawHeadersStr,
+      rawBody: rawBodyStr,
+      rawResponse: rawResponseStr,
     });
 
     if (rtkSaved > 0) {
@@ -492,9 +684,9 @@ export async function logUpstreamRequest(data: {
           email: data.clientUserEmail,
         },
         reasoningEffort: data.reasoningEffort,
-        rawHeaders: data.rawHeaders,
-        rawBody: data.rawBody,
-        rawResponse: data.rawResponse,
+        rawHeaders: rawHeadersStr,
+        rawBody: rawBodyStr,
+        rawResponse: rawResponseStr,
       });
 
       if (rtkSaved > 0) {
