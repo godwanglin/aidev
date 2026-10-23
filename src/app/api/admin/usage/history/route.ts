@@ -222,11 +222,24 @@ export async function GET(req: NextRequest) {
 
     const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
+    // Fetch unique models present in recent logs for quick filtering in admin
+    let availableModels: string[] = [];
+    try {
+      const distinct = await prisma.upstreamLog.findMany({
+        distinct: ["model"],
+        select: { model: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+      availableModels = distinct.map((d) => d.model).filter(Boolean);
+    } catch {}
+
     return NextResponse.json({
       success: true,
       data: {
         logs,
         totalCount,
+        availableModels,
         pagination: {
           page,
           limit,

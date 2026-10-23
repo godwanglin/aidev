@@ -115,6 +115,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   req.headers.forEach((v, k) => {
     if (k.toLowerCase() === "authorization") {
       rawHeadersObj[k] = v.length > 20 ? `${v.slice(0, 15)}...${v.slice(-6)}` : v;
+    } else if (k.toLowerCase() === "x-api-key") {
+      rawHeadersObj[k] = v.length > 15 ? `${v.slice(0, 10)}...${v.slice(-4)}` : v;
     } else {
       rawHeadersObj[k] = v;
     }
@@ -631,6 +633,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             upstreamLogModel,
             clientApiKeyId: apiKeyId,
             clientUserId,
+            clientUserEmail: userEmail,
+            reasoningEffort: candidateReasoningEffort,
+            rawHeaders: rawHeadersObj,
             reqPath,
             clientWantsStream,
             estimatedPromptTokens,

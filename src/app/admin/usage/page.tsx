@@ -1401,6 +1401,7 @@ export default function AdminUsagePage() {
   // Filters
   const [providerFilter, setProviderFilter] = useState("ALL");
   const [accountFilter, setAccountFilter] = useState("ALL");
+  const [modelFilter, setModelFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchModel, setSearchModel] = useState("");
 
@@ -1420,6 +1421,7 @@ export default function AdminUsagePage() {
   const hasActiveFilters =
     providerFilter !== "ALL" ||
     accountFilter !== "ALL" ||
+    modelFilter !== "ALL" ||
     statusFilter !== "ALL" ||
     debouncedSearch.trim() !== "";
 
@@ -1433,8 +1435,12 @@ export default function AdminUsagePage() {
   // Dropdown popover states
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelSearch, setModelSearch] = useState("");
   const providerDropdownRef = useRef<HTMLDivElement>(null);
   const accountDropdownRef = useRef<HTMLDivElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Developer Hub Empty State Tabs
   const [codeTab, setCodeTab] = useState<"curl" | "node" | "python">("curl");
@@ -1445,6 +1451,7 @@ export default function AdminUsagePage() {
   const [loadingInspectDetail, setLoadingInspectDetail] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
   const [activeRawTab, setActiveRawTab] = useState<"chat" | "body" | "headers" | "response" | "telemetry">("chat");
+  const [headerViewMode, setHeaderViewMode] = useState<"table" | "json">("table");
   const [copiedTab, setCopiedTab] = useState(false);
 
   // Dedicated Chat Bubble Popup Modal
@@ -1454,7 +1461,7 @@ export default function AdminUsagePage() {
   async function openInspect(ev: UpstreamEvent) {
     setInspectEvent(ev);
     const isTruncated = typeof ev.rawBody === "string" && ev.rawBody.includes("[TRUNCATED_IN_MEMORY_CACHE]");
-    if (!ev.rawBody || isTruncated || (!ev.rawResponse && !ev.rawBody)) {
+    if (!ev.rawHeaders || !ev.rawBody || isTruncated || (!ev.rawResponse && !ev.rawBody)) {
       setLoadingInspectDetail(true);
       try {
         const res = await fetch(`/api/admin/usage/history?logId=${ev.id}`);
@@ -1507,6 +1514,12 @@ export default function AdminUsagePage() {
       ) {
         setAccountDropdownOpen(false);
       }
+      if (
+        modelDropdownRef.current &&
+        !modelDropdownRef.current.contains(event.target as Node)
+      ) {
+        setModelDropdownOpen(false);
+      }
     }
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -1522,7 +1535,7 @@ export default function AdminUsagePage() {
     provider = providerFilter,
     account = accountFilter,
     status = statusFilter,
-    model = debouncedSearch
+    model = (modelFilter !== "ALL" ? modelFilter : debouncedSearch)
   ) {
     setLoading(true);
     try {
@@ -1540,6 +1553,9 @@ export default function AdminUsagePage() {
       if (json.success && json.data) {
         setEvents(json.data.logs || []);
         setTotalCount(json.data.totalCount ?? 0);
+        if (Array.isArray(json.data.availableModels)) {
+          setAvailableModels(json.data.availableModels);
+        }
         if (json.data.stats) {
           setStats(json.data.stats);
         }
@@ -1611,24 +1627,25 @@ export default function AdminUsagePage() {
   }, []);
 
   // Reset to page 1 whenever filters change
-  const prevFilterState = useRef({ providerFilter, accountFilter, statusFilter, debouncedSearch });
+  const prevFilterState = useRef({ providerFilter, accountFilter, modelFilter, statusFilter, debouncedSearch });
   useEffect(() => {
     const prev = prevFilterState.current;
     if (
       prev.providerFilter !== providerFilter ||
       prev.accountFilter !== accountFilter ||
+      prev.modelFilter !== modelFilter ||
       prev.statusFilter !== statusFilter ||
       prev.debouncedSearch !== debouncedSearch
     ) {
-      prevFilterState.current = { providerFilter, accountFilter, statusFilter, debouncedSearch };
+      prevFilterState.current = { providerFilter, accountFilter, modelFilter, statusFilter, debouncedSearch };
       setCurrentPage(1);
     }
-  }, [providerFilter, accountFilter, statusFilter, debouncedSearch]);
+  }, [providerFilter, accountFilter, modelFilter, statusFilter, debouncedSearch]);
 
   // Fetch when page, size, or filters change
   useEffect(() => {
-    fetchHistory(currentPage, pageSize, providerFilter, accountFilter, statusFilter, debouncedSearch);
-  }, [currentPage, pageSize, providerFilter, accountFilter, statusFilter, debouncedSearch]);
+    fetchHistory(currentPage, pageSize, providerFilter, accountFilter, statusFilter, modelFilter !== "ALL" ? modelFilter : debouncedSearch);
+  }, [currentPage, pageSize, providerFilter, accountFilter, modelFilter, statusFilter, debouncedSearch]);
 
   // Only display providers that actually have connected accounts!
   const connectedProviders = useMemo(() => {
@@ -2361,6 +2378,110 @@ print(response.choices[0].message.content)`,
                 </div>
               )}
             </div>
+
+            {/* 3. Model Dropdown Trigger & Popover */}
+            <div className="provider-dropdown-container" ref={modelDropdownRef}>
+              <button
+                type="button"
+                className={`provider-dropdown-trigger ${modelDropdownOpen ? "active" : ""}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setModelDropdownOpen((prev) => !prev);
+                  setProviderDropdownOpen(false);
+                  setAccountDropdownOpen(false);
+                }}
+              >
+                <Code2
+                  size={13}
+                  style={{ color: modelFilter !== "ALL" ? "var(--blue, #2563eb)" : "var(--muted, #64748b)" }}
+                />
+                <span className="trigger-text" style={{ maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {modelFilter === "ALL" ? "All models" : modelFilter}
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={`trigger-chevron ${modelDropdownOpen ? "open" : ""}`}
+                />
+              </button>
+
+              {modelDropdownOpen && (
+                <div className="provider-popover-menu" style={{ minWidth: "260px", maxWidth: "340px" }}>
+                  {/* Search inside model dropdown if > 5 models */}
+                  {availableModels.length > 5 && (
+                    <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--line)" }}>
+                      <input
+                        type="text"
+                        className="control text-xs w-full"
+                        placeholder="Search models in logs..."
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ height: "26px", fontSize: "11px" }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Option: All Models */}
+                  <button
+                    type="button"
+                    className={`provider-dropdown-item ${modelFilter === "ALL" ? "active" : ""}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setModelFilter("ALL");
+                      setModelDropdownOpen(false);
+                      setModelSearch("");
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <div className="item-content">
+                      <span className="item-title">All models</span>
+                    </div>
+                    {modelFilter === "ALL" && (
+                      <Check size={15} className="item-check" />
+                    )}
+                  </button>
+
+                  {/* Models List */}
+                  <div className="provider-dropdown-scroll">
+                    {availableModels.length === 0 ? (
+                      <div className="provider-dropdown-empty">
+                        No models recorded yet
+                      </div>
+                    ) : (
+                      availableModels
+                        .filter((m) => !modelSearch.trim() || m.toLowerCase().includes(modelSearch.toLowerCase().trim()))
+                        .map((m) => {
+                          const isSelected = modelFilter === m;
+                          return (
+                            <button
+                              key={m}
+                              type="button"
+                              className={`provider-dropdown-item ${isSelected ? "active" : ""}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setModelFilter(m);
+                                setModelDropdownOpen(false);
+                                setModelSearch("");
+                                setCurrentPage(1);
+                              }}
+                            >
+                              <div className="account-box" style={{ maxWidth: "240px" }}>
+                                <span className="account-title mono text-[11.5px]" style={{ wordBreak: "break-all" }}>{m}</span>
+                              </div>
+                              {isSelected && (
+                                <Check size={15} className="item-check shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right Controls: Segmented Status Filter + Search */}
@@ -2435,6 +2556,7 @@ print(response.choices[0].message.content)`,
                   onClick={() => {
                     setProviderFilter("ALL");
                     setAccountFilter("ALL");
+                    setModelFilter("ALL");
                     setStatusFilter("ALL");
                     setSearchModel("");
                   }}
@@ -2467,6 +2589,7 @@ print(response.choices[0].message.content)`,
                     onClick={() => {
                       setProviderFilter("ALL");
                       setAccountFilter("ALL");
+                      setModelFilter("ALL");
                       setStatusFilter("ALL");
                       setSearchModel("");
                     }}
@@ -3138,7 +3261,21 @@ print(response.choices[0].message.content)`,
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActiveRawTab("headers")}
+                        onClick={() => {
+                          setActiveRawTab("headers");
+                          if (inspectEvent && !inspectEvent.rawHeaders && !loadingInspectDetail) {
+                            setLoadingInspectDetail(true);
+                            fetch(`/api/admin/usage/history?logId=${inspectEvent.id}`)
+                              .then((r) => r.json())
+                              .then((json) => {
+                                if (json.success && json.data?.log) {
+                                  setInspectEvent((prev) => (prev?.id === inspectEvent.id ? { ...prev, ...json.data.log } : prev));
+                                }
+                              })
+                              .catch(() => {})
+                              .finally(() => setLoadingInspectDetail(false));
+                          }
+                        }}
                         className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                           activeRawTab === "headers"
                             ? "bg-blue text-white shadow-sm"
@@ -3202,6 +3339,33 @@ print(response.choices[0].message.content)`,
                         <span>Buka Popup Penuh</span>
                       </button>
 
+                      {activeRawTab === "headers" && inspectEvent.rawHeaders && (
+                        <div className="flex items-center gap-1 p-0.5 rounded-md text-[11px] mr-1" style={{ background: "rgba(30, 41, 59, 0.6)", border: "1px solid var(--border)" }}>
+                          <button
+                            type="button"
+                            className="px-2 py-0.5 rounded font-semibold transition-all"
+                            onClick={() => setHeaderViewMode("table")}
+                            style={{
+                              background: headerViewMode === "table" ? "#3b82f6" : "transparent",
+                              color: headerViewMode === "table" ? "#fff" : "var(--muted)",
+                            }}
+                          >
+                            Table
+                          </button>
+                          <button
+                            type="button"
+                            className="px-2 py-0.5 rounded font-semibold transition-all"
+                            onClick={() => setHeaderViewMode("json")}
+                            style={{
+                              background: headerViewMode === "json" ? "#3b82f6" : "transparent",
+                              color: headerViewMode === "json" ? "#fff" : "var(--muted)",
+                            }}
+                          >
+                            JSON
+                          </button>
+                        </div>
+                      )}
+
                       {activeRawTab !== "chat" && (
                         <button
                           className="inspector-copy-btn"
@@ -3244,6 +3408,92 @@ print(response.choices[0].message.content)`,
                         }}
                         onSwitchToRaw={() => setActiveRawTab("body")}
                       />
+                    </div>
+                  ) : activeRawTab === "headers" && headerViewMode === "table" ? (
+                    <div style={{ marginTop: "10px" }}>
+                      {loadingInspectDetail ? (
+                        <div className="inspector-code-box">
+                          <pre className="inspector-pre">
+                            <code>// Sedang memuat full raw headers dari database...</code>
+                          </pre>
+                        </div>
+                      ) : !inspectEvent.rawHeaders ? (
+                        <div className="inspector-code-box">
+                          <pre className="inspector-pre">
+                            <code>// Tidak ada data raw headers yang tersimpan untuk request ini.</code>
+                          </pre>
+                        </div>
+                      ) : (() => {
+                        let parsed: Record<string, string> | null = null;
+                        if (typeof inspectEvent.rawHeaders === "object" && inspectEvent.rawHeaders !== null) {
+                          parsed = inspectEvent.rawHeaders;
+                        } else if (typeof inspectEvent.rawHeaders === "string") {
+                          try { parsed = JSON.parse(inspectEvent.rawHeaders); } catch {}
+                        }
+                        if (!parsed || Object.keys(parsed).length === 0) {
+                          return (
+                            <div className="inspector-code-box">
+                              <pre className="inspector-pre">
+                                <code>{typeof inspectEvent.rawHeaders === "string" ? inspectEvent.rawHeaders : "// Headers kosong."}</code>
+                              </pre>
+                            </div>
+                          );
+                        }
+                        const entries = Object.entries(parsed);
+                        return (
+                          <div style={{ border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden", background: "var(--surface)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)", background: "rgba(0,0,0,0.15)" }}>
+                              <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-soft)" }}>
+                                Client HTTP Headers ({entries.length})
+                              </span>
+                              <span style={{ fontSize: "10.5px", color: "var(--muted)" }}>
+                                Dikirim oleh Agent (Claude Code, Cursor, Antigravity, dll)
+                              </span>
+                            </div>
+                            <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11.5px" }}>
+                                <tbody>
+                                  {entries.map(([key, val], idx) => (
+                                    <tr
+                                      key={key}
+                                      style={{
+                                        borderBottom: idx < entries.length - 1 ? "1px solid var(--border)" : "none",
+                                        backgroundColor: idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)",
+                                      }}
+                                    >
+                                      <td
+                                        className="mono"
+                                        style={{
+                                          padding: "7px 12px",
+                                          width: "220px",
+                                          fontWeight: 600,
+                                          color: "#3b82f6",
+                                          verticalAlign: "top",
+                                          userSelect: "text",
+                                        }}
+                                      >
+                                        {key}
+                                      </td>
+                                      <td
+                                        className="mono"
+                                        style={{
+                                          padding: "7px 12px",
+                                          color: "var(--ink)",
+                                          wordBreak: "break-all",
+                                          verticalAlign: "top",
+                                          userSelect: "text",
+                                        }}
+                                      >
+                                        {val}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="inspector-code-box" style={{ marginTop: "10px" }}>

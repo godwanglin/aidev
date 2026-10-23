@@ -123,7 +123,7 @@ export default function AdminCombosPage() {
   const [isPublic, setIsPublic] = useState(true);
   const [rateInUsdPer1m, setRateInPer1m] = useState(0.15);
   const [rateOutUsdPer1m, setRateOutPer1m] = useState(0.60);
-  const [selectedItems, setSelectedItems] = useState<{ modelId: string; priority: number; weight: number }[]>([]);
+  const [selectedItems, setSelectedItems] = useState<{ modelId: string; priority: number; weight: number; isActive?: boolean }[]>([]);
   const [saving, setSaving] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [manualModelInput, setManualModelInput] = useState("");
@@ -192,9 +192,18 @@ export default function AdminCombosPage() {
         modelId: clean,
         priority: selectedItems.length + 1,
         weight: 1,
+        isActive: true,
       },
     ]);
     setManualModelInput("");
+  }
+
+  function handleToggleItemActive(index: number) {
+    setSelectedItems((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, isActive: item.isActive === false ? true : false } : item
+      )
+    );
   }
 
   useEffect(() => {
@@ -251,6 +260,7 @@ export default function AdminCombosPage() {
         modelId: it.modelId,
         priority: it.priority,
         weight: it.weight,
+        isActive: it.isActive !== false,
       }))
     );
     setPickerSearch("");
@@ -924,15 +934,17 @@ export default function AdminCombosPage() {
                                     ? "0 4px 12px rgba(59, 130, 246, 0.3)"
                                     : "0 1px 2px rgba(0,0,0,0.02)",
                                   cursor: canDrag ? "grab" : "default",
-                                  opacity: isDragged ? 0.35 : 1,
-                                  borderStyle: isDragged ? "dashed" : "solid",
-                                  borderColor: isDragOver ? "#3b82f6" : undefined,
-                                  backgroundColor: isDragOver ? "rgba(59, 130, 246, 0.15)" : undefined,
+                                  opacity: isDragged ? 0.35 : item.isActive === false ? 0.45 : 1,
+                                  borderStyle: isDragged ? "dashed" : item.isActive === false ? "dashed" : "solid",
+                                  borderColor: isDragOver ? "#3b82f6" : item.isActive === false ? "rgba(239, 68, 68, 0.4)" : undefined,
+                                  backgroundColor: isDragOver ? "rgba(59, 130, 246, 0.15)" : item.isActive === false ? "rgba(239, 68, 68, 0.05)" : undefined,
                                   transition: "all 0.15s ease",
                                   userSelect: "none",
                                 }}
                                 title={
-                                  canDrag
+                                  item.isActive === false
+                                    ? `[DISABLED] Model ini dilewati/skip saat routing`
+                                    : canDrag
                                     ? `Drag untuk menukar urutan (${
                                         combo.strategy === "ROUND_ROBIN" ? `W:${item.weight}` : `T${item.priority}`
                                       })`
@@ -952,11 +964,19 @@ export default function AdminCombosPage() {
                                     fontSize: "9.5px",
                                     padding: "1px 5px",
                                     borderRadius: "4px",
+                                    filter: item.isActive === false ? "grayscale(1)" : "none",
                                   }}
                                 >
                                   {combo.strategy === "ROUND_ROBIN" ? `W:${item.weight}` : `T${item.priority}`}
                                 </span>
-                                <span style={{ fontWeight: 500 }}>{item.modelId}</span>
+                                <span style={{ fontWeight: 500, textDecoration: item.isActive === false ? "line-through" : "none" }}>
+                                  {item.modelId}
+                                </span>
+                                {item.isActive === false && (
+                                  <span style={{ fontSize: "9px", fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.12)", padding: "1px 4px", borderRadius: "3px", marginLeft: "4px" }}>
+                                    OFF
+                                  </span>
+                                )}
 
                                 {isCooling && (
                                   <span
@@ -1549,6 +1569,7 @@ export default function AdminCombosPage() {
                                             modelId: m.modelId,
                                             priority: selectedItems.length + 1,
                                             weight: 1,
+                                            isActive: true,
                                           },
                                         ]);
                                       }
@@ -1644,6 +1665,9 @@ export default function AdminCombosPage() {
                             padding: "8px 12px",
                             borderBottom: idx < selectedItems.length - 1 ? "1px solid var(--line)" : "none",
                             fontSize: "12px",
+                            opacity: it.isActive === false ? 0.55 : 1,
+                            backgroundColor: it.isActive === false ? "rgba(239, 68, 68, 0.03)" : "transparent",
+                            transition: "all 0.15s ease",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1657,16 +1681,95 @@ export default function AdminCombosPage() {
                                 fontWeight: 700,
                                 minWidth: "42px",
                                 textAlign: "center",
+                                filter: it.isActive === false ? "grayscale(1)" : "none",
                               }}
                             >
                               {strategy === "ROUND_ROBIN" ? `W:${it.weight}` : `Tier ${it.priority}`}
                             </span>
-                            <span className="mono" style={{ fontWeight: 500, color: "var(--ink)" }}>
+                            <span
+                              className="mono"
+                              style={{
+                                fontWeight: 500,
+                                color: it.isActive === false ? "var(--muted)" : "var(--ink)",
+                                textDecoration: it.isActive === false ? "line-through" : "none",
+                              }}
+                            >
                               {it.modelId}
                             </span>
+                            {it.isActive === false && (
+                              <span
+                                style={{
+                                  fontSize: "9.5px",
+                                  fontWeight: 700,
+                                  color: "#ef4444",
+                                  backgroundColor: "rgba(239, 68, 68, 0.12)",
+                                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                                  padding: "1px 6px",
+                                  borderRadius: "3px",
+                                  letterSpacing: "0.5px",
+                                }}
+                              >
+                                DISABLED
+                              </span>
+                            )}
                           </div>
 
-                          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            {/* Toggle Enable / Disable Candidate */}
+                            <label
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                cursor: "pointer",
+                                marginRight: "6px",
+                                userSelect: "none",
+                              }}
+                              title={it.isActive === false ? "Candidate dinonaktifkan (akan dilewati)" : "Candidate aktif"}
+                            >
+                              <div
+                                style={{
+                                  width: "28px",
+                                  height: "16px",
+                                  borderRadius: "10px",
+                                  backgroundColor: it.isActive === false ? "rgba(100, 116, 139, 0.3)" : "#10b981",
+                                  position: "relative",
+                                  transition: "background-color 0.2s ease",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: "12px",
+                                    height: "12px",
+                                    borderRadius: "50%",
+                                    backgroundColor: "#ffffff",
+                                    position: "absolute",
+                                    top: "2px",
+                                    left: it.isActive === false ? "2px" : "14px",
+                                    transition: "left 0.2s ease",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+                                  }}
+                                />
+                              </div>
+                              <input
+                                suppressHydrationWarning
+                                type="checkbox"
+                                checked={it.isActive !== false}
+                                onChange={() => handleToggleItemActive(idx)}
+                                style={{ display: "none" }}
+                              />
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  color: it.isActive === false ? "var(--muted)" : "#10b981",
+                                  minWidth: "48px",
+                                }}
+                              >
+                                {it.isActive === false ? "Skip" : "Active"}
+                              </span>
+                            </label>
+
                             {strategy === "ROUND_ROBIN" && (
                               <div style={{ display: "flex", alignItems: "center", gap: "4px", marginRight: "8px" }}>
                                 <span style={{ fontSize: "10px", color: "#94a3b8" }}>Weight:</span>
@@ -1676,6 +1779,7 @@ export default function AdminCombosPage() {
                                   className="control text-xs"
                                   style={{ width: "48px", height: "24px", textAlign: "center" }}
                                   value={it.weight}
+                                  disabled={it.isActive === false}
                                   onChange={(e) => {
                                     const val = Math.max(1, Number(e.target.value));
                                     setSelectedItems(
