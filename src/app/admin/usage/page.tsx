@@ -2253,6 +2253,43 @@ print(response.choices[0].message.content)`,
                     {pct}%
                   </button>
                 ))}
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "2px", marginLeft: "4px" }}>
+                  <input
+                    type="number"
+                    min={10}
+                    max={95}
+                    value={autoCompressThresholdPct}
+                    disabled={contextGuardSaving || !autoCompressActive}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) setAutoCompressThresholdPct(val);
+                    }}
+                    onBlur={() => {
+                      const val = Math.max(10, Math.min(95, autoCompressThresholdPct || 50));
+                      updateAutoCompressThreshold(val);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = Math.max(10, Math.min(95, autoCompressThresholdPct || 50));
+                        updateAutoCompressThreshold(val);
+                      }
+                    }}
+                    title="Custom threshold % (10-95%)"
+                    style={{
+                      width: "48px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      textAlign: "center",
+                      padding: "2px 4px",
+                      borderRadius: "4px",
+                      border: "1px solid var(--line)",
+                      backgroundColor: "var(--card)",
+                      color: "var(--ink)",
+                      opacity: autoCompressActive ? 1 : 0.6,
+                    }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600 }}>%</span>
+                </div>
               </div>
 
               <button

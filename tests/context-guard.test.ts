@@ -289,6 +289,156 @@ assert.strictEqual(responsesGuard.compressedInput[0], responsesInput[0]);
 assert.strictEqual(responsesGuard.compressedInput[6], responsesInput[6]);
 console.log("✓ Test 5 Passed: Responses API input correctly compacted.");
 
+// ---------------------------------------------------------
+// Test 6: OpenAI tool_calls argument JSON syntax preservation
+// ---------------------------------------------------------
+console.log("\nTest 6: OpenAI tool_calls JSON preservation in middle turns...");
+const openAiLongConv = [
+  { role: "user", content: "Review and update this codebase." },
+  {
+    role: "assistant",
+    content: null,
+    tool_calls: [
+      {
+        id: "call_abc",
+        type: "function",
+        function: {
+          name: "write_file",
+          arguments: JSON.stringify({
+            path: "src/deep/nested/component.tsx",
+            code: "export const MyComponent = () => {\n" + "  return <div>item</div>;\n".repeat(150) + "};\n",
+          }),
+        },
+      },
+    ],
+  },
+  { role: "tool", tool_call_id: "call_abc", content: "File saved successfully." },
+  { role: "user", content: "Now check if there are lint errors." },
+  { role: "assistant", content: "Checking linting now." },
+  { role: "user", content: "Show me the lint output." },
+  { role: "assistant", content: "Linting completed with 0 errors." },
+];
+
+const openAiTokens = estimateMessagesTokens(openAiLongConv);
+const openAiGuard = applyContextGuard({
+  messages: openAiLongConv,
+  currentEstimatedTokens: openAiTokens,
+  contextLimit: 2000,
+  thresholdPct: 50,
+});
+assert.strictEqual(openAiGuard.applied, true);
+const middleOpenAiMsg = openAiGuard.compressedMessages[1];
+const middleArgs = middleOpenAiMsg.tool_calls[0].function.arguments;
+// CRITICAL: arguments MUST be valid JSON!
+let parsedArgs: any;
+try {
+  parsedArgs = JSON.parse(middleArgs);
+} catch (err: any) {
+  assert.fail(`Compacted tool_calls arguments is NOT valid JSON: ${err.message}`);
+}
+assert(parsedArgs && typeof parsedArgs === "object", "Parsed arguments should be an object");
+assert.strictEqual(parsedArgs.path, "src/deep/nested/component.tsx", "Path argument must be intact");
+assert(parsedArgs.code.includes("[Context Guard: compacted"), "Code argument must be compacted with marker");
+console.log("✓ Test 6 Passed: OpenAI tool_calls arguments remain 100% valid JSON after compaction.");
+
+// ---------------------------------------------------------
+// Test 7: Vision base64 image data token estimation cap
+// ---------------------------------------------------------
+console.log("\nTest 7: Base64 vision image token estimation cap...");
+const hugeBase64ImageMessage = {
+  role: "user",
+  content: [
+    {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: "image/png",
+        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk" + "A".repeat(500000),
+      },
+    },
+  ],
+};
+const imageChars = extractContentChars(hugeBase64ImageMessage.content);
+console.log(`Calculated chars for 500k base64 image: ${imageChars} (Expected <= 5600)`);
+assert(imageChars <= 5600, `Image chars (${imageChars}) should be capped to ~1600 tokens equivalent!`);
+const imageTokens = estimateMessagesTokens([hugeBase64ImageMessage]);
+console.log(`Estimated tokens for base64 image: ${imageTokens} (Expected <= 1650)`);
+assert(imageTokens <= 1650, `Image tokens (${imageTokens}) must be capped!`);
+console.log("✓ Test 7 Passed: Vision base64 image tokens properly capped to prevent phantom blowout.");
+
+// ---------------------------------------------------------
+// Test 8: OpenAI role "function" & JSON tool output compaction
+// ---------------------------------------------------------
+console.log("\nTest 8: OpenAI role function & JSON tool output compaction...");
+const legacyFunctionConv = [
+  { role: "user", content: "Run diagnostic function" },
+  {
+    role: "assistant",
+    content: null,
+    function_call: { name: "get_system_health", arguments: "{}" },
+  },
+  {
+    role: "function",
+    name: "get_system_health",
+    content: JSON.stringify({
+      status: "healthy",
+      details: "system diagnostic log: " + "OK\n".repeat(2000),
+    }),
+  },
+  { role: "user", content: "Status report?" },
+  { role: "assistant", content: "All systems green." },
+  { role: "user", content: "Thank you." },
+  { role: "assistant", content: "You are welcome!" },
+];
+const funcTokens = estimateMessagesTokens(legacyFunctionConv);
+const funcGuard = applyContextGuard({
+  messages: legacyFunctionConv,
+  currentEstimatedTokens: funcTokens,
+  contextLimit: 2000,
+  thresholdPct: 50,
+});
+assert.strictEqual(funcGuard.applied, true);
+const compactedFunc = funcGuard.compressedMessages[2].content;
+const parsedFunc = JSON.parse(compactedFunc);
+assert.strictEqual(parsedFunc.status, "healthy");
+assert(parsedFunc.details.includes("[Context Guard: compacted"));
+console.log("✓ Test 8 Passed: Legacy role function and JSON tool output properly compacted.");
+
+// ---------------------------------------------------------
+// Test 9: No nested compaction markers on repeated runs
+// ---------------------------------------------------------
+console.log("\nTest 9: Preventing nested compaction markers on repeated passes...");
+const alreadyCompacted = [
+  { role: "user", content: "Root task prompt" },
+  {
+    role: "user",
+    content: [
+      {
+        type: "tool_result",
+        tool_use_id: "tu_old",
+        content: "start\n... [Context Guard: compacted 5000 characters of older tool output] ...\nend" + " extra".repeat(200),
+      },
+    ],
+  },
+  { role: "assistant", content: "Middle turn 1" },
+  { role: "user", content: "Middle turn 2" },
+  { role: "assistant", content: "Recent 1" },
+  { role: "user", content: "Recent 2" },
+  { role: "assistant", content: "Recent 3" },
+  { role: "user", content: "Recent 4" },
+];
+const repeatGuard = applyContextGuard({
+  messages: alreadyCompacted,
+  currentEstimatedTokens: 5000,
+  contextLimit: 4000,
+  thresholdPct: 50,
+});
+assert.strictEqual(repeatGuard.applied, true);
+const contentStr = repeatGuard.compressedMessages[1].content[0].content;
+const markerCount = (contentStr.match(/Context Guard: compacted/g) || []).length;
+assert.strictEqual(markerCount, 1, "Should have exactly 1 clean compaction marker, not nested!");
+console.log("✓ Test 9 Passed: No nested compaction markers.");
+
 console.log("\n========================================================");
 console.log("ALL CONTEXT GUARD & TOKEN ESTIMATION TESTS PASSED 100%!");
 console.log("========================================================");

@@ -63,12 +63,15 @@ export function extractContentChars(content: any): number {
           if (typeof part.function.arguments === "string") sum += part.function.arguments.length;
         }
 
-        // image / source URL
+        // image / source URL (cap base64 data to ~1600 tokens equivalent = 5600 chars to avoid phantom blowout)
         if (part.image_url?.url && typeof part.image_url.url === "string") {
-          sum += part.image_url.url.length;
+          const urlLen = part.image_url.url.startsWith("data:")
+            ? Math.min(part.image_url.url.length, 5600)
+            : part.image_url.url.length;
+          sum += urlLen;
         }
         if (part.source?.data && typeof part.source.data === "string") {
-          sum += part.source.data.length;
+          sum += Math.min(part.source.data.length, 5600);
         }
       }
     }
@@ -103,6 +106,12 @@ export function calculateMessageChars(m: any): number {
       if (tc?.function?.arguments) count += String(tc.function.arguments).length;
       if (tc?.id) count += tc.id.length;
     }
+  }
+
+  // OpenAI legacy function call
+  if (m.function_call) {
+    if (m.function_call.name) count += String(m.function_call.name).length;
+    if (m.function_call.arguments) count += String(m.function_call.arguments).length;
   }
 
   if (m.tool_call_id) count += String(m.tool_call_id).length;
@@ -169,8 +178,33 @@ export async function resolveModelContextLimit(modelId?: string): Promise<number
     if (aiModel?.contextWindow) {
       limit = parseContextWindowNumber(aiModel.contextWindow);
     } else {
-      const caps = getModelCapabilities(modelId, "");
-      limit = caps?.context_length || 128000;
+      // Check if it's a combo model
+      const combo = await prisma.comboModel.findUnique({
+        where: { comboId: modelId },
+        include: {
+          items: {
+            where: { isActive: true },
+            orderBy: { priority: "asc" },
+            take: 1,
+          },
+        },
+      });
+      if (combo && combo.items.length > 0 && combo.items[0].modelId) {
+        const targetModelId = combo.items[0].modelId;
+        const targetAiModel = await prisma.aiModel.findUnique({
+          where: { modelId: targetModelId },
+          select: { contextWindow: true },
+        });
+        if (targetAiModel?.contextWindow) {
+          limit = parseContextWindowNumber(targetAiModel.contextWindow);
+        } else {
+          const caps = getModelCapabilities(targetModelId, "");
+          limit = caps?.context_length || 128000;
+        }
+      } else {
+        const caps = getModelCapabilities(modelId, "");
+        limit = caps?.context_length || 128000;
+      }
     }
   } catch {
     const caps = getModelCapabilities(modelId, "");
@@ -189,8 +223,14 @@ export async function resolveModelContextLimit(modelId?: string): Promise<number
  */
 function compactString(text: string, headChars: number, tailChars: number, label: string): string {
   if (!text || text.length <= headChars + tailChars + 50) return text;
-  const omitted = text.length - (headChars + tailChars);
-  return `${text.slice(0, headChars)}\n... [Context Guard: compacted ${omitted} characters of older ${label}] ...\n${text.slice(-tailChars)}`;
+  // Clean up any existing Context Guard markers so we don't produce nested markers
+  const cleanText = text.replace(
+    /\n\.\.\. \[Context Guard: compacted \d+ characters of older [^\]]+\] \.\.\.\n/g,
+    "\n... [omitted] ...\n"
+  );
+  if (cleanText.length <= headChars + tailChars + 50) return cleanText;
+  const omitted = cleanText.length - (headChars + tailChars);
+  return `${cleanText.slice(0, headChars)}\n... [Context Guard: compacted ${omitted} characters of older ${label}] ...\n${cleanText.slice(-tailChars)}`;
 }
 
 /**
@@ -206,7 +246,7 @@ function compactMessageContent(m: any, aggressionLevel: 1 | 2 = 1): any {
   const textHeadChars = aggressionLevel === 2 ? 200 : 400;
   const textTailChars = aggressionLevel === 2 ? 200 : 400;
 
-  // 1. Anthropic multi-part content
+  // 1. Multi-part content (Anthropic or OpenAI content block array)
   if (Array.isArray(clone.content)) {
     clone.content = clone.content.map((part: any) => {
       if (!part || typeof part !== "object") return part;
@@ -241,9 +281,16 @@ function compactMessageContent(m: any, aggressionLevel: 1 | 2 = 1): any {
         }
       }
 
-      // Middle assistant / user text block
-      if (partClone.type === "text" && typeof partClone.text === "string" && partClone.text.length > 1200) {
-        partClone.text = compactString(partClone.text, textHeadChars, textTailChars, "conversation turn");
+      // Middle assistant / user / tool text block
+      if (partClone.type === "text" && typeof partClone.text === "string") {
+        const isToolRole = clone.role === "tool" || clone.role === "function";
+        const minLen = isToolRole ? 300 : 1200;
+        const head = isToolRole ? toolHeadChars : textHeadChars;
+        const tail = isToolRole ? toolTailChars : textTailChars;
+        const label = isToolRole ? "tool output" : "conversation turn";
+        if (partClone.text.length > minLen) {
+          partClone.text = compactString(partClone.text, head, tail, label);
+        }
       }
 
       return partClone;
@@ -251,24 +298,64 @@ function compactMessageContent(m: any, aggressionLevel: 1 | 2 = 1): any {
     return clone;
   }
 
-  // 2. OpenAI Tool Message: role === "tool"
-  if (clone.role === "tool" && typeof clone.content === "string") {
-    clone.content = compactString(clone.content, toolHeadChars, toolTailChars, "tool result");
-    return clone;
+  // 2. OpenAI Tool / Function Message: role === "tool" || role === "function"
+  if (clone.role === "tool" || clone.role === "function") {
+    if (typeof clone.content === "string") {
+      let compacted = false;
+      const trimmed = clone.content.trim();
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(clone.content);
+          if (parsed && typeof parsed === "object") {
+            let modified = false;
+            for (const [k, v] of Object.entries(parsed)) {
+              if (typeof v === "string" && v.length > 600) {
+                (parsed as any)[k] = compactString(v, toolHeadChars, toolTailChars, `tool output '${k}'`);
+                modified = true;
+              }
+            }
+            if (modified) {
+              clone.content = JSON.stringify(parsed);
+              compacted = true;
+            }
+          }
+        } catch {}
+      }
+      if (!compacted) {
+        clone.content = compactString(clone.content, toolHeadChars, toolTailChars, "tool result");
+      }
+      return clone;
+    }
   }
 
-  // 3. OpenAI Assistant Tool Calls: compact large arguments in older tool calls
+  // 3. OpenAI Assistant Tool Calls: compact large arguments in older tool calls WITHOUT corrupting JSON syntax
   if (Array.isArray(clone.tool_calls)) {
     clone.tool_calls = clone.tool_calls.map((tc: any) => {
-      if (tc?.function?.arguments && typeof tc.function.arguments === "string" && tc.function.arguments.length > 1000) {
+      if (tc?.function?.arguments && typeof tc.function.arguments === "string" && tc.function.arguments.length > 500) {
         const argsStr = tc.function.arguments;
-        return {
-          ...tc,
-          function: {
-            ...tc.function,
-            arguments: compactString(argsStr, 150, 150, "tool call arguments"),
-          },
-        };
+        try {
+          const parsed = JSON.parse(argsStr);
+          if (parsed && typeof parsed === "object") {
+            let modified = false;
+            for (const [k, v] of Object.entries(parsed)) {
+              if (typeof v === "string" && v.length > 600) {
+                parsed[k] = compactString(v, 150, 150, `tool argument '${k}'`);
+                modified = true;
+              }
+            }
+            if (modified) {
+              return {
+                ...tc,
+                function: {
+                  ...tc.function,
+                  arguments: JSON.stringify(parsed),
+                },
+              };
+            }
+          }
+        } catch {
+          // Leave untouched if not valid JSON to avoid corrupting syntax further
+        }
       }
       return tc;
     });

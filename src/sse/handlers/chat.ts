@@ -220,13 +220,18 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   // 3. RTK Token Saver & Auto Context Compression (Context Guard)
   let tokensSavedRtk = 0;
   const clientRtkHeader = req.headers.get("x-rtk-token-saver");
+  const clientContextGuardHeader = req.headers.get("x-context-guard") || req.headers.get("x-auto-compress");
   const rtkSettings = await getRtkSettings();
   const rtkActive = clientRtkHeader === "false"
     ? false
     : clientRtkHeader === "true"
     ? true
     : rtkSettings.rtkCompressionActive;
-  const autoCompressActive = rtkSettings.autoCompressActive;
+  const autoCompressActive = (clientContextGuardHeader === "false" || clientRtkHeader === "false")
+    ? false
+    : clientContextGuardHeader === "true"
+    ? true
+    : rtkSettings.autoCompressActive;
   const autoCompressThresholdPct = rtkSettings.autoCompressThresholdPct;
 
   if (rawBody && (rtkActive || autoCompressActive)) {
@@ -307,6 +312,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         rawBody = JSON.stringify(jsonBody);
         if (Array.isArray(jsonBody.messages)) {
           estimatedPromptTokens = estimateMessagesTokens(jsonBody.messages, jsonBody.system);
+        } else if (Array.isArray(jsonBody.input)) {
+          let charCount = 0;
+          for (const item of jsonBody.input) {
+            if (typeof item === "string") charCount += item.length;
+            else if (item && typeof item === "object") charCount += calculateMessageChars(item);
+          }
+          if (jsonBody.instructions) charCount += extractContentChars(jsonBody.instructions);
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
         }
       }
     } catch {}
