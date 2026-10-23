@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401, markConnectionCooldown } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
-import { fixMissingToolResponsesOpenAI } from "./anthropic";
+import { extractAnthropicText, fixMissingToolResponsesOpenAI } from "./anthropic";
 
 export const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 export const CODEX_CLIENT_VERSION = "0.200.0";
@@ -91,7 +91,7 @@ export function resolveCodexModelAndEffort(rawModel: string): { model: string; i
     .trim();
 
   if (baseModel === "default" || baseModel === "default-model" || !baseModel) {
-    return { model: "gpt-5.5", inferredEffort };
+    return { model: "gpt-6-astra", inferredEffort };
   }
 
   return { model: baseModel || clean, inferredEffort };
@@ -113,11 +113,12 @@ function formatCodexTools(tools: any[]): any[] {
       const fn = t.function || t;
       const name = fn.name || t.name;
       if (!name) continue;
+      const schema = fn.parameters || t.parameters || fn.input_schema || t.input_schema;
       result.push({
         type: "function",
         name,
         description: fn.description || t.description || "",
-        ...(fn.parameters || t.parameters ? { parameters: fn.parameters || t.parameters } : {}),
+        ...(schema && typeof schema === "object" ? { parameters: schema } : { parameters: { type: "object", properties: {} } }),
       });
     } else if (t.type === "custom") {
       result.push(t);
@@ -185,6 +186,20 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
   for (const sm of systemMessages) {
     if (sm.content.trim()) {
       instructionParts.push(sm.content.trim());
+    }
+  }
+
+  // Support top-level parsedBody.instructions or parsedBody.system
+  if (parsedBody.instructions && typeof parsedBody.instructions === "string" && parsedBody.instructions.trim()) {
+    const trimmed = parsedBody.instructions.trim();
+    if (!instructionParts.includes(trimmed)) {
+      instructionParts.unshift(trimmed);
+    }
+  }
+  if (parsedBody.system) {
+    const sysText = extractAnthropicText(parsedBody.system);
+    if (sysText.trim() && !instructionParts.includes(sysText.trim())) {
+      instructionParts.unshift(sysText.trim());
     }
   }
 
@@ -272,6 +287,26 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
   // Ensure at least one input message exists
   if (input.length === 0) {
     input.push({ role: "user", content: "Hello" });
+  }
+
+  // CRITICAL: OpenAI Codex CANNOT accept an input array ending in role: "assistant" or type: "function_call"
+  // If the last turn is assistant (e.g. prefill, interrupted turn, or missing tool output),
+  // OpenAI Codex rejects it or fails with server_is_overloaded / response.failed.
+  // We guarantee the final item in input is user or function_call_output.
+  const lastItem = input[input.length - 1];
+  if (lastItem) {
+    if (lastItem.role === "assistant") {
+      input.push({
+        role: "user",
+        content: "Continue.",
+      });
+    } else if (lastItem.type === "function_call") {
+      input.push({
+        type: "function_call_output",
+        call_id: lastItem.call_id || `call_${Date.now()}`,
+        output: "[Completed]",
+      });
+    }
   }
 
   const codexTools = formatCodexTools(parsedBody.tools);
@@ -1055,6 +1090,20 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     }
     windowed.push(...tail);
     formattedInput = windowed;
+  }
+
+  // Ensure formattedInput does not end with assistant or function_call
+  const lastDirect = formattedInput[formattedInput.length - 1];
+  if (lastDirect) {
+    if (lastDirect.role === "assistant") {
+      formattedInput.push({ role: "user", content: "Continue." });
+    } else if (lastDirect.type === "function_call") {
+      formattedInput.push({
+        type: "function_call_output",
+        call_id: lastDirect.call_id || `call_${Date.now()}`,
+        output: "[Completed]",
+      });
+    }
   }
 
   const codexBody: any = {

@@ -275,6 +275,12 @@ export function convertAnthropicToOpenAiMessages(parsedBody: any): any[] {
   // Ensure every tool_call in an assistant message has a matching tool response
   fixMissingToolResponsesOpenAI(messages);
 
+  // If the conversation ends with an assistant message (e.g. assistant prefill in Anthropic),
+  // OpenAI APIs require a user prompt to respond to, otherwise they return empty content or fail.
+  if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+    messages.push({ role: "user", content: "Continue." });
+  }
+
   return messages;
 }
 
@@ -526,6 +532,17 @@ export async function transformChatResponseToAnthropic(
 
           try {
             const data = JSON.parse(trimmed.slice(6));
+            if (data.error) {
+              const errMsg = data.error.message || "Upstream returned error";
+              emitEvent(controller, "error", {
+                type: "error",
+                error: {
+                  type: "api_error",
+                  message: errMsg,
+                },
+              });
+              return;
+            }
             const choice = data.choices?.[0];
             const delta = choice?.delta;
 
