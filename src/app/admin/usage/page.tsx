@@ -5,6 +5,7 @@ import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar } from "@/components/providers/ProviderIcons";
+import { getModelContextLimit, formatCompactTokens } from "@/lib/model-capabilities";
 import {
   Activity,
   Radio,
@@ -3102,14 +3103,54 @@ print(response.choices[0].message.content)`,
                       </td>
 
                       {/* Tokens (In / Out) */}
-                      <td className="mono text-xs">
-                        <span className="font-semibold" style={{ color: "var(--ink)" }}>
-                          {ev.promptTokens.toLocaleString()}
-                        </span>
-                        <span className="text-muted mx-1">/</span>
-                        <span style={{ color: "#059669", fontWeight: 600 }}>
-                          {ev.completionTokens.toLocaleString()}
-                        </span>
+                      <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
+                        <div className="flex items-center gap-1.5">
+                          <div>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>
+                              {ev.promptTokens.toLocaleString()}
+                            </span>
+                            <span className="text-muted mx-1">/</span>
+                            <span style={{ color: "#059669", fontWeight: 600 }}>
+                              {ev.completionTokens.toLocaleString()}
+                            </span>
+                          </div>
+                          {(() => {
+                            const limit = getModelContextLimit(ev.model, ev.provider);
+                            const promptTokens = ev.promptTokens || 0;
+                            const pct = Math.min(100, Math.max(0, (promptTokens / limit) * 100));
+                            const pctDisplay = pct < 0.1 && pct > 0 ? "<0.1%" : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+                            const tooltip = `${formatCompactTokens(promptTokens)}/${formatCompactTokens(limit)} (${pct.toFixed(1)}%) terpakai`;
+
+                            let badgeBg = "rgba(16, 185, 129, 0.12)";
+                            let badgeColor = "#10b981";
+                            let badgeBorder = "rgba(16, 185, 129, 0.3)";
+
+                            if (pct >= 65) {
+                              badgeBg = "rgba(244, 63, 94, 0.12)";
+                              badgeColor = "#f43f5e";
+                              badgeBorder = "rgba(244, 63, 94, 0.3)";
+                            } else if (pct >= 40) {
+                              badgeBg = "rgba(245, 158, 11, 0.12)";
+                              badgeColor = "#f59e0b";
+                              badgeBorder = "rgba(245, 158, 11, 0.3)";
+                            }
+
+                            return (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold mono cursor-help transition hover:opacity-80 shrink-0"
+                                style={{
+                                  backgroundColor: badgeBg,
+                                  color: badgeColor,
+                                  border: `1px solid ${badgeBorder}`,
+                                  lineHeight: 1.15,
+                                }}
+                                title={tooltip}
+                              >
+                                {pctDisplay}
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </td>
 
                       {/* Latency */}
@@ -3383,7 +3424,37 @@ print(response.choices[0].message.content)`,
                   }}
                 >
                   <div className="inspector-metric-card">
-                    <span className="inspector-metric-label">Prompt Tokens</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="inspector-metric-label">Prompt Tokens</span>
+                      {(() => {
+                        const limit = getModelContextLimit(inspectEvent.model, inspectEvent.provider);
+                        const promptTokens = inspectEvent.promptTokens || 0;
+                        const pct = Math.min(100, Math.max(0, (promptTokens / limit) * 100));
+                        const pctDisplay = pct < 0.1 && pct > 0 ? "<0.1%" : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+                        const tooltip = `${formatCompactTokens(promptTokens)}/${formatCompactTokens(limit)} (${pct.toFixed(1)}%) terpakai`;
+                        let badgeBg = "rgba(16, 185, 129, 0.12)";
+                        let badgeColor = "#10b981";
+                        let badgeBorder = "rgba(16, 185, 129, 0.3)";
+                        if (pct >= 65) {
+                          badgeBg = "rgba(244, 63, 94, 0.12)";
+                          badgeColor = "#f43f5e";
+                          badgeBorder = "rgba(244, 63, 94, 0.3)";
+                        } else if (pct >= 40) {
+                          badgeBg = "rgba(245, 158, 11, 0.12)";
+                          badgeColor = "#f59e0b";
+                          badgeBorder = "rgba(245, 158, 11, 0.3)";
+                        }
+                        return (
+                          <span
+                            className="px-1.5 py-0.2 rounded text-[10px] font-bold mono cursor-help"
+                            style={{ backgroundColor: badgeBg, color: badgeColor, border: `1px solid ${badgeBorder}` }}
+                            title={tooltip}
+                          >
+                            {pctDisplay} of {formatCompactTokens(limit)}
+                          </span>
+                        );
+                      })()}
+                    </div>
                     <span className="inspector-metric-val">{inspectEvent.promptTokens.toLocaleString()}</span>
                   </div>
                   <div className="inspector-metric-card">
@@ -3874,6 +3945,34 @@ print(response.choices[0].message.content)`,
                       <span>{chatModalEvent.clientUser?.email || chatModalEvent.clientUserEmail || "Direct Gateway API"}</span>
                       <span>•</span>
                       <span>{chatModalEvent.totalTokens.toLocaleString()} tokens</span>
+                      {(() => {
+                        const limit = getModelContextLimit(chatModalEvent.model, chatModalEvent.provider);
+                        const promptTokens = chatModalEvent.promptTokens || 0;
+                        const pct = Math.min(100, Math.max(0, (promptTokens / limit) * 100));
+                        const pctDisplay = pct < 0.1 && pct > 0 ? "<0.1%" : pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+                        const tooltip = `${formatCompactTokens(promptTokens)}/${formatCompactTokens(limit)} (${pct.toFixed(1)}%) terpakai`;
+                        let badgeBg = "rgba(16, 185, 129, 0.12)";
+                        let badgeColor = "#10b981";
+                        let badgeBorder = "rgba(16, 185, 129, 0.3)";
+                        if (pct >= 65) {
+                          badgeBg = "rgba(244, 63, 94, 0.12)";
+                          badgeColor = "#f43f5e";
+                          badgeBorder = "rgba(244, 63, 94, 0.3)";
+                        } else if (pct >= 40) {
+                          badgeBg = "rgba(245, 158, 11, 0.12)";
+                          badgeColor = "#f59e0b";
+                          badgeBorder = "rgba(245, 158, 11, 0.3)";
+                        }
+                        return (
+                          <span
+                            className="px-1.5 py-0.2 rounded text-[10px] font-bold mono cursor-help"
+                            style={{ backgroundColor: badgeBg, color: badgeColor, border: `1px solid ${badgeBorder}` }}
+                            title={tooltip}
+                          >
+                            Context: {pctDisplay}
+                          </span>
+                        );
+                      })()}
                       <span>•</span>
                       <span>{chatModalEvent.latencyMs}ms</span>
                     </div>

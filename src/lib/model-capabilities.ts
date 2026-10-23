@@ -39,28 +39,33 @@ export function getModelCapabilities(modelId: string, provider: string): {
     maxOutput = 16384;
     reasoning = lower.includes("o1") || lower.includes("o3");
     ownedBy = "chatgpt_web";
+  } else if (lower.includes("o1") || lower.includes("o3") || lower.includes("o4")) {
+    contextWindow = 200000;
+    maxOutput = 65536;
+    reasoning = true;
+    ownedBy = "openai";
   } else if (lower.includes("claude")) {
-    const isAgClaude = lower.startsWith("ag/") || lower.includes("5-5") || lower.includes("5.5");
+    const isAgClaude = lower.startsWith("ag/") || lower.includes("5-5") || lower.includes("5.5") || lower.includes("1m");
     contextWindow = isAgClaude ? 1000000 : 200000;
     maxOutput = isAgClaude ? 128000 : 64000;
     reasoning = lower.includes("thinking") || lower.includes("3-7") || lower.includes("opus") || isAgClaude;
     ownedBy = "anthropic";
-  } else if (lower.startsWith("ag/") || lower.includes("gemini")) {
-    contextWindow = 1000000;
+  } else if (lower.startsWith("ag/") || lower.includes("gemini") || provLower.includes("gemini") || provLower.includes("google") || provLower === "antigravity") {
+    contextWindow = (lower.includes("1.5-pro") || lower.includes("2.5-pro")) ? 2000000 : 1000000;
     maxOutput = 65536;
     reasoning = lower.includes("thinking") || lower.includes("high") || lower.includes("medium");
     ownedBy = "google";
-  } else if (lower.startsWith("deepseek/") || lower.includes("deepseek")) {
+  } else if (lower.startsWith("deepseek/") || lower.includes("deepseek") || provLower.includes("deepseek")) {
     if (lower.includes("v4")) {
       contextWindow = 1000000;
       maxOutput = 32768;
     } else {
-      contextWindow = 128000;
+      contextWindow = 64000;
       maxOutput = 8192;
     }
     reasoning = lower.includes("r1") || lower.includes("reasoner");
     ownedBy = "deepseek";
-  } else if (lower.startsWith("or/") || lower.includes("openrouter")) {
+  } else if (lower.startsWith("or/") || lower.includes("openrouter") || provLower.includes("openrouter")) {
     contextWindow = 128000;
     maxOutput = 16384;
     ownedBy = "openrouter";
@@ -100,6 +105,38 @@ export function formatContextWindow(tokens: number): string {
     return `${k % 1 === 0 ? k : k.toFixed(0)}k`;
   }
   return `${tokens}`;
+}
+
+/**
+ * Resolves context limit in tokens for a given model and provider.
+ * Supports combo format: "combo-name -> target-model"
+ */
+export function getModelContextLimit(modelId?: string, provider?: string): number {
+  if (!modelId) return 128000;
+  let target = modelId.trim();
+  if (target.includes(" -> ")) {
+    target = target.split(" -> ")[1].trim();
+  }
+  const caps = getModelCapabilities(target, provider || "");
+  return caps.context_length || 128000;
+}
+
+/**
+ * Compact formatting for token counts (e.g., 12000 -> "12k", 131181 -> "131.2k", 1000000 -> "1M", 200000 -> "200k").
+ */
+export function formatCompactTokens(val: number): string {
+  if (!val || val <= 0) return "0";
+  if (val >= 1_000_000) {
+    const m = val / 1_000_000;
+    const rounded = Number(m.toFixed(1));
+    return `${rounded}M`;
+  }
+  if (val >= 1_000) {
+    const k = val / 1_000;
+    const rounded = Number(k.toFixed(1));
+    return `${rounded}k`;
+  }
+  return String(val);
 }
 
 export function resolveComboContextWindow(candidateModelId?: string, rawContext?: string, comboId?: string): string {
