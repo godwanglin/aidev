@@ -13,10 +13,13 @@ interface ImageGenerationBody {
   prompt: string;
   model?: string;
   n?: number;
-  quality?: "standard" | "hd";
+  quality?: "standard" | "hd" | string;
   response_format?: "b64_json" | "url";
   size?: "1024x1024" | "1024x1792" | "1792x1024" | "512x512" | string;
   style?: "vivid" | "natural";
+  background?: string;
+  image_detail?: string;
+  output_format?: string;
 }
 
 /**
@@ -259,6 +262,9 @@ export async function handleImagesGenerations(req: NextRequest): Promise<NextRes
           connectionId: resolvedRoute.connectionId,
           size: body.size,
           quality: body.quality,
+          background: body.background,
+          image_detail: body.image_detail,
+          output_format: body.output_format,
           n: body.n,
         });
 

@@ -1313,6 +1313,33 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   );
 }
 
+const CODEX_MODEL_SUFFIX = "-image";
+const CODEX_IMAGES_DEFAULT_MODEL = "gpt-5.6-sol";
+const CODEX_TOOL_IMAGE_MODELS = new Set([
+  "gpt-image-1.5",
+  "gpt-image-2",
+  "gpt-image-2.5",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-sunburst",
+]);
+
+function stripImageSuffix(model: string): string {
+  return model.endsWith(CODEX_MODEL_SUFFIX)
+    ? model.slice(0, -CODEX_MODEL_SUFFIX.length)
+    : model;
+}
+
+export function resolveCodexImageModels(rawModel: string): { responsesModel: string; toolModel: string | null } {
+  const clean = (rawModel || "").replace(/^(cx\/|codex\/)/i, "").trim() || CODEX_IMAGES_DEFAULT_MODEL;
+  if (CODEX_TOOL_IMAGE_MODELS.has(clean)) {
+    return { responsesModel: CODEX_IMAGES_DEFAULT_MODEL, toolModel: clean };
+  }
+  const stripped = stripImageSuffix(clean);
+  const isGptModel = /^gpt-|^o[1345]/i.test(stripped);
+  const responsesModel = isGptModel ? stripped : CODEX_IMAGES_DEFAULT_MODEL;
+  return { responsesModel, toolModel: null };
+}
+
 export interface CodexImageParams {
   model: string;
   prompt: string;
@@ -1320,6 +1347,8 @@ export interface CodexImageParams {
   connectionId?: string;
   size?: string;
   quality?: string;
+  background?: string;
+  image_detail?: string;
   output_format?: string;
   n?: number;
 }
@@ -1328,13 +1357,31 @@ export async function dispatchCodexImage(params: CodexImageParams): Promise<{ cr
   let activeToken = params.accessToken;
   const accountId = extractAccountId(activeToken);
 
-  let toolModel = params.model.replace(/^cx\//i, "").trim() || "gpt-image-2.5";
-  if (!toolModel.includes("image")) {
-    toolModel = "gpt-image-2.5";
+  const { responsesModel, toolModel } = resolveCodexImageModels(params.model);
+
+  const imgTool: Record<string, any> = {
+    type: "image_generation",
+    output_format: (params.output_format || "png").toLowerCase(),
+  };
+
+  if (toolModel) {
+    imgTool.action = "generate";
+    imgTool.model = toolModel;
+  }
+
+  // Filter out empty or "auto" values so Codex doesn't return 400
+  if (params.size && params.size !== "auto" && params.size !== "") {
+    imgTool.size = params.size;
+  }
+  if (params.quality && params.quality !== "auto" && params.quality !== "") {
+    imgTool.quality = params.quality;
+  }
+  if (params.background && params.background !== "auto" && params.background !== "") {
+    imgTool.background = params.background;
   }
 
   const codexBody = {
-    model: "gpt-5.5",
+    model: responsesModel,
     instructions: "",
     input: [
       {
@@ -1343,22 +1390,13 @@ export async function dispatchCodexImage(params: CodexImageParams): Promise<{ cr
         content: [{ type: "input_text", text: params.prompt }],
       },
     ],
-    tools: [
-      {
-        type: "image_generation",
-        action: "generate",
-        model: toolModel,
-        output_format: (params.output_format || "png").toLowerCase(),
-        ...(params.size ? { size: params.size } : {}),
-        ...(params.quality ? { quality: params.quality } : {}),
-      },
-    ],
-    tool_choice: { type: "image_generation" },
+    tools: [imgTool],
+    tool_choice: toolModel ? { type: "image_generation" } : "auto",
     parallel_tool_calls: false,
     prompt_cache_key: crypto.randomUUID(),
     stream: true,
     store: false,
-    reasoning: { effort: "medium", summary: "auto" },
+    reasoning: toolModel ? { effort: "medium", summary: "auto" } : null,
   };
 
   const getHeaders = (token: string): Record<string, string> => ({
@@ -1400,25 +1438,35 @@ export async function dispatchCodexImage(params: CodexImageParams): Promise<{ cr
   const text = await response.text();
   const lines = text.split("\n");
   let imageB64: string | null = null;
+  let partialImageB64: string | null = null;
+  let streamErrorMessage: string | null = null;
 
   for (const line of lines) {
-    if (line.startsWith("data: ")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("data: ")) {
       try {
-        const d = JSON.parse(line.slice(6));
+        const d = JSON.parse(trimmed.slice(6));
         if (d.item?.type === "image_generation_call" && d.item.result) {
           imageB64 = d.item.result;
+        } else if (d.type === "response.image_generation_call.partial_image" && d.partial_image_b64) {
+          partialImageB64 = d.partial_image_b64;
+        } else if (d.error?.message) {
+          streamErrorMessage = d.error.message;
+        } else if (d.type === "response.failed" && d.response?.error?.message) {
+          streamErrorMessage = d.response.error.message;
         }
       } catch {}
     }
   }
 
-  if (!imageB64) {
-    throw new Error("Codex did not return an image. Account may not be entitled (Plus/Pro required).");
+  const resultB64 = imageB64 || partialImageB64;
+  if (!resultB64) {
+    throw new Error(streamErrorMessage || "Codex did not return an image. Account may not be entitled (Plus/Pro required).");
   }
 
   return {
     created: Math.floor(Date.now() / 1000),
-    data: [{ b64_json: imageB64 }],
+    data: [{ b64_json: resultB64 }],
   };
 }
 
