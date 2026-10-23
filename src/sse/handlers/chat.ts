@@ -163,7 +163,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           if (jsonBody.system) {
             charCount += extractContentChars(jsonBody.system);
           }
-          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
         } else if (Array.isArray(jsonBody.input)) {
           let charCount = 0;
           for (const item of jsonBody.input) {
@@ -173,7 +173,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           if (jsonBody.instructions) {
             charCount += extractContentChars(jsonBody.instructions);
           }
-          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
         } else {
           estimatedPromptTokens = estimateTokens(rawText);
         }
@@ -319,7 +319,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             else if (item && typeof item === "object") charCount += calculateMessageChars(item);
           }
           if (jsonBody.instructions) charCount += extractContentChars(jsonBody.instructions);
-          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
         }
       }
     } catch {}

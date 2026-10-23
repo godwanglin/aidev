@@ -36,9 +36,16 @@ export function extractContentChars(content: any): number {
         if (typeof part.text === "string") {
           sum += part.text.length;
         }
+        // Anthropic interleaved thinking block
+        if (typeof part.thinking === "string") {
+          sum += part.thinking.length;
+        }
         // tool_result content (can be string or nested array of parts!)
         if (part.content !== undefined) {
           sum += extractContentChars(part.content);
+        }
+        if (typeof part.output === "string") {
+          sum += part.output.length;
         }
         // tool_use input (object or JSON string)
         if (part.input !== undefined) {
@@ -133,7 +140,8 @@ export function estimateMessagesTokens(messages: any[], system?: any): number {
   if (system) {
     charCount += extractContentChars(system);
   }
-  return Math.max(1, Math.ceil(charCount / 3.5));
+  // Safe lower-bound estimation for code, JSON, and thinking tokens
+  return Math.max(1, Math.ceil(charCount / 3.0));
 }
 
 /**
@@ -264,6 +272,16 @@ function compactMessageContent(m: any, aggressionLevel: 1 | 2 = 1): any {
             return sub;
           });
         }
+        if (typeof partClone.output === "string") {
+          partClone.output = compactString(partClone.output, toolHeadChars, toolTailChars, "tool output");
+        }
+      }
+
+      // Thinking block in middle turns (compact older reasoning to save hundreds of thousands of tokens)
+      if (partClone.type === "thinking" && typeof partClone.thinking === "string") {
+        const tHead = aggressionLevel === 2 ? 80 : 160;
+        const tTail = aggressionLevel === 2 ? 80 : 160;
+        partClone.thinking = compactString(partClone.thinking, tHead, tTail, "thinking process");
       }
 
       // Tool use block (e.g. huge file write argument in older turn)
@@ -374,11 +392,11 @@ function compactMessageContent(m: any, aggressionLevel: 1 | 2 = 1): any {
  * the threshold percentage of the target model's maximum context limit.
  *
  * Keeps intact:
- * - System prompt (never modified)
- * - Initial user prompt / task instruction (never modified)
- * - Recent 4 messages / active turns (never modified)
+ * - Awal: System prompts and initial user prompt / task objective (never modified)
+ * - Akhir: Latest user prompt / active turn (never modified)
  *
- * Only compacts bulky tool outputs and redundant history in the middle.
+ * Compacts:
+ * - Pertengahan: All turns in between (bulky tool outputs, thinking blocks, long text)
  */
 export function applyContextGuard(params: {
   messages: any[];
@@ -391,8 +409,8 @@ export function applyContextGuard(params: {
 
   const thresholdTokens = Math.floor(contextLimit * (thresholdPct / 100));
 
-  // If below threshold, no compression needed
-  if (currentEstimatedTokens < thresholdTokens || !Array.isArray(messages) || messages.length <= 4) {
+  // If below threshold or messages array too short, no compression needed
+  if (currentEstimatedTokens < thresholdTokens || !Array.isArray(messages) || messages.length <= 2) {
     return {
       compressedMessages: messages,
       tokensSaved: 0,
@@ -405,24 +423,49 @@ export function applyContextGuard(params: {
     };
   }
 
-  // Identify boundaries:
-  // 1. Find initial user instruction index (skip system messages at start)
+  // 1. Awal (Beginning): Find initial user instruction index (keep initial system messages and first user prompt 100% intact)
   let firstUserIdx = 0;
   for (let i = 0; i < messages.length; i++) {
-    if (messages[i]?.role === "user") {
+    const role = (messages[i]?.role || "").toLowerCase();
+    if (role === "user" || role === "human") {
       firstUserIdx = i;
       break;
     }
   }
 
-  // 2. Keep the first user prompt and any initial system messages intact
-  // 3. Keep the most recent 4 messages intact
-  const protectRecentCount = Math.min(4, Math.max(2, messages.length - (firstUserIdx + 1)));
+  // 2. Akhir (Ending): Keep the latest active turn intact
+  // The middle consists of everything strictly between the first user prompt and the final turn:
   const middleStartIndex = firstUserIdx + 1;
-  const middleEndIndex = messages.length - protectRecentCount;
+  const middleEndIndex = messages.length - 1;
 
   if (middleStartIndex >= middleEndIndex) {
-    // Not enough middle messages to compress safely
+    // If there are no intermediate messages between first user prompt and last message,
+    // check if the very last message itself is a massive tool result that caused the blowup
+    const lastMsg = messages[messages.length - 1];
+    const isLastMsgTool = lastMsg && (
+      lastMsg.role === "tool" || 
+      lastMsg.role === "function" || 
+      (Array.isArray(lastMsg.content) && lastMsg.content.some((p: any) => p?.type === "tool_result"))
+    );
+
+    if (isLastMsgTool) {
+      // Safely compact the middle of the massive tool result at the end
+      const compactedLastMsg = compactMessageContent(lastMsg, 1);
+      const newMessages = [...messages.slice(0, messages.length - 1), compactedLastMsg];
+      const newEstimatedTokens = estimateMessagesTokens(newMessages, system);
+      const tokensSaved = Math.max(0, currentEstimatedTokens - newEstimatedTokens);
+      return {
+        compressedMessages: newMessages,
+        tokensSaved,
+        applied: tokensSaved > 0,
+        originalTokens: currentEstimatedTokens,
+        newTokens: newEstimatedTokens,
+        contextLimit,
+        thresholdTokens,
+        thresholdPct,
+      };
+    }
+
     return {
       compressedMessages: messages,
       tokensSaved: 0,
@@ -435,7 +478,7 @@ export function applyContextGuard(params: {
     };
   }
 
-  // Pass 1: Standard Middle Compaction
+  // Pass 1: Standard Middle Compaction across all middle turns
   let newMessages = messages.map((m, idx) => {
     if (idx >= middleStartIndex && idx < middleEndIndex) {
       return compactMessageContent(m, 1);
@@ -445,7 +488,7 @@ export function applyContextGuard(params: {
 
   let newEstimatedTokens = estimateMessagesTokens(newMessages, system);
 
-  // Pass 2: If still above threshold, apply aggressive compaction on older middle messages
+  // Pass 2: If still above threshold, apply aggressive compaction on middle turns
   if (newEstimatedTokens >= thresholdTokens) {
     newMessages = newMessages.map((m, idx) => {
       if (idx >= middleStartIndex && idx < middleEndIndex) {
@@ -454,6 +497,20 @@ export function applyContextGuard(params: {
       return m;
     });
     newEstimatedTokens = estimateMessagesTokens(newMessages, system);
+  }
+
+  // Pass 3: If STILL above threshold and the last message is a bulky tool result, compact that tool result as well
+  if (newEstimatedTokens >= thresholdTokens) {
+    const lastMsg = newMessages[newMessages.length - 1];
+    const isLastMsgTool = lastMsg && (
+      lastMsg.role === "tool" || 
+      lastMsg.role === "function" || 
+      (Array.isArray(lastMsg.content) && lastMsg.content.some((p: any) => p?.type === "tool_result"))
+    );
+    if (isLastMsgTool) {
+      newMessages[newMessages.length - 1] = compactMessageContent(lastMsg, 2);
+      newEstimatedTokens = estimateMessagesTokens(newMessages, system);
+    }
   }
 
   const tokensSaved = Math.max(0, currentEstimatedTokens - newEstimatedTokens);
