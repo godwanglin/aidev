@@ -520,6 +520,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             rawHeaders: rawHeadersObj,
             reqPath,
             clientWantsStream,
+            estimatedPromptTokens,
           });
 
           // Check if this connection returned invalid token, capacity, or server error
@@ -632,6 +633,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             clientUserId,
             reqPath,
             clientWantsStream,
+            estimatedPromptTokens,
           });
 
           const isRetryableError =

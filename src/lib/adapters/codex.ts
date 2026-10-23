@@ -30,6 +30,7 @@ export interface CodexDispatchParams {
   rawHeaders?: any;
   reqPath: string;
   clientWantsStream: boolean;
+  estimatedPromptTokens?: number;
 }
 
 /**
@@ -617,16 +618,21 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
               }
             }
 
-            if (data.type === "response.completed" && data.response?.usage) {
-              promptTokens = data.response.usage.input_tokens || promptTokens;
-              completionTokens = data.response.usage.output_tokens || completionTokens;
-              totalTokens = data.response.usage.total_tokens || (promptTokens + completionTokens);
+            if (
+              (data.type === "response.completed" || data.type === "response.done") &&
+              (data.response?.usage || data.usage)
+            ) {
+              const u = data.response?.usage || data.usage;
+              promptTokens = u.input_tokens || u.prompt_tokens || promptTokens;
+              completionTokens = u.output_tokens || u.completion_tokens || completionTokens;
+              totalTokens = u.total_tokens || (promptTokens + completionTokens);
             }
           } catch {}
         }
       },
       flush(controller) {
         const hasToolCalls = activeToolCalls.size > 0;
+        const hasContent = Boolean(accumulatedText.trim().length > 0 || hasToolCalls);
         const finalChunk = {
           id: completionId,
           object: "chat.completion.chunk",
@@ -644,18 +650,28 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
         controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
 
         const durationMs = Date.now() - startTime;
+        const fallbackPrompt = params.estimatedPromptTokens || Math.max(15, Math.ceil((params.rawBody?.length || 0) / 4));
+        const finalPromptTokens = promptTokens || fallbackPrompt;
+        const finalCompletionTokens = completionTokens > 0 
+          ? completionTokens 
+          : hasContent 
+          ? Math.max(1, Math.ceil(accumulatedText.length / 4)) 
+          : 0;
+        const effectiveStatus = (hasContent || finalCompletionTokens > 0) ? 200 : 502;
+
         logUpstreamRequest({
           connectionId: params.connectionId,
           provider: "OPENAI_CODEX",
           model: logModel,
           clientApiKeyId: params.clientApiKeyId,
           clientUserId: params.clientUserId,
-          promptTokens: promptTokens || 15,
-          completionTokens: completionTokens || 20,
-          totalTokens: totalTokens || (promptTokens + completionTokens) || 35,
+          promptTokens: finalPromptTokens,
+          completionTokens: finalCompletionTokens,
+          totalTokens: finalPromptTokens + finalCompletionTokens,
           latencyMs: durationMs,
-          statusCode: 200,
-          isFailover: false,
+          statusCode: effectiveStatus,
+          isFailover: effectiveStatus !== 200,
+          failoverReason: effectiveStatus !== 200 ? "Codex stream returned empty content" : null,
         }).catch(() => {});
       },
     });
@@ -1108,10 +1124,14 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
               data.model = responseModel;
               modified = true;
             }
-            if (data.type === "response.completed" && data.response?.usage) {
-              promptTokens = data.response.usage.input_tokens || promptTokens;
-              completionTokens = data.response.usage.output_tokens || completionTokens;
-              totalTokens = data.response.usage.total_tokens || (promptTokens + completionTokens);
+            if (
+              (data.type === "response.completed" || data.type === "response.done") &&
+              (data.response?.usage || data.usage)
+            ) {
+              const u = data.response?.usage || data.usage;
+              promptTokens = u.input_tokens || u.prompt_tokens || promptTokens;
+              completionTokens = u.output_tokens || u.completion_tokens || completionTokens;
+              totalTokens = u.total_tokens || (promptTokens + completionTokens);
             }
             if (modified) {
               return "data: " + JSON.stringify(data);
@@ -1136,11 +1156,13 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
           ? 200 
           : (response.status >= 400 ? response.status : 502);
 
+        const finalPrompt = promptTokens || params.estimatedPromptTokens || 15;
+
         if (statusCode === 200) {
           adminLogger.done({
             durationMs,
             ttftMs,
-            promptTokens: promptTokens || 15,
+            promptTokens: finalPrompt,
             completionTokens: finalTokens,
             model: responseModel,
             upstreamModel: logModel,
@@ -1166,9 +1188,9 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
           rawHeaders: params.rawHeaders,
           rawBody: params.rawBody,
           rawResponse: accumulatedChunks,
-          promptTokens: promptTokens || 15,
+          promptTokens: finalPrompt,
           completionTokens: finalTokens,
-          totalTokens: (promptTokens || 15) + finalTokens,
+          totalTokens: finalPrompt + finalTokens,
           latencyMs: durationMs,
           statusCode,
           isFailover: false,
