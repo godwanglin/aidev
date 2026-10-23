@@ -129,17 +129,57 @@ function convertOpenAiMessagesToGemini(messages: any[], wireModel?: string): {
     const role = msg.role;
 
     if (role === "user") {
-      let text = "";
+      const parts: any[] = [];
       if (typeof msg.content === "string") {
-        text = msg.content;
+        if (msg.content.trim()) parts.push({ text: msg.content.trim() });
       } else if (Array.isArray(msg.content)) {
-        text = msg.content.map((p: any) => (typeof p === "string" ? p : p.text || JSON.stringify(p))).join("\n");
+        for (const p of msg.content) {
+          if (!p) continue;
+          if (typeof p === "string") {
+            if (p.trim()) parts.push({ text: p.trim() });
+          } else if (p.type === "text" && typeof p.text === "string") {
+            if (p.text.trim()) parts.push({ text: p.text.trim() });
+          } else if (p.type === "image_url" || p.type === "image") {
+            const url = p.image_url?.url || p.url || p.source?.data;
+            if (url && typeof url === "string" && url.startsWith("data:")) {
+              const match = url.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                parts.push({
+                  inlineData: {
+                    mimeType: match[1],
+                    data: match[2],
+                  },
+                });
+                continue;
+              }
+            } else if (p.source?.type === "base64" && p.source.data) {
+              parts.push({
+                inlineData: {
+                  mimeType: p.source.media_type || "image/png",
+                  data: p.source.data,
+                },
+              });
+              continue;
+            }
+          } else {
+            const serialized = JSON.stringify(p);
+            // Protect against dumping massive base64 or binary data into text
+            if (serialized.length < 50000) {
+              parts.push({ text: serialized });
+            }
+          }
+        }
       } else if (msg.content) {
-        text = JSON.stringify(msg.content);
+        parts.push({ text: JSON.stringify(msg.content) });
       }
+
+      if (parts.length === 0) {
+        parts.push({ text: " " });
+      }
+
       rawTurns.push({
         role: "user",
-        parts: [{ text: text.trim() || " " }],
+        parts,
       });
       i++;
     } else if (role === "assistant") {
