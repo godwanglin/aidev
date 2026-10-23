@@ -221,15 +221,29 @@ export async function resolveComboCandidates(
   let candidates: string[] = [];
 
   if (combo.strategy === "ROUND_ROBIN") {
-    // Atomic round-robin index
+    // Weighted Round-Robin load balancing across candidate models
+    const totalWeight = pool.reduce((sum, it) => sum + Math.max(1, it.weight || 1), 0);
     const currentIdx = comboRRCounters.get(combo.id) || 0;
-    comboRRCounters.set(combo.id, currentIdx + 1);
+    comboRRCounters.set(combo.id, (currentIdx + 1) % 1000000);
 
-    const start = currentIdx % pool.length;
-    // Circular reordering: [start, start+1, ... pool.length-1, 0, ... start-1]
+    let selectedIdx = 0;
+    if (totalWeight > 0) {
+      let targetWeight = currentIdx % totalWeight;
+      for (let i = 0; i < pool.length; i++) {
+        const w = Math.max(1, pool[i].weight || 1);
+        if (targetWeight < w) {
+          selectedIdx = i;
+          break;
+        }
+        targetWeight -= w;
+      }
+    }
+
+    // Selected model goes first; remaining healthy models follow as circular failovers
     const rotated = [
-      ...pool.slice(start),
-      ...pool.slice(0, start),
+      pool[selectedIdx],
+      ...pool.slice(selectedIdx + 1),
+      ...pool.slice(0, selectedIdx),
     ];
     candidates = rotated.map((i) => i.modelId);
   } else {
