@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401, markConnectionCooldown } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
+import { fixMissingToolResponsesOpenAI } from "./anthropic";
 
 export const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 export const CODEX_CLIENT_VERSION = "0.200.0";
@@ -127,6 +128,8 @@ function formatCodexTools(tools: any[]): any[] {
 
 /**
  * Converts OpenAI Chat messages into instructions and input array for Codex Responses API.
+ * Applies a sliding window if conversation exceeds MAX_CODEX_INPUT_MESSAGES (~70 turns)
+ * to avoid context_length_exceeded and server_is_overloaded errors from upstream OpenAI Codex.
  */
 function formatCodexPayload(parsedBody: any, targetModel: string) {
   const messages: any[] = Array.isArray(parsedBody.messages) ? parsedBody.messages : [];
@@ -134,6 +137,10 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
   let instructions: string | undefined = undefined;
   const instructionParts: string[] = [];
   const input: Array<any> = [];
+
+  // 1. Separate system / developer instructions from conversational turns
+  const systemMessages: any[] = [];
+  const convMessages: any[] = [];
 
   for (const m of messages) {
     let content = "";
@@ -165,16 +172,62 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
       content = content.replace(/"data"\s*:\s*"[A-Za-z0-9+/=]{100,}"/g, '"data":"[Attached Image Base64 Data]"');
     }
 
+    const normalizedMsg = { ...m, content };
+
     if (m.role === "system" || m.role === "developer") {
-      if (content.trim()) {
-        instructionParts.push(content.trim());
-      }
-    } else if (m.role === "tool") {
+      systemMessages.push(normalizedMsg);
+    } else {
+      convMessages.push(normalizedMsg);
+    }
+  }
+
+  // Preserve all system / developer instructions
+  for (const sm of systemMessages) {
+    if (sm.content.trim()) {
+      instructionParts.push(sm.content.trim());
+    }
+  }
+
+  // 2. Apply sliding window if conversation exceeds MAX_CODEX_INPUT_MESSAGES (~70 turns)
+  const MAX_CODEX_INPUT_MESSAGES = 70;
+  let activeConv: any[] = convMessages;
+
+  if (convMessages.length > MAX_CODEX_INPUT_MESSAGES) {
+    // Retain initial user goal/context
+    const firstUserMsg = convMessages.find((m) => m.role === "user");
+
+    // Slice recent messages (~60 turns)
+    let tail = convMessages.slice(-60);
+
+    // Ensure the slice starts at a clean user turn (no orphaned tool results or assistant turns)
+    const firstUserIndexInTail = tail.findIndex((m) => m.role === "user");
+    if (firstUserIndexInTail > 0) {
+      tail = tail.slice(firstUserIndexInTail);
+    }
+
+    activeConv = [];
+    if (firstUserMsg && !tail.includes(firstUserMsg)) {
+      activeConv.push(firstUserMsg);
+      activeConv.push({
+        role: "user",
+        content: "[System Context: Earlier conversation turns have been truncated to maintain fast response times and fit context limits. Proceeding with the latest context below.]",
+      });
+    }
+    activeConv.push(...tail);
+
+    // Ensure tool call integrity in windowed slice
+    fixMissingToolResponsesOpenAI(activeConv);
+  }
+
+  // 3. Convert active conversation turns to Codex input format
+  for (const m of activeConv) {
+    const content = m.content || "";
+    if (m.role === "tool") {
       const callId = m.tool_call_id || m.id || `call_${Date.now()}`;
       input.push({
         type: "function_call_output",
         call_id: callId,
-        output: content || "",
+        output: content,
       });
     } else if (m.role === "assistant") {
       if (content.trim()) {
@@ -207,7 +260,7 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
     } else {
       input.push({
         role: "user",
-        content: content || "",
+        content,
       });
     }
   }
@@ -256,6 +309,7 @@ const CODEX_SSE_ERROR_PATTERNS = [
   "quota_exceeded",
   "invalidated_token",
   "could not parse your authentication token",
+  "context_length_exceeded",
   '"status":"failed"',
   '"type":"error"',
   "event: error",
@@ -551,6 +605,25 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
                   {
                     index: 0,
                     delta: { content: data.delta },
+                    finish_reason: null,
+                  },
+                ],
+              };
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+            }
+
+            // 1b. Reasoning / thinking delta
+            if ((data.type === "response.reasoning_text.delta" || data.type === "response.thinking_text.delta") && typeof data.delta === "string") {
+              accumulatedText += data.delta;
+              const chunkPayload = {
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model: params.model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: { reasoning_content: data.delta },
                     finish_reason: null,
                   },
                 ],
@@ -943,6 +1016,25 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     });
   } else {
     formattedInput = [{ role: "user", content: "Hello" }];
+  }
+
+  // Sliding window for long response input arrays (> 70 turns)
+  if (formattedInput.length > 70) {
+    const firstUser = formattedInput.find((i: any) => i.role === "user");
+    let tail = formattedInput.slice(-60);
+    const userIdx = tail.findIndex((i: any) => i.role === "user");
+    if (userIdx > 0) tail = tail.slice(userIdx);
+
+    const windowed: any[] = [];
+    if (firstUser && !tail.includes(firstUser)) {
+      windowed.push(firstUser);
+      windowed.push({
+        role: "user",
+        content: "[System Context: Earlier conversation turns truncated to fit context limits. Continuing from latest context below.]",
+      });
+    }
+    windowed.push(...tail);
+    formattedInput = windowed;
   }
 
   const codexBody: any = {
