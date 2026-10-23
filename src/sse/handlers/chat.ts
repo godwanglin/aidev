@@ -26,8 +26,16 @@ import {
   extractAllResponsesTools,
 } from "@/lib/adapters/responses";
 import { isComboModel, resolveComboCandidates, markComboModelCooldown } from "@/lib/combo-router";
-import { isRtkEnabled } from "@/lib/rtk/config";
+import { getRtkSettings } from "@/lib/rtk/config";
 import { compressMessages, compressResponsesInput } from "@/lib/rtk/compressor";
+import {
+  extractContentChars,
+  calculateMessageChars,
+  estimateMessagesTokens,
+  resolveModelContextLimit,
+  applyContextGuard,
+  applyContextGuardToResponsesInput,
+} from "@/lib/rtk/context-guard";
 import { createKeepAliveTransform, SSE_HEADERS } from "@/sse/utils/keepalive";
 import zlib from "zlib";
 import * as fzstd from "fzstd";
@@ -150,19 +158,21 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         if (Array.isArray(jsonBody.messages)) {
           let charCount = 0;
           for (const m of jsonBody.messages) {
-            if (typeof m?.content === "string") charCount += m.content.length;
-            else if (m?.content) charCount += 100;
+            charCount += calculateMessageChars(m);
           }
-          if (typeof jsonBody.system === "string") charCount += jsonBody.system.length;
+          if (jsonBody.system) {
+            charCount += extractContentChars(jsonBody.system);
+          }
           estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
         } else if (Array.isArray(jsonBody.input)) {
           let charCount = 0;
           for (const item of jsonBody.input) {
             if (typeof item === "string") charCount += item.length;
-            else if (typeof item?.content === "string") charCount += item.content.length;
-            else charCount += 100;
+            else if (item && typeof item === "object") charCount += calculateMessageChars(item);
           }
-          if (typeof jsonBody.instructions === "string") charCount += jsonBody.instructions.length;
+          if (jsonBody.instructions) {
+            charCount += extractContentChars(jsonBody.instructions);
+          }
           estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.5));
         } else {
           estimatedPromptTokens = estimateTokens(rawText);
@@ -207,30 +217,96 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
   const apiKeyId = auth.apiKey.id;
   const clientUserId = (auth.apiKey as any)?.user?.id || (auth.apiKey as any)?.userId || null;
 
-  // 3. RTK Token Saver Context Compression
+  // 3. RTK Token Saver & Auto Context Compression (Context Guard)
   let tokensSavedRtk = 0;
   const clientRtkHeader = req.headers.get("x-rtk-token-saver");
+  const rtkSettings = await getRtkSettings();
   const rtkActive = clientRtkHeader === "false"
     ? false
     : clientRtkHeader === "true"
     ? true
-    : await isRtkEnabled();
+    : rtkSettings.rtkCompressionActive;
+  const autoCompressActive = rtkSettings.autoCompressActive;
+  const autoCompressThresholdPct = rtkSettings.autoCompressThresholdPct;
 
-  if (rtkActive && rawBody) {
+  if (rawBody && (rtkActive || autoCompressActive)) {
     try {
-      const jsonBody = JSON.parse(rawBody);
-      if (Array.isArray(jsonBody.messages)) {
-        const { compressedMessages, tokensSaved } = compressMessages(jsonBody.messages);
-        if (tokensSaved > 0) {
-          jsonBody.messages = compressedMessages;
-          rawBody = JSON.stringify(jsonBody);
-          tokensSavedRtk = tokensSaved;
+      let jsonBody = JSON.parse(rawBody);
+      let payloadModified = false;
+
+      // 3a. RTK Token Saver Context Compression (Diffs, Lockfiles, Trees, Logs)
+      if (rtkActive) {
+        if (Array.isArray(jsonBody.messages)) {
+          const { compressedMessages, tokensSaved } = compressMessages(jsonBody.messages);
+          if (tokensSaved > 0) {
+            jsonBody.messages = compressedMessages;
+            tokensSavedRtk += tokensSaved;
+            payloadModified = true;
+          }
+        } else if (jsonBody.input) {
+          const { compressedBody, tokensSaved } = compressResponsesInput(jsonBody);
+          if (tokensSaved > 0) {
+            jsonBody = compressedBody;
+            tokensSavedRtk += tokensSaved;
+            payloadModified = true;
+          }
         }
-      } else if (jsonBody.input) {
-        const { compressedBody, tokensSaved } = compressResponsesInput(jsonBody);
-        if (tokensSaved > 0) {
-          rawBody = JSON.stringify(compressedBody);
-          tokensSavedRtk = tokensSaved;
+      }
+
+      // 3b. Auto Context Compression (Context Guard)
+      // Activates when context reaches the configured % threshold of the target model's context limit
+      if (autoCompressActive) {
+        const modelLimit = await resolveModelContextLimit(parsedModel);
+        if (Array.isArray(jsonBody.messages)) {
+          const currentTokens = estimateMessagesTokens(jsonBody.messages, jsonBody.system);
+          const guard = applyContextGuard({
+            messages: jsonBody.messages,
+            system: jsonBody.system,
+            currentEstimatedTokens: currentTokens,
+            contextLimit: modelLimit,
+            thresholdPct: autoCompressThresholdPct,
+          });
+
+          if (guard.applied) {
+            jsonBody.messages = guard.compressedMessages;
+            tokensSavedRtk += guard.tokensSaved;
+            payloadModified = true;
+            console.log(
+              `[CONTEXT GUARD] Model '${parsedModel}': context ${guard.originalTokens}/${modelLimit} (${Math.round((guard.originalTokens / modelLimit) * 100)}% >= ${autoCompressThresholdPct}%). Saved ${guard.tokensSaved} tokens. New context: ${guard.newTokens} tokens.`
+            );
+          }
+        } else if (Array.isArray(jsonBody.input)) {
+          let charCount = 0;
+          for (const item of jsonBody.input) {
+            if (typeof item === "string") charCount += item.length;
+            else if (item && typeof item === "object") charCount += calculateMessageChars(item);
+          }
+          if (jsonBody.instructions) charCount += extractContentChars(jsonBody.instructions);
+          const currentTokens = Math.max(1, Math.ceil(charCount / 3.5));
+
+          const guard = applyContextGuardToResponsesInput({
+            input: jsonBody.input,
+            instructions: jsonBody.instructions,
+            currentEstimatedTokens: currentTokens,
+            contextLimit: modelLimit,
+            thresholdPct: autoCompressThresholdPct,
+          });
+
+          if (guard.applied) {
+            jsonBody.input = guard.compressedInput;
+            tokensSavedRtk += guard.tokensSaved;
+            payloadModified = true;
+            console.log(
+              `[CONTEXT GUARD] Model '${parsedModel}' responses: saved ${guard.tokensSaved} tokens.`
+            );
+          }
+        }
+      }
+
+      if (payloadModified) {
+        rawBody = JSON.stringify(jsonBody);
+        if (Array.isArray(jsonBody.messages)) {
+          estimatedPromptTokens = estimateMessagesTokens(jsonBody.messages, jsonBody.system);
         }
       }
     } catch {}

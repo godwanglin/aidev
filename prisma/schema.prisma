@@ -137,6 +137,8 @@ model SystemSetting {
   defaultRoutingStrategy     String    @default("SMART_FALLBACK") // "ROUND_ROBIN" | "SMART_FALLBACK"
   quotaSyncIntervalMinutes   Int       @default(15)
   rtkCompressionActive       Boolean   @default(true)
+  autoCompressActive         Boolean   @default(true)
+  autoCompressThresholdPct   Int       @default(50)
   updatedAt                  DateTime  @default(now()) @updatedAt
 }
 

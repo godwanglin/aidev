@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { isRtkEnabled, setRtkEnabled } from "@/lib/rtk/config";
+import { getRtkSettings, setRtkSettings } from "@/lib/rtk/config";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -17,7 +17,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized. Admin only." }, { status: 403 });
   }
 
-  const active = await isRtkEnabled();
+  const settings = await getRtkSettings();
   let totalTokensSaved = 0;
 
   try {
@@ -38,7 +38,9 @@ export async function GET() {
 
   return NextResponse.json({
     success: true,
-    active,
+    active: settings.rtkCompressionActive,
+    autoCompressActive: settings.autoCompressActive,
+    autoCompressThresholdPct: settings.autoCompressThresholdPct,
     totalTokensSaved,
   });
 }
@@ -51,13 +53,28 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const active = Boolean(body.active);
-    await setRtkEnabled(active);
+    const partial: any = {};
+    if (body.active !== undefined) {
+      partial.rtkCompressionActive = Boolean(body.active);
+    }
+    if (body.rtkCompressionActive !== undefined) {
+      partial.rtkCompressionActive = Boolean(body.rtkCompressionActive);
+    }
+    if (body.autoCompressActive !== undefined) {
+      partial.autoCompressActive = Boolean(body.autoCompressActive);
+    }
+    if (body.autoCompressThresholdPct !== undefined) {
+      partial.autoCompressThresholdPct = Number(body.autoCompressThresholdPct);
+    }
+
+    const updated = await setRtkSettings(partial);
 
     return NextResponse.json({
       success: true,
-      active,
-      message: `RTK Token Saver is now ${active ? "ENABLED" : "DISABLED"} globally.`,
+      active: updated.rtkCompressionActive,
+      autoCompressActive: updated.autoCompressActive,
+      autoCompressThresholdPct: updated.autoCompressThresholdPct,
+      message: "RTK and Auto Context Compression settings updated successfully.",
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 400 });

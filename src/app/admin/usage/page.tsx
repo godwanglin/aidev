@@ -1480,9 +1480,12 @@ export default function AdminUsagePage() {
   const [isPaused, setIsPaused] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // RTK Token Saver State
+  // RTK Token Saver & Context Guard State
   const [rtkActive, setRtkActive] = useState(true);
   const [rtkSaving, setRtkSaving] = useState(false);
+  const [autoCompressActive, setAutoCompressActive] = useState(true);
+  const [autoCompressThresholdPct, setAutoCompressThresholdPct] = useState(50);
+  const [contextGuardSaving, setContextGuardSaving] = useState(false);
   const [totalTokensSaved, setTotalTokensSaved] = useState(0);
 
   // Filters
@@ -1685,7 +1688,13 @@ export default function AdminUsagePage() {
       const res = await fetch("/api/admin/rtk");
       const json = await res.json();
       if (json.success) {
-        setRtkActive(json.active);
+        setRtkActive(Boolean(json.active));
+        if (json.autoCompressActive !== undefined) {
+          setAutoCompressActive(Boolean(json.autoCompressActive));
+        }
+        if (json.autoCompressThresholdPct !== undefined) {
+          setAutoCompressThresholdPct(Number(json.autoCompressThresholdPct) || 50);
+        }
         setTotalTokensSaved(json.totalTokensSaved || 0);
       }
     } catch {}
@@ -1706,6 +1715,40 @@ export default function AdminUsagePage() {
       }
     } catch {}
     setRtkSaving(false);
+  }
+
+  async function toggleAutoCompress() {
+    setContextGuardSaving(true);
+    const newActive = !autoCompressActive;
+    try {
+      const res = await fetch("/api/admin/rtk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoCompressActive: newActive, autoCompressThresholdPct }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setAutoCompressActive(Boolean(json.autoCompressActive));
+      }
+    } catch {}
+    setContextGuardSaving(false);
+  }
+
+  async function updateAutoCompressThreshold(pct: number) {
+    setAutoCompressThresholdPct(pct);
+    setContextGuardSaving(true);
+    try {
+      const res = await fetch("/api/admin/rtk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoCompressActive, autoCompressThresholdPct: pct }),
+      });
+      const json = await res.json();
+      if (json.success && json.autoCompressThresholdPct !== undefined) {
+        setAutoCompressThresholdPct(Number(json.autoCompressThresholdPct));
+      }
+    } catch {}
+    setContextGuardSaving(false);
   }
 
   useEffect(() => {
@@ -2106,6 +2149,132 @@ print(response.choices[0].message.content)`,
                 }}
               >
                 {rtkSaving ? "Updating..." : rtkActive ? "Disable RTK" : "Enable RTK"}
+              </button>
+            </div>
+          </div>
+
+          {/* Auto Context Compression (Context Guard) Sub-Header */}
+          <div
+            style={{
+              padding: "10px 18px",
+              borderBottom: "1px solid var(--line)",
+              backgroundColor: autoCompressActive ? "rgba(16, 185, 129, 0.05)" : "var(--surface-hover)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "6px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  backgroundColor: autoCompressActive ? "rgba(16, 185, 129, 0.15)" : "var(--card)",
+                  color: autoCompressActive ? "#10b981" : "var(--muted)",
+                  border: autoCompressActive ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--line)",
+                }}
+              >
+                <ShieldCheck size={15} strokeWidth={2.2} />
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 600, fontSize: "13px", color: "var(--ink)" }}>
+                    Auto Context Compression (Context Guard)
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "10.5px",
+                      fontWeight: 600,
+                      padding: "1px 7px",
+                      borderRadius: "999px",
+                      backgroundColor: autoCompressActive ? "rgba(16, 185, 129, 0.15)" : "var(--card)",
+                      color: autoCompressActive ? "#10b981" : "var(--muted)",
+                      border: autoCompressActive ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--line)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "5px",
+                        height: "5px",
+                        borderRadius: "50%",
+                        backgroundColor: autoCompressActive ? "#10b981" : "#94a3b8",
+                        display: "inline-block",
+                      }}
+                    />
+                    {autoCompressActive ? `Active @ ${autoCompressThresholdPct}% limit` : "Disabled"}
+                  </span>
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "1px" }}>
+                  Auto-compacts bulky older tool results and redundant history in the middle when conversation reaches {autoCompressThresholdPct}% of target LLM limit.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <span style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600, marginRight: "4px" }}>
+                  Threshold:
+                </span>
+                {[50, 55, 60, 70].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    disabled={contextGuardSaving || !autoCompressActive}
+                    onClick={() => updateAutoCompressThreshold(pct)}
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      padding: "3px 8px",
+                      borderRadius: "4px",
+                      cursor: autoCompressActive ? "pointer" : "not-allowed",
+                      border: autoCompressThresholdPct === pct && autoCompressActive
+                        ? "1px solid #10b981"
+                        : "1px solid var(--line)",
+                      backgroundColor: autoCompressThresholdPct === pct && autoCompressActive
+                        ? "#10b981"
+                        : "var(--card)",
+                      color: autoCompressThresholdPct === pct && autoCompressActive
+                        ? "#ffffff"
+                        : "var(--ink)",
+                      opacity: autoCompressActive ? 1 : 0.6,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                disabled={contextGuardSaving}
+                onClick={toggleAutoCompress}
+                className="control btn-inline"
+                style={{
+                  fontSize: "11.5px",
+                  fontWeight: 600,
+                  padding: "4px 12px",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  minWidth: "100px",
+                  justifyContent: "center",
+                  backgroundColor: autoCompressActive ? "rgba(16, 185, 129, 0.15)" : "var(--card)",
+                  color: autoCompressActive ? "#047857" : "var(--ink)",
+                  border: autoCompressActive ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid var(--line)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {contextGuardSaving ? "Saving..." : autoCompressActive ? "Disable Guard" : "Enable Guard"}
               </button>
             </div>
           </div>
