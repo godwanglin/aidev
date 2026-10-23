@@ -231,7 +231,11 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
 
   // Filter out EXHAUSTED and FAILED connections if other healthy connections are available
   const healthy = candidatePool.filter((c) => c.syncStatus !== 'EXHAUSTED' && c.syncStatus !== 'FAILED');
-  const eligibleConnections = healthy.length > 0 ? healthy : candidatePool;
+  const poolAfterExhausted = healthy.length > 0 ? healthy : candidatePool;
+
+  // Prefer NORMAL accounts over LOW_QUOTA if available
+  const normalPool = poolAfterExhausted.filter((c) => c.syncStatus === 'NORMAL');
+  const eligibleConnections = normalPool.length > 0 ? normalPool : poolAfterExhausted;
 
   if (eligibleConnections.length === 0) {
     return null;
@@ -257,6 +261,20 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
       }
       
       roundRobinCounters.set(groupKey, currentIndex + 1);
+    }
+  } else {
+    // For SMART_FALLBACK / default:
+    // If multiple accounts share top priority and weight, balance requests across them
+    const topPriority = eligibleConnections[0].priority ?? 1;
+    const topWeight = eligibleConnections[0].weight ?? 1;
+    const equalTier = eligibleConnections.filter(
+      (c) => (c.priority ?? 1) === topPriority && (c.weight ?? 1) === topWeight
+    );
+    if (equalTier.length > 1) {
+      const groupKey = targetProvider || 'ALL';
+      const currentIndex = roundRobinCounters.get(groupKey) || 0;
+      selectedConnection = equalTier[currentIndex % equalTier.length];
+      roundRobinCounters.set(groupKey, (currentIndex + 1) % 1000000);
     }
   }
 
@@ -375,6 +393,7 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
 export async function markConnectionCooldown(connectionId: string, durationSeconds: number = 60): Promise<void> {
   if (!connectionId || connectionId.startsWith("default-")) return;
   try {
+    invalidateProviderConnectionsCache();
     const cooldownUntil = new Date(Date.now() + durationSeconds * 1000);
     await prisma.providerConnection.update({
       where: { id: connectionId },

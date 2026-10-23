@@ -225,17 +225,38 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
 }
 
 // SSE error patterns inside 200-OK bodies
-const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
-const CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS = ["selected model is at capacity", "model_at_capacity"];
+const CODEX_SSE_ERROR_PATTERNS = [
+  "server_is_overloaded",
+  "service_unavailable_error",
+  "selected model is at capacity",
+  "model_at_capacity",
+  "response.failed",
+  "rate_limit_exceeded",
+  "tokens_exhausted",
+  "quota_exceeded",
+  "invalidated_token",
+  "could not parse your authentication token",
+  '"status":"failed"',
+  '"type":"error"',
+  "event: error",
+  '"type":"response.failed"',
+];
+
 const CODEX_SSE_USER_OUTPUT_PATTERNS = [
   "event: response.output_text.delta",
   "event: response.function_call_arguments.delta",
+  "event: response.output_item.added",
+  "event: response.content_part.added",
+  "event: response.reasoning_text.delta",
+  "event: response.thinking_text.delta",
   '"type":"response.output_text.delta"',
   '"type":"response.function_call_arguments.delta"',
+  '"type":"response.reasoning_text.delta"',
+  '"type":"response.thinking_text.delta"',
 ];
 const CODEX_SSE_PEEK_BYTES = 256 * 1024; // 256 KB peek buffer to catch capacity errors even after large headers/tools
 
-// Peek first 256KB for transient SSE errors (e.g. 200 OK with "model at capacity" or "server_is_overloaded")
+// Peek first 256KB for transient SSE errors (e.g. 200 OK with "model at capacity", "server_is_overloaded", or empty stream)
 async function peekSseTransientError(response: Response): Promise<{
   matched: string | null;
   message: string | null;
@@ -255,40 +276,54 @@ async function peekSseTransientError(response: Response): Promise<{
   try {
     while (text.length < CODEX_SSE_PEEK_BYTES) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        const lowerText = text.toLowerCase();
+        const hasUserOutput = CODEX_SSE_USER_OUTPUT_PATTERNS.some((p) => lowerText.includes(p));
+        if (!hasUserOutput) {
+          matched = "empty_or_failed_stream";
+          accountFallback = true;
+          let emptyMsg = "Codex upstream closed connection without returning content.";
+          try {
+            const m = text.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+            if (m) emptyMsg = JSON.parse(`"${m[1]}"`);
+          } catch {}
+          return {
+            matched,
+            message: emptyMsg,
+            accountFallback: true,
+            replacementBody: null,
+          };
+        }
+        break;
+      }
       chunks.push(value);
       text += decoder.decode(value, { stream: true });
       const lowerText = text.toLowerCase();
 
-      const accountHit = CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS.find((p) => lowerText.includes(p));
-      if (accountHit) {
-        matched = accountHit;
+      const errorHit = CODEX_SSE_ERROR_PATTERNS.find((p) => lowerText.includes(p));
+      if (errorHit) {
+        matched = errorHit;
         accountFallback = true;
-        break;
+        let errMsg: string | null = null;
+        try {
+          const m = text.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          if (m) errMsg = JSON.parse(`"${m[1]}"`);
+        } catch {}
+        try { await reader.cancel(); } catch {}
+        try { reader.releaseLock(); } catch {}
+        return {
+          matched,
+          message: errMsg || (lowerText.includes("capacity") ? "Selected model is at capacity. Please try a different model." : "Our servers are currently overloaded. Please try again later."),
+          accountFallback: true,
+          replacementBody: null,
+        };
       }
-      const retryHit = CODEX_SSE_RETRY_PATTERNS.find((p) => lowerText.includes(p));
-      if (retryHit) {
-        matched = retryHit;
-        break;
-      }
+
       if (CODEX_SSE_USER_OUTPUT_PATTERNS.some((p) => lowerText.includes(p))) {
         break;
       }
     }
   } catch {}
-
-  if (matched) {
-    try { await reader.cancel(); } catch {}
-    try { reader.releaseLock(); } catch {}
-    return {
-      matched,
-      message: accountFallback
-        ? "Selected model is at capacity. Please try a different model."
-        : "Our servers are currently overloaded. Please try again later.",
-      accountFallback,
-      replacementBody: null,
-    };
-  }
 
   reader.releaseLock();
 
@@ -633,21 +668,44 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       flush(controller) {
         const hasToolCalls = activeToolCalls.size > 0;
         const hasContent = Boolean(accumulatedText.trim().length > 0 || hasToolCalls);
-        const finalChunk = {
-          id: completionId,
-          object: "chat.completion.chunk",
-          created,
-          model: params.model,
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: hasToolCalls ? "tool_calls" : "stop",
+        if (!hasContent) {
+          const errorChunk = {
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: params.model,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: "error",
+              },
+            ],
+            error: {
+              message: "Codex stream returned empty content",
+              type: "upstream_empty_content",
+              code: 502,
             },
-          ],
-        };
-        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-        controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(errorChunk)}\n\n`));
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        } else {
+          const finalChunk = {
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: params.model,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: hasToolCalls ? "tool_calls" : "stop",
+              },
+            ],
+          };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        }
 
         const durationMs = Date.now() - startTime;
         const fallbackPrompt = params.estimatedPromptTokens || Math.max(15, Math.ceil((params.rawBody?.length || 0) / 4));
