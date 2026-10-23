@@ -1127,6 +1127,56 @@ function uuidFromSeed(seed: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+const GOOGLE_ALLOWED_ASPECT_RATIOS: { label: string; ratio: number }[] = [
+  { label: "1:1", ratio: 1 / 1 },
+  { label: "1:4", ratio: 1 / 4 },
+  { label: "1:8", ratio: 1 / 8 },
+  { label: "2:3", ratio: 2 / 3 },
+  { label: "3:2", ratio: 3 / 2 },
+  { label: "3:4", ratio: 3 / 4 },
+  { label: "4:1", ratio: 4 / 1 },
+  { label: "4:3", ratio: 4 / 3 },
+  { label: "4:5", ratio: 4 / 5 },
+  { label: "5:4", ratio: 5 / 4 },
+  { label: "8:1", ratio: 8 / 1 },
+  { label: "9:16", ratio: 9 / 16 },
+  { label: "16:9", ratio: 16 / 9 },
+  { label: "21:9", ratio: 21 / 9 },
+];
+
+export function resolveGoogleAspectRatio(inputSize?: string): string {
+  if (!inputSize || typeof inputSize !== "string") return "1:1";
+
+  const clean = inputSize.trim().toLowerCase();
+  if (clean === "auto" || clean === "") return "1:1";
+
+  // Check direct label match e.g. "16:9", "1:1"
+  const directMatch = GOOGLE_ALLOWED_ASPECT_RATIOS.find((r) => r.label === clean);
+  if (directMatch) return directMatch.label;
+
+  const parts = clean.split("x");
+  if (parts.length !== 2) return "1:1";
+
+  const w = parseFloat(parts[0]);
+  const h = parseFloat(parts[1]);
+  if (!w || !h || w <= 0 || h <= 0) return "1:1";
+
+  const targetRatio = w / h;
+  let closest = GOOGLE_ALLOWED_ASPECT_RATIOS[0];
+  let minDiff = Math.abs(targetRatio - closest.ratio);
+
+  for (let i = 1; i < GOOGLE_ALLOWED_ASPECT_RATIOS.length; i++) {
+    const candidate = GOOGLE_ALLOWED_ASPECT_RATIOS[i];
+    const diff = Math.abs(targetRatio - candidate.ratio);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = candidate;
+    }
+  }
+
+  return closest.label;
+}
+
 export interface AntigravityImageParams {
   model: string;
   prompt: string;
@@ -1141,24 +1191,8 @@ export async function dispatchAntigravityImage(params: AntigravityImageParams): 
   let currentToken = params.accessToken;
   const projectId = await getEffectiveProjectId(currentToken);
 
-  // Aspect ratio calculation from size or model suffix
-  let aspectRatio = "1:1";
-  if (params.size && typeof params.size === "string") {
-    const parts = params.size.toLowerCase().split("x");
-    if (parts.length === 2) {
-      const w = parseInt(parts[0], 10);
-      const h = parseInt(parts[1], 10);
-      if (w > 0 && h > 0) {
-        const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-        const d = gcd(w, h);
-        const rw = w / d;
-        const rh = h / d;
-        if (rw <= 16 && rh <= 16) {
-          aspectRatio = `${rw}:${rh}`;
-        }
-      }
-    }
-  }
+  // Aspect ratio calculation mapped strictly to Google Imagen 3 whitelist
+  const aspectRatio = resolveGoogleAspectRatio(params.size);
 
   // Model cleanup: e.g. "ag/gemini-3.1-flash-image" -> "gemini-3.1-flash-image"
   let wireModel = params.model.replace(/^ag\//i, "").trim();
