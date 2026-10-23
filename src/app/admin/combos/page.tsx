@@ -137,6 +137,7 @@ export default function AdminCombosPage() {
   const [draggedChip, setDraggedChip] = useState<{ comboId: string; index: number } | null>(null);
   const [dragOverChip, setDragOverChip] = useState<{ comboId: string; index: number } | null>(null);
   const [savingReorderId, setSavingReorderId] = useState<string | null>(null);
+  const [togglingCandidateKey, setTogglingCandidateKey] = useState<string | null>(null);
 
   async function fetchCombos() {
     setLoading(true);
@@ -428,6 +429,53 @@ export default function AdminCombosPage() {
       fetchCombos(); // Revert from server
     } finally {
       setSavingReorderId(null);
+    }
+  }
+
+  async function handleToggleCandidateActive(combo: ComboItem, itemIndex: number) {
+    const item = combo.items[itemIndex];
+    if (!item) return;
+
+    const candidateKey = `${combo.id}:${itemIndex}`;
+    if (togglingCandidateKey) return;
+    setTogglingCandidateKey(candidateKey);
+
+    const nextActive = item.isActive === false ? true : false;
+    const newItems = combo.items.map((it, idx) =>
+      idx === itemIndex ? { ...it, isActive: nextActive } : it
+    );
+
+    // Optimistically update table immediately
+    setCombos((prev) =>
+      prev.map((c) => (c.id === combo.id ? { ...c, items: newItems } : c))
+    );
+
+    try {
+      const res = await fetch(`/api/admin/combos/${combo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: newItems }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Gagal memperbarui status candidate.");
+      }
+      if (data.combo) {
+        setCombos((prev) =>
+          prev.map((c) => (c.id === combo.id ? data.combo : c))
+        );
+      }
+      setSuccessMsg(
+        nextActive
+          ? `Candidate '${item.modelId}' diaktifkan`
+          : `Candidate '${item.modelId}' dinonaktifkan (skip)`
+      );
+      setTimeout(() => setSuccessMsg(""), 2000);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Gagal memperbarui status candidate.");
+      fetchCombos(); // Revert from server
+    } finally {
+      setTogglingCandidateKey(null);
     }
   }
 
@@ -972,11 +1020,80 @@ export default function AdminCombosPage() {
                                 <span style={{ fontWeight: 500, textDecoration: item.isActive === false ? "line-through" : "none" }}>
                                   {item.modelId}
                                 </span>
-                                {item.isActive === false && (
-                                  <span style={{ fontSize: "9px", fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.12)", padding: "1px 4px", borderRadius: "3px", marginLeft: "4px" }}>
-                                    OFF
-                                  </span>
-                                )}
+
+                                {/* Quick Candidate Active / Disable Toggle Switch */}
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleCandidateActive(combo, idx);
+                                  }}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  title={
+                                    item.isActive === false
+                                      ? `[SKIP] ${item.modelId} dinonaktifkan. Klik untuk mengaktifkan kembali.`
+                                      : `[ACTIVE] ${item.modelId} aktif. Klik untuk disable / lewati (skip) candidate ini.`
+                                  }
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    marginLeft: "4px",
+                                    cursor: "pointer",
+                                    userSelect: "none",
+                                  }}
+                                  className="group/cand-toggle"
+                                >
+                                  {item.isActive === false && (
+                                    <span
+                                      style={{
+                                        fontSize: "8.5px",
+                                        fontWeight: 800,
+                                        color: "#ef4444",
+                                        background: "rgba(239, 68, 68, 0.15)",
+                                        border: "1px solid rgba(239, 68, 68, 0.35)",
+                                        padding: "0.5px 3.5px",
+                                        borderRadius: "3px",
+                                        letterSpacing: "0.02em",
+                                        lineHeight: 1.2,
+                                      }}
+                                    >
+                                      OFF
+                                    </span>
+                                  )}
+
+                                  <div
+                                    style={{
+                                      width: "22px",
+                                      height: "12px",
+                                      borderRadius: "999px",
+                                      backgroundColor: item.isActive === false ? "rgba(239, 68, 68, 0.2)" : "rgba(16, 185, 129, 0.25)",
+                                      border: `1px solid ${item.isActive === false ? "rgba(239, 68, 68, 0.55)" : "rgba(16, 185, 129, 0.7)"}`,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: item.isActive === false ? "flex-start" : "flex-end",
+                                      padding: "1px",
+                                      transition: "all 0.18s ease",
+                                      boxSizing: "border-box",
+                                    }}
+                                  >
+                                    {togglingCandidateKey === `${combo.id}:${idx}` ? (
+                                      <RefreshCw size={8} className="animate-spin text-blue-400 mx-auto" />
+                                    ) : (
+                                      <span
+                                        style={{
+                                          width: "8px",
+                                          height: "8px",
+                                          borderRadius: "50%",
+                                          backgroundColor: item.isActive === false ? "#ef4444" : "#10b981",
+                                          boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
+                                          display: "block",
+                                        }}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
 
                                 {isCooling && (
                                   <span
