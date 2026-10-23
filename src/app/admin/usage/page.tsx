@@ -339,6 +339,11 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
           content = JSON.stringify(m.content, null, 2);
         }
 
+        // Clean out synthetic <total_tokens> tags from user content
+        if (typeof content === "string") {
+          content = content.replace(/<total_tokens>[\s\S]*?<\/total_tokens>/gi, "").trim();
+        }
+
         const reasoning = m.reasoning_content || m.reasoning || m.thought || undefined;
 
         if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
@@ -688,6 +693,27 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
       });
     }
   }
+
+  // Ensure logical conversational layout:
+  // 1. System instructions & tools configuration (top)
+  // 2. Conversation history omitted divider
+  // 3. User message (top-right)
+  // 4. Tools execution & tool outputs (below user on the left)
+  // 5. Assistant thoughts / intermediate responses
+  // 6. Final Upstream Output
+  messages.sort((a, b) => {
+    const getWeight = (m: ParsedChatMessage) => {
+      if (m.role === "system" || m.isAdditionalTools) {
+        if (m.content?.includes("[Riwayat percakapan:") || (m as any)._isHistoryOmittedNote) return 1;
+        return 0;
+      }
+      if (m.role === "user") return 2;
+      if (m.isToolExec || m.isToolOutput || m.role === "tool") return 3;
+      if (m.isFinalResponse) return 5;
+      return 4;
+    };
+    return getWeight(a) - getWeight(b);
+  });
 
   return messages;
 }

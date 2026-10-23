@@ -507,10 +507,55 @@ export function compactRequestBodyForLog(rawBody: any): string | null {
 
       const compactedMessages: any[] = [...systemMsgs];
 
+      // Helper to check if a message is a real human user prompt (not just synthetic total_tokens or tool_result)
+      const isRealUserMsg = (m: any): boolean => {
+        if (!m || (m.role !== "user" && m.role !== "human")) return false;
+        let text = "";
+        if (typeof m.content === "string") {
+          text = m.content;
+        } else if (Array.isArray(m.content)) {
+          if (m.content.every((p: any) => p && p.type === "tool_result")) return false;
+          text = m.content
+            .filter((p: any) => p && p.type !== "tool_result")
+            .map((p: any) => p.text || (typeof p === "string" ? p : ""))
+            .join(" ");
+        }
+        const cleaned = text.replace(/<total_tokens>[\s\S]*?<\/total_tokens>/gi, "").trim();
+        return cleaned.length > 0;
+      };
+
+      // Strip <total_tokens> tags from user content
+      const cleanUserContent = (msg: any): any => {
+        if (!msg) return msg;
+        const cloned = { ...msg };
+        if (typeof cloned.content === "string") {
+          cloned.content = cloned.content.replace(/<total_tokens>[\s\S]*?<\/total_tokens>/gi, "").trim();
+        } else if (Array.isArray(cloned.content)) {
+          cloned.content = cloned.content
+            .filter((p: any) => {
+              if (typeof p === "string" && /<total_tokens>[\s\S]*?<\/total_tokens>/i.test(p)) return false;
+              if (p?.text && /<total_tokens>[\s\S]*?<\/total_tokens>/i.test(p.text)) return false;
+              return true;
+            })
+            .map((p: any) => {
+              if (typeof p === "string") return p.replace(/<total_tokens>[\s\S]*?<\/total_tokens>/gi, "").trim();
+              if (p?.text) return { ...p, text: p.text.replace(/<total_tokens>[\s\S]*?<\/total_tokens>/gi, "").trim() };
+              return p;
+            });
+        }
+        return cloned;
+      };
+
       if (nonSystemMsgs.length > 0) {
-        // If there is prior conversation history, add a note
-        if (nonSystemMsgs.length > 2) {
-          const omittedCount = nonSystemMsgs.length - 2;
+        // Find the latest real human user prompt in conversation history
+        const lastUserMsg = [...nonSystemMsgs].reverse().find(isRealUserMsg);
+        
+        // Find recent turn messages (tool calls, tool results, assistant interactions)
+        const recentTurnMsgs = nonSystemMsgs.slice(-3).filter((m) => m !== lastUserMsg);
+
+        const keptCount = (lastUserMsg ? 1 : 0) + recentTurnMsgs.length;
+        if (nonSystemMsgs.length > keptCount) {
+          const omittedCount = nonSystemMsgs.length - keptCount;
           compactedMessages.push({
             role: "system",
             content: `[Riwayat percakapan: ${omittedCount} pesan riwayat sebelumnya dilewati untuk menghemat log]`,
@@ -518,10 +563,19 @@ export function compactRequestBodyForLog(rawBody: any): string | null {
           });
         }
 
-        // Keep the last 1 or 2 messages (prior assistant reply/tool call + latest user prompt)
-        const recentMsgs = nonSystemMsgs.slice(-2);
-        for (const rm of recentMsgs) {
-          compactedMessages.push({ ...rm, content: sanitizeContent(rm.content) });
+        // 1. Put REAL User Prompt FIRST (so it renders at the top on the right!)
+        if (lastUserMsg) {
+          compactedMessages.push(cleanUserContent(lastUserMsg));
+        }
+
+        // 2. Put Tool execution / Tool result / Assistant turn AFTER user prompt (renders below on the left!)
+        for (const tm of recentTurnMsgs) {
+          if (isRealUserMsg(tm)) continue;
+          const cleaned = cleanUserContent(tm);
+          if (cleaned.role === "user" && (!cleaned.content || cleaned.content.length === 0)) {
+            continue;
+          }
+          compactedMessages.push(cleaned);
         }
       }
 
