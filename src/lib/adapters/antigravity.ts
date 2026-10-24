@@ -551,6 +551,7 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
 
   // Resolve reasoning effort from explicit parameter, nested Codex responses format, or standard chat format
   const rawEffort = params.reasoningEffort ||
+    (params.parsedBody?.output_config && typeof params.parsedBody.output_config === "object" ? params.parsedBody.output_config.effort : undefined) ||
     (params.parsedBody?.reasoning && typeof params.parsedBody.reasoning === "object" ? params.parsedBody.reasoning.effort : undefined) ||
     params.parsedBody?.reasoning_effort ||
     params.parsedBody?.effort ||

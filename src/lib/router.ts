@@ -440,6 +440,12 @@ export function compactRequestBodyForLog(rawBody: any): string | null {
       model: bodyObj.model,
     };
 
+    if (bodyObj.thinking) compacted.thinking = bodyObj.thinking;
+    if (bodyObj.effort) compacted.effort = bodyObj.effort;
+    if (bodyObj.output_config) compacted.output_config = bodyObj.output_config;
+    if (bodyObj.reasoning) compacted.reasoning = bodyObj.reasoning;
+    if (bodyObj.reasoning_effort) compacted.reasoning_effort = bodyObj.reasoning_effort;
+
     // 1. Anthropic / Top-level system
     if (bodyObj.system) {
       if (typeof bodyObj.system === "string") {

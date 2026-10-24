@@ -98,39 +98,51 @@ function extractReasoningEffort(body: any, fallbackModel?: string): string | und
     return undefined;
   }
 
-  // 1. OpenAI format: reasoning.effort
-  if (body.reasoning && typeof body.reasoning === "object" && typeof body.reasoning.effort === "string") {
-    return body.reasoning.effort.toLowerCase();
-  }
-  // 2. OpenAI top-level reasoning_effort
-  if (typeof body.reasoning_effort === "string") {
-    return body.reasoning_effort.toLowerCase();
-  }
-  // 3. Anthropic Claude Code explicit effort (beta header effort-2025-11-24)
-  if (typeof body.effort === "string") {
-    return body.effort.toLowerCase();
-  }
-  // 4. Anthropic thinking configuration
-  if (body.thinking && typeof body.thinking === "object") {
-    if (typeof body.thinking.effort === "string") {
-      return body.thinking.effort.toLowerCase();
-    }
-    if (typeof body.thinking.budget_tokens === "number") {
-      const budget = body.thinking.budget_tokens;
-      if (budget >= 16000) return "high";
-      if (budget >= 4000) return "medium";
-      if (budget > 0) return "low";
-    }
-    if (body.thinking.type === "enabled" || body.thinking.type === "adaptive") {
-      return "high";
-    }
-  }
-  // 5. Output config effort
+  // Priority 1: Explicit effort parameters across Anthropic and OpenAI schemas
+  // Anthropic output_config.effort (Claude Code effort API: "low", "medium", "high", "max")
   if (body.output_config && typeof body.output_config === "object" && typeof body.output_config.effort === "string") {
     return body.output_config.effort.toLowerCase();
   }
+  // Anthropic top-level effort header/body (effort-2025-11-24)
+  if (typeof body.effort === "string") {
+    return body.effort.toLowerCase();
+  }
+  // Anthropic thinking.effort
+  if (body.thinking && typeof body.thinking === "object" && typeof body.thinking.effort === "string") {
+    return body.thinking.effort.toLowerCase();
+  }
+  // OpenAI format: reasoning.effort
+  if (body.reasoning && typeof body.reasoning === "object" && typeof body.reasoning.effort === "string") {
+    return body.reasoning.effort.toLowerCase();
+  }
+  // OpenAI top-level reasoning_effort
+  if (typeof body.reasoning_effort === "string") {
+    return body.reasoning_effort.toLowerCase();
+  }
 
-  // 6. Model name hint fallback (e.g. "ag/gemini-3.8-flash-high", "claude-opus-5-5-high")
+  // Priority 2: Anthropic thinking budget_tokens
+  if (body.thinking && typeof body.thinking === "object" && typeof body.thinking.budget_tokens === "number") {
+    const budget = body.thinking.budget_tokens;
+    if (budget >= 16000) return "high";
+    if (budget >= 4000) return "medium";
+    if (budget > 0) return "low";
+  }
+
+  // Priority 3: Anthropic thinking type enabled / adaptive (without explicit effort)
+  if (body.thinking && typeof body.thinking === "object") {
+    if (body.thinking.type === "enabled" || body.thinking.type === "adaptive") {
+      const modelStr = (fallbackModel || body.model || "").toLowerCase();
+      if (modelStr) {
+        if (modelStr.includes("-ultra") || modelStr.includes("-xhigh") || modelStr.includes("-max")) return "high";
+        if (modelStr.includes("-high") || modelStr.includes("-thinking")) return "high";
+        if (modelStr.includes("-medium")) return "medium";
+        if (modelStr.includes("-low") || modelStr.includes("-minimal") || modelStr.includes("-extra-low")) return "low";
+      }
+      return "medium";
+    }
+  }
+
+  // Priority 4: Model name hint fallback (e.g. "ag/gemini-3.8-flash-high", "claude-opus-5-5-high")
   const modelStr = (fallbackModel || body.model || "").toLowerCase();
   if (modelStr) {
     if (modelStr.includes("-ultra") || modelStr.includes("-xhigh") || modelStr.includes("-max")) return "high";

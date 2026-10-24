@@ -307,23 +307,28 @@ export function convertAnthropicToOpenAiPayload(
 
   // Extract reasoning / thinking from Anthropic format into OpenAI format
   let detectedEffort: string | undefined = undefined;
-  if (typeof parsedBody.effort === "string") {
+  if (typeof parsedBody.output_config?.effort === "string") {
+    detectedEffort = parsedBody.output_config.effort.toLowerCase();
+  } else if (typeof parsedBody.effort === "string") {
     detectedEffort = parsedBody.effort.toLowerCase();
-  } else if (parsedBody.thinking && typeof parsedBody.thinking === "object") {
-    if (typeof parsedBody.thinking.effort === "string") {
-      detectedEffort = parsedBody.thinking.effort.toLowerCase();
-    } else if (typeof parsedBody.thinking.budget_tokens === "number") {
-      const budget = parsedBody.thinking.budget_tokens;
-      if (budget >= 16000) detectedEffort = "high";
-      else if (budget >= 4000) detectedEffort = "medium";
-      else if (budget > 0) detectedEffort = "low";
-    } else if (parsedBody.thinking.type === "enabled" || parsedBody.thinking.type === "adaptive") {
-      detectedEffort = "high";
-    }
+  } else if (typeof parsedBody.thinking?.effort === "string") {
+    detectedEffort = parsedBody.thinking.effort.toLowerCase();
   } else if (typeof parsedBody.reasoning_effort === "string") {
     detectedEffort = parsedBody.reasoning_effort.toLowerCase();
   } else if (parsedBody.reasoning?.effort) {
     detectedEffort = String(parsedBody.reasoning.effort).toLowerCase();
+  } else if (typeof parsedBody.thinking?.budget_tokens === "number") {
+    const budget = parsedBody.thinking.budget_tokens;
+    if (budget >= 16000) detectedEffort = "high";
+    else if (budget >= 4000) detectedEffort = "medium";
+    else if (budget > 0) detectedEffort = "low";
+  } else if (parsedBody.thinking && (parsedBody.thinking.type === "enabled" || parsedBody.thinking.type === "adaptive")) {
+    const tmLower = (targetModel || "").toLowerCase();
+    if (tmLower.includes("-ultra") || tmLower.includes("-xhigh") || tmLower.includes("-max")) detectedEffort = "high";
+    else if (tmLower.includes("-high") || tmLower.includes("-thinking")) detectedEffort = "high";
+    else if (tmLower.includes("-medium")) detectedEffort = "medium";
+    else if (tmLower.includes("-low") || tmLower.includes("-minimal") || tmLower.includes("-extra-low")) detectedEffort = "low";
+    else detectedEffort = "medium";
   }
 
   // Model name fallback
