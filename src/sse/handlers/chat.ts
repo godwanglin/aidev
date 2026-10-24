@@ -86,14 +86,59 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 3.5));
 }
 
-function extractReasoningEffort(body: any): string | undefined {
-  if (!body || typeof body !== "object") return undefined;
+function extractReasoningEffort(body: any, fallbackModel?: string): string | undefined {
+  if (!body || typeof body !== "object") {
+    if (fallbackModel) {
+      const tmLower = fallbackModel.toLowerCase();
+      if (tmLower.includes("-ultra") || tmLower.includes("-xhigh") || tmLower.includes("-max")) return "high";
+      if (tmLower.includes("-high") || tmLower.includes("-thinking")) return "high";
+      if (tmLower.includes("-medium")) return "medium";
+      if (tmLower.includes("-low") || tmLower.includes("-minimal")) return "low";
+    }
+    return undefined;
+  }
+
+  // 1. OpenAI format: reasoning.effort
   if (body.reasoning && typeof body.reasoning === "object" && typeof body.reasoning.effort === "string") {
-    return body.reasoning.effort;
+    return body.reasoning.effort.toLowerCase();
   }
+  // 2. OpenAI top-level reasoning_effort
   if (typeof body.reasoning_effort === "string") {
-    return body.reasoning_effort;
+    return body.reasoning_effort.toLowerCase();
   }
+  // 3. Anthropic Claude Code explicit effort (beta header effort-2025-11-24)
+  if (typeof body.effort === "string") {
+    return body.effort.toLowerCase();
+  }
+  // 4. Anthropic thinking configuration
+  if (body.thinking && typeof body.thinking === "object") {
+    if (typeof body.thinking.effort === "string") {
+      return body.thinking.effort.toLowerCase();
+    }
+    if (typeof body.thinking.budget_tokens === "number") {
+      const budget = body.thinking.budget_tokens;
+      if (budget >= 16000) return "high";
+      if (budget >= 4000) return "medium";
+      if (budget > 0) return "low";
+    }
+    if (body.thinking.type === "enabled" || body.thinking.type === "adaptive") {
+      return "high";
+    }
+  }
+  // 5. Output config effort
+  if (body.output_config && typeof body.output_config === "object" && typeof body.output_config.effort === "string") {
+    return body.output_config.effort.toLowerCase();
+  }
+
+  // 6. Model name hint fallback (e.g. "ag/gemini-3.8-flash-high", "claude-opus-5-5-high")
+  const modelStr = (fallbackModel || body.model || "").toLowerCase();
+  if (modelStr) {
+    if (modelStr.includes("-ultra") || modelStr.includes("-xhigh") || modelStr.includes("-max")) return "high";
+    if (modelStr.includes("-high") || modelStr.includes("-thinking")) return "high";
+    if (modelStr.includes("-medium")) return "medium";
+    if (modelStr.includes("-low") || modelStr.includes("-minimal") || modelStr.includes("-extra-low")) return "low";
+  }
+
   return undefined;
 }
 
@@ -463,7 +508,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       ? candidateModel
       : (resolvedRoute?.upstreamModel || candidateModel);
 
-    const candidateReasoningEffort = extractReasoningEffort(parsedCandidateJson);
+    const candidateReasoningEffort = extractReasoningEffort(parsedCandidateJson, candidateModel) || resolvedRoute?.thinkingLevel?.toLowerCase();
 
     adminLogger.post({
       model: clientRequestedModel,
@@ -528,12 +573,14 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           delete chatPayload.tool_choice;
         }
 
-        // Forward reasoning_effort if client specified reasoning configuration
+        // Forward reasoning_effort if client specified reasoning configuration or inferred from model
         if (parsedCandidateJson.reasoning && typeof parsedCandidateJson.reasoning === "object") {
           const effort = parsedCandidateJson.reasoning.effort;
           if (effort && effort !== "none") {
             chatPayload.reasoning_effort = effort;
           }
+        } else if (candidateReasoningEffort) {
+          chatPayload.reasoning_effort = candidateReasoningEffort;
         }
 
         delete chatPayload.input;

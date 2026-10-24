@@ -552,7 +552,9 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
   // Resolve reasoning effort from explicit parameter, nested Codex responses format, or standard chat format
   const rawEffort = params.reasoningEffort ||
     (params.parsedBody?.reasoning && typeof params.parsedBody.reasoning === "object" ? params.parsedBody.reasoning.effort : undefined) ||
-    params.parsedBody?.reasoning_effort;
+    params.parsedBody?.reasoning_effort ||
+    params.parsedBody?.effort ||
+    (params.parsedBody?.thinking && typeof params.parsedBody.thinking === "object" ? (params.parsedBody.thinking.effort || (params.parsedBody.thinking.type === "enabled" ? "high" : undefined)) : undefined);
   const effortStr = rawEffort ? String(rawEffort).toLowerCase() : "";
 
   const wireModel = mapToWireModel(params.model, effortStr);

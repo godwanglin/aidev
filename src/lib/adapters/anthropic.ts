@@ -305,6 +305,44 @@ export function convertAnthropicToOpenAiPayload(
 
   delete payload.system;
 
+  // Extract reasoning / thinking from Anthropic format into OpenAI format
+  let detectedEffort: string | undefined = undefined;
+  if (typeof parsedBody.effort === "string") {
+    detectedEffort = parsedBody.effort.toLowerCase();
+  } else if (parsedBody.thinking && typeof parsedBody.thinking === "object") {
+    if (typeof parsedBody.thinking.effort === "string") {
+      detectedEffort = parsedBody.thinking.effort.toLowerCase();
+    } else if (typeof parsedBody.thinking.budget_tokens === "number") {
+      const budget = parsedBody.thinking.budget_tokens;
+      if (budget >= 16000) detectedEffort = "high";
+      else if (budget >= 4000) detectedEffort = "medium";
+      else if (budget > 0) detectedEffort = "low";
+    } else if (parsedBody.thinking.type === "enabled" || parsedBody.thinking.type === "adaptive") {
+      detectedEffort = "high";
+    }
+  } else if (typeof parsedBody.reasoning_effort === "string") {
+    detectedEffort = parsedBody.reasoning_effort.toLowerCase();
+  } else if (parsedBody.reasoning?.effort) {
+    detectedEffort = String(parsedBody.reasoning.effort).toLowerCase();
+  }
+
+  // Model name fallback
+  if (!detectedEffort && targetModel) {
+    const tmLower = targetModel.toLowerCase();
+    if (tmLower.includes("-high") || tmLower.includes("-ultra") || tmLower.includes("-thinking")) {
+      detectedEffort = "high";
+    } else if (tmLower.includes("-medium")) {
+      detectedEffort = "medium";
+    } else if (tmLower.includes("-low")) {
+      detectedEffort = "low";
+    }
+  }
+
+  if (detectedEffort && detectedEffort !== "none") {
+    payload.reasoning_effort = detectedEffort;
+    payload.reasoning = { effort: detectedEffort };
+  }
+
   if (openAiTools && openAiTools.length > 0) {
     payload.tools = openAiTools;
     if (openAiToolChoice) {
@@ -1347,6 +1385,32 @@ export function convertOpenAiToAnthropicPayload(
   if (!result.tools || result.tools.length === 0) {
     delete result.tools;
     delete result.tool_choice;
+  }
+
+  // 5. Convert reasoning_effort to Anthropic thinking
+  const reasoningEffort = openAiBody.reasoning_effort || openAiBody.reasoning?.effort;
+  if (reasoningEffort && reasoningEffort !== "none") {
+    let budget = 8192;
+    if (reasoningEffort === "high" || reasoningEffort === "xhigh" || reasoningEffort === "ultra" || reasoningEffort === "max") {
+      budget = 16384;
+    } else if (reasoningEffort === "low" || reasoningEffort === "minimal") {
+      budget = 2048;
+    }
+    result.thinking = {
+      type: "enabled",
+      budget_tokens: budget,
+    };
+    if (result.max_tokens < budget + 4096) {
+      result.max_tokens = budget + 4096;
+    }
+  } else if (cleanModel.includes("-high") || cleanModel.includes("-thinking")) {
+    result.thinking = {
+      type: "enabled",
+      budget_tokens: 8192,
+    };
+    if (result.max_tokens < 12288) {
+      result.max_tokens = 12288;
+    }
   }
 
   return result;

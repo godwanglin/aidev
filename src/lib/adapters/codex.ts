@@ -1156,7 +1156,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   }
 
   // Apply reasoning effort if explicitly given or inferred from model name (e.g. 6.1 Sol Extra High)
-  let effectiveEffort = params.reasoningEffort || codexBody.reasoning?.effort || resolved.inferredEffort;
+  let effectiveEffort = params.reasoningEffort || codexBody.reasoning?.effort || codexBody.reasoning_effort || resolved.inferredEffort;
   if (effectiveEffort === "max") {
     effectiveEffort = "xhigh";
   }
