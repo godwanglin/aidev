@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar } from "@/components/providers/ProviderIcons";
 import { getModelContextLimit, formatCompactTokens } from "@/lib/model-capabilities";
@@ -1586,7 +1587,8 @@ export default function AdminUsagePage() {
   const [clearModalOpen, setClearModalOpen] = useState(false);
   const [clearScope, setClearScope] = useState<"all" | "older_than_24h" | "older_than_7d">("all");
   const [clearing, setClearing] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
+  const setActionMessage = (msg: string) => { if (msg) toast.success(msg); };
+  const actionMessage = "";
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -2053,7 +2055,7 @@ print(response.choices[0].message.content)`,
         </PageHead>
 
         {/* Storage Cleaned Alert Banner */}
-        {actionMessage && (
+        {false && (
           <div className="banner-alert badge-emerald mb-3">
             <CheckCircle2 size={16} style={{ color: "#10b981", flexShrink: 0 }} />
             <div className="banner-text">

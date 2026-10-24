@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   Network,
   Plus,
@@ -41,8 +42,8 @@ export default function ProvidersCatalogPage() {
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [customProviders, setCustomProviders] = useState<CustomProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const setError = (msg: string) => { if (msg) toast.error(msg); };
+  const setSuccess = (msg: string) => { if (msg) toast.success(msg); };
 
   // Category filter
   const [filterView, setFilterView] = useState<"ALL" | "CUSTOM" | "WEB" | "OAUTH" | "FREE_TIER">("ALL");
@@ -280,20 +281,7 @@ export default function ProvidersCatalogPage() {
           </div>
         </div>
 
-        {/* Alerts */}
-        {error && (
-          <div className="login-error mb-4 flex items-center gap-2">
-            <AlertCircle size={14} />
-            <span>{error}</span>
-          </div>
-        )}
 
-        {success && (
-          <div className="banner-alert mb-4 flex items-center gap-2">
-            <CheckCircle2 size={15} className="shrink-0 text-green" />
-            <span className="banner-text text-xs">{success}</span>
-          </div>
-        )}
 
         <div className="providers-hub-container">
           {/* ===================================================================

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   Receipt,
   Search,
@@ -91,8 +92,10 @@ export default function AdminOrdersPage() {
   const [totalCount, setTotalCount] = useState(0);
 
   // Notifications
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Modals
@@ -241,7 +244,7 @@ export default function AdminOrdersPage() {
         </PageHead>
 
         {/* Success Alert Banner */}
-        {successMsg && (
+        {false && (
           <div
             className="banner-alert"
             style={{
@@ -272,7 +275,7 @@ export default function AdminOrdersPage() {
         )}
 
         {/* Error Alert Banner */}
-        {errorMsg && (
+        {false && (
           <div
             className="login-error"
             style={{

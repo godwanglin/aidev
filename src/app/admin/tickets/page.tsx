@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   LifeBuoy,
   MessageSquare,
@@ -57,8 +58,10 @@ export default function AdminTicketsPage() {
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [testingPing, setTestingPing] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
 
   // Selected Ticket for Conversation
   const [activeTicket, setActiveTicket] = useState<TicketItem | null>(null);
@@ -191,7 +194,7 @@ export default function AdminTicketsPage() {
           </button>
         </PageHead>
 
-        {successMsg && (
+        {false && (
           <div className="banner-alert mb-3">
             <CheckCircle2 size={16} className="text-green shrink-0" />
             <div className="banner-text">
@@ -201,7 +204,7 @@ export default function AdminTicketsPage() {
           </div>
         )}
 
-        {errorMsg && (
+        {false && (
           <div className="login-error mb-3 flex items-center gap-2">
             <AlertCircle size={14} className="shrink-0" />
             <span>{errorMsg}</span>

@@ -1923,6 +1923,35 @@ select.control {
 }
 
 
+/* Toast Floating Notifications */
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (min-width: 640px) {
+  @keyframes toastSlideIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+  }
+}
+
+.toast-animate-in {
+  animation: toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* Modal & Alert Styles */
 .banner-alert {
   background: var(--blue-soft);

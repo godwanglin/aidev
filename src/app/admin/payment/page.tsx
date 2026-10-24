@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   CreditCard,
   QrCode,
@@ -19,8 +20,10 @@ import {
 export default function AdminPaymentSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
 
   // Form states
   const [serverKey, setServerKey] = useState("");
@@ -90,7 +93,7 @@ export default function AdminPaymentSettingsPage() {
           </button>
         </PageHead>
 
-        {successMsg && (
+        {false && (
           <div className="banner-alert mb-3">
             <CheckCircle2 size={16} className="text-green shrink-0" />
             <div className="banner-text">
@@ -100,7 +103,7 @@ export default function AdminPaymentSettingsPage() {
           </div>
         )}
 
-        {errorMsg && (
+        {false && (
           <div className="login-error mb-3 flex items-center gap-2">
             <AlertCircle size={14} />
             <span>{errorMsg}</span>

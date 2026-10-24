@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   Tag,
   Clock,
@@ -19,8 +20,10 @@ export default function AdminDiscountPage() {
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
 
   // Form states
   const [promoActive, setPromoActive] = useState(false);
@@ -102,7 +105,7 @@ export default function AdminDiscountPage() {
           subtitle="Configure promotional flash sales, newcomer discounts, and high-usage loyalty rewards."
         />
 
-        {successMsg && (
+        {false && (
           <div className="banner-alert mb-3">
             <CheckCircle2 size={16} className="text-green" />
             <div className="banner-text">
@@ -112,7 +115,7 @@ export default function AdminDiscountPage() {
           </div>
         )}
 
-        {errorMsg && (
+        {false && (
           <div className="login-error mb-3 flex items-center gap-2">
             <AlertCircle size={14} />
             <span>{errorMsg}</span>

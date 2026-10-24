@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import CustomDropdown from "@/components/CustomDropdown";
 import {
   Users,
@@ -94,8 +95,10 @@ export default function AdminUsersPage() {
   const [totalCount, setTotalCount] = useState(0);
 
   // Feedback states
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Modal 1: Ubah Tier
@@ -331,7 +334,7 @@ export default function AdminUsersPage() {
           </div>
         </PageHead>
 
-        {successMsg && (
+        {false && (
           <div className="banner-alert mb-4">
             <CheckCircle2 size={16} className="text-green shrink-0" />
             <div className="banner-text">
@@ -341,7 +344,7 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-        {errorMsg && (
+        {false && (
           <div className="login-error mb-4 flex items-center gap-2">
             <AlertCircle size={15} className="shrink-0 text-red" />
             <span>{errorMsg}</span>

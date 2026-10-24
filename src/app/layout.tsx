@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ToastContainer } from "@/components/Toast";
 
 export const metadata: Metadata = {
   title: "Aidev Gateway",
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           }}
         />
       </head>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        {children}
+        <ToastContainer />
+      </body>
     </html>
   );
 }

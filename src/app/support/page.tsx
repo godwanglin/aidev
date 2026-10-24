@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   LifeBuoy,
   MessageSquare,
@@ -120,12 +121,11 @@ export default function SupportPage() {
       });
       const json = await res.json();
       if (json.success) {
-        setSubmitted(true);
+        toast.success("Pesan Anda telah dikirim ke teknisi kami.", { title: "Tiket Berhasil Dibuat!" });
         setSubject("");
         setMessage("");
         fetchUserTickets();
         if (json.data) setSelectedTicket(json.data);
-        setTimeout(() => setSubmitted(false), 5000);
       }
     } catch {}
     setSubmitting(false);
@@ -225,7 +225,7 @@ export default function SupportPage() {
                 </h2>
               </div>
               <div className="settings-body">
-                {submitted && (
+                {false && (
                   <div className="banner-alert mb-3">
                     <CheckCircle2 size={16} className="text-green" />
                     <div className="banner-text">

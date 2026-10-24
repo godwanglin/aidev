@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar, getProviderDisplayName } from "@/components/providers/ProviderIcons";
 import EditConnectionModal from "@/components/providers/EditConnectionModal";
@@ -107,8 +108,10 @@ export default function AdminQuotaTrackerPage() {
   const [sortBy, setSortBy] = useState<"most" | "expiring" | "least" | "name">("most");
   const [viewMode, setViewMode] = useState<"account" | "provider">("account");
 
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
+  const successMsg = "";
+  const errorMsg = "";
 
   // Modals state
   const [editingConnection, setEditingConnection] = useState<any | null>(null);
@@ -709,7 +712,7 @@ export default function AdminQuotaTrackerPage() {
         </PageHead>
 
         {/* Success Alert */}
-        {successMsg && (
+        {false && (
           <div className="banner-alert mb-3">
             <CheckCircle2 size={16} className="text-green" />
             <div className="banner-text">
@@ -720,7 +723,7 @@ export default function AdminQuotaTrackerPage() {
         )}
 
         {/* Error Alert */}
-        {errorMsg && (
+        {false && (
           <div className="login-error mb-3 flex items-center gap-2">
             <AlertCircle size={15} className="shrink-0 text-red" />
             <span>{errorMsg}</span>

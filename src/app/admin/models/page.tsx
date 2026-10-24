@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import CustomDropdown from "@/components/CustomDropdown";
 import { ProviderAvatar } from "@/components/providers/ProviderIcons";
 import {
@@ -91,8 +92,8 @@ export default function AdminModelsPage() {
   const [visibilityFilter, setVisibilityFilter] = useState<"ALL" | "PUBLIC" | "HIDDEN">("ALL");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [syncingModels, setSyncingModels] = useState(false);
 
@@ -495,22 +496,7 @@ export default function AdminModelsPage() {
           </div>
         </PageHead>
 
-        {successMsg && (
-          <div className="banner-alert mb-3">
-            <CheckCircle2 size={16} className="text-green" />
-            <div className="banner-text">
-              <strong>Success!</strong>
-              <p>{successMsg}</p>
-            </div>
-          </div>
-        )}
 
-        {errorMsg && (
-          <div className="login-error mb-3 flex items-center gap-2">
-            <AlertCircle size={14} />
-            <span>{errorMsg}</span>
-          </div>
-        )}
 
         {/* Toolbar with Provider Filter, Visibility Filter, and Search */}
         <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: "14px", position: "relative", zIndex: 50 }}>

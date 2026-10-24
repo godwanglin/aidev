@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
+import { toast } from "@/components/Toast";
 import {
   Layers,
   Search,
@@ -105,8 +106,8 @@ export default function AdminCombosPage() {
   const [search, setSearch] = useState("");
   const [strategyFilter, setStrategyFilter] = useState<"ALL" | "FALLBACK" | "ROUND_ROBIN">("ALL");
   const [modelTypeFilter, setModelTypeFilter] = useState<"ALL" | "chat" | "image">("ALL");
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const setSuccessMsg = (msg: string) => { if (msg) toast.success(msg); };
+  const setErrorMsg = (msg: string) => { if (msg) toast.error(msg); };
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Modal State
@@ -634,22 +635,7 @@ export default function AdminCombosPage() {
           </div>
         </PageHead>
 
-        {successMsg && (
-          <div className="banner-alert mb-3">
-            <CheckCircle2 size={16} className="text-green" />
-            <div className="banner-text">
-              <strong>Success!</strong>
-              <p>{successMsg}</p>
-            </div>
-          </div>
-        )}
 
-        {errorMsg && (
-          <div className="login-error mb-3 flex items-center gap-2">
-            <AlertCircle size={14} />
-            <span>{errorMsg}</span>
-          </div>
-        )}
 
         {/* KPI Summary Cards */}
         <div className="cards mb-4">

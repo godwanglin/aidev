@@ -34,6 +34,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
+import { toast } from "@/components/Toast";
 import {
   ProviderAvatar,
   getProviderDisplayName,
@@ -140,8 +141,8 @@ export default function SubscriptionsAdminPage() {
   const [savingPackage, setSavingPackage] = useState(false);
 
   function showToast(text: string, type: "success" | "error" = "success") {
-    setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 3500);
+    if (type === "error") toast.error(text);
+    else toast.success(text);
   }
 
   async function fetchData() {
@@ -499,30 +500,7 @@ export default function SubscriptionsAdminPage() {
           subtitle="Kelola paket langganan hybrid, matrix izin akses model AI per tier, automated cron health checker, dan Discord alert bot."
         />
 
-        {/* Global Toast Banner */}
-        {toastMsg && (
-          <div
-            className={`banner-alert mb-4 ${
-              toastMsg.type === "error" ? "bg-red-50 border-red-200 text-red-800" : ""
-            }`}
-            style={{
-              padding: "10px 16px",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "13px",
-              fontWeight: 500,
-            }}
-          >
-            {toastMsg.type === "error" ? (
-              <AlertTriangle size={16} className="text-red-500 shrink-0" />
-            ) : (
-              <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-            )}
-            <span>{toastMsg.text}</span>
-          </div>
-        )}
+
 
         {/* Header & Quick Action for Tiers */}
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">

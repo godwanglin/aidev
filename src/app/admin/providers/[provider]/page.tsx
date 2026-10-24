@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
+import { toast } from "@/components/Toast";
 import {
   ChevronRight,
   ChevronUp,
@@ -53,8 +54,11 @@ export default function ProviderDetailPage() {
 
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const setError = (msg: string) => { if (msg) toast.error(msg); };
+  const setSuccess = (msg: string) => { if (msg) toast.success(msg); };
+  const error = "";
+  const success = "";
+
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -960,8 +964,8 @@ export default function ProviderDetailPage() {
           </div>
         )}
 
-        {/* Notifications */}
-        {success && (
+
+        {false && (
           <div className="banner-alert mb-4">
             <CheckCircle2 size={16} className="text-green" />
             <div className="banner-text">
@@ -971,7 +975,7 @@ export default function ProviderDetailPage() {
           </div>
         )}
 
-        {error && (
+        {false && (
           <div className="login-error mb-4 flex items-center gap-2">
             <AlertCircle size={14} />
             <span>{error}</span>
