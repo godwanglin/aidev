@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DashboardShell from "@/components/DashboardShell";
 import PageHead from "@/components/PageHead";
 import Status from "@/components/Status";
@@ -16,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Coins,
+  BarChart3,
 } from "lucide-react";
 
 export default function LogsPage() {
@@ -130,6 +132,10 @@ export default function LogsPage() {
             <SlidersHorizontal size={13} strokeWidth={1.5} />
             <span>Advanced Filters</span>
           </button>
+          <Link href="/" className="control btn-inline" title="Visual Charts">
+            <BarChart3 size={13} strokeWidth={1.5} />
+            <span>Visual Charts</span>
+          </Link>
           <button className="control btn-icon-only" onClick={() => fetchLogs(page)} title="Refresh">
             <RefreshCw size={13} strokeWidth={1.5} />
           </button>
