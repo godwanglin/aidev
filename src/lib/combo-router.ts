@@ -18,6 +18,7 @@ export interface CachedCombo {
     priority: number;
     weight: number;
     isActive: boolean;
+    reasoningEffort?: string | null;
   }[];
 }
 
@@ -198,7 +199,11 @@ export function isModelInCooldown(modelId: string): boolean {
  */
 export async function resolveComboCandidates(
   rawModel: string
-): Promise<{ combo: CachedCombo; candidates: string[] } | null> {
+): Promise<{
+  combo: CachedCombo;
+  candidates: string[];
+  candidateEfforts: Record<string, string | null>;
+} | null> {
   const combo = await findCombo(rawModel);
   if (!combo || combo.items.length === 0) return null;
 
@@ -251,9 +256,24 @@ export async function resolveComboCandidates(
     candidates = [...pool].sort((a, b) => a.priority - b.priority).map((i) => i.modelId);
   }
 
+  // Index explicit reasoning effort overrides per candidate model
+  const candidateEfforts: Record<string, string | null> = {};
+  for (const it of combo.items) {
+    if (it.reasoningEffort && it.reasoningEffort !== "default") {
+      const eff = it.reasoningEffort.toLowerCase();
+      const mLow = it.modelId.toLowerCase();
+      candidateEfforts[mLow] = eff;
+      const stripped = mLow.replace(/^([a-z0-9_-]+)\//, "");
+      if (stripped !== mLow) {
+        candidateEfforts[stripped] = eff;
+      }
+    }
+  }
+
   return {
     combo,
     candidates,
+    candidateEfforts,
   };
 }
 

@@ -127,6 +127,7 @@ export async function POST(req: NextRequest) {
                 priority: it.priority !== undefined ? Number(it.priority) : index + 1,
                 weight: Number(it.weight) > 0 ? Number(it.weight) : 1,
                 isActive: it.isActive !== undefined ? Boolean(it.isActive) : true,
+                reasoningEffort: it.reasoningEffort && it.reasoningEffort !== "default" ? String(it.reasoningEffort).trim().toLowerCase() : null,
               }))
             : [],
         },

@@ -296,14 +296,15 @@ model ComboModel {
 }
 
 model ComboModelItem {
-  id           String     @id @default(cuid())
-  comboModelId String
-  comboModel   ComboModel @relation(fields: [comboModelId], references: [id], onDelete: Cascade)
-  modelId      String // Target model identifier e.g. "or/poolside/laguna-s-2.1:free", "deepseek/deepseek-flash"
-  priority     Int        @default(1) // 1 = Tier 1 (highest priority for Fallback)
-  weight       Int        @default(1) // Weight for Round-Robin
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
+  id              String      @id @default(cuid())
+  comboModelId    String
+  comboModel      ComboModel  @relation(fields: [comboModelId], references: [id], onDelete: Cascade)
+  modelId         String // Target model identifier e.g. "or/poolside/laguna-s-2.1:free", "deepseek/deepseek-flash"
+  priority        Int         @default(1) // 1 = Tier 1 (highest priority for Fallback)
+  weight          Int         @default(1) // Weight for Round-Robin
+  isActive        Boolean     @default(true)
+  reasoningEffort String? // e.g. null / "default" (follow client), "low", "medium", "high", "xhigh", "none" / "off"
+  createdAt       DateTime    @default(now())
 
   @@index([comboModelId, priority])
 }

@@ -290,7 +290,8 @@ export function convertAnthropicToOpenAiMessages(parsedBody: any): any[] {
 export function convertAnthropicToOpenAiPayload(
   parsedBody: any,
   targetModel: string,
-  clientWantsStream: boolean
+  clientWantsStream: boolean,
+  forcedReasoningEffort?: string
 ): any {
   const openAiMessages = convertAnthropicToOpenAiMessages(parsedBody);
   const openAiTools = convertAnthropicToolsToOpenAi(parsedBody.tools);
@@ -306,46 +307,53 @@ export function convertAnthropicToOpenAiPayload(
   delete payload.system;
 
   // Extract reasoning / thinking from Anthropic format into OpenAI format
-  let detectedEffort: string | undefined = undefined;
-  if (typeof parsedBody.output_config?.effort === "string") {
-    detectedEffort = parsedBody.output_config.effort.toLowerCase();
-  } else if (typeof parsedBody.effort === "string") {
-    detectedEffort = parsedBody.effort.toLowerCase();
-  } else if (typeof parsedBody.thinking?.effort === "string") {
-    detectedEffort = parsedBody.thinking.effort.toLowerCase();
-  } else if (typeof parsedBody.reasoning_effort === "string") {
-    detectedEffort = parsedBody.reasoning_effort.toLowerCase();
-  } else if (parsedBody.reasoning?.effort) {
-    detectedEffort = String(parsedBody.reasoning.effort).toLowerCase();
-  } else if (typeof parsedBody.thinking?.budget_tokens === "number") {
-    const budget = parsedBody.thinking.budget_tokens;
-    if (budget >= 16000) detectedEffort = "high";
-    else if (budget >= 4000) detectedEffort = "medium";
-    else if (budget > 0) detectedEffort = "low";
-  } else if (parsedBody.thinking && (parsedBody.thinking.type === "enabled" || parsedBody.thinking.type === "adaptive")) {
-    const tmLower = (targetModel || "").toLowerCase();
-    if (tmLower.includes("-ultra") || tmLower.includes("-xhigh") || tmLower.includes("-max")) detectedEffort = "high";
-    else if (tmLower.includes("-high") || tmLower.includes("-thinking")) detectedEffort = "high";
-    else if (tmLower.includes("-medium")) detectedEffort = "medium";
-    else if (tmLower.includes("-low") || tmLower.includes("-minimal") || tmLower.includes("-extra-low")) detectedEffort = "low";
-    else detectedEffort = "medium";
-  }
+  let detectedEffort: string | undefined = forcedReasoningEffort;
+  if (forcedReasoningEffort === "none" || forcedReasoningEffort === "off") {
+    detectedEffort = "none";
+  } else if (!detectedEffort) {
+    if (typeof parsedBody.output_config?.effort === "string") {
+      detectedEffort = parsedBody.output_config.effort.toLowerCase();
+    } else if (typeof parsedBody.effort === "string") {
+      detectedEffort = parsedBody.effort.toLowerCase();
+    } else if (typeof parsedBody.thinking?.effort === "string") {
+      detectedEffort = parsedBody.thinking.effort.toLowerCase();
+    } else if (typeof parsedBody.reasoning_effort === "string") {
+      detectedEffort = parsedBody.reasoning_effort.toLowerCase();
+    } else if (parsedBody.reasoning?.effort) {
+      detectedEffort = String(parsedBody.reasoning.effort).toLowerCase();
+    } else if (typeof parsedBody.thinking?.budget_tokens === "number") {
+      const budget = parsedBody.thinking.budget_tokens;
+      if (budget >= 16000) detectedEffort = "high";
+      else if (budget >= 4000) detectedEffort = "medium";
+      else if (budget > 0) detectedEffort = "low";
+    } else if (parsedBody.thinking && (parsedBody.thinking.type === "enabled" || parsedBody.thinking.type === "adaptive")) {
+      const tmLower = (targetModel || "").toLowerCase();
+      if (tmLower.includes("-ultra") || tmLower.includes("-xhigh") || tmLower.includes("-max")) detectedEffort = "high";
+      else if (tmLower.includes("-high") || tmLower.includes("-thinking")) detectedEffort = "high";
+      else if (tmLower.includes("-medium")) detectedEffort = "medium";
+      else if (tmLower.includes("-low") || tmLower.includes("-minimal") || tmLower.includes("-extra-low")) detectedEffort = "low";
+      else detectedEffort = "medium";
+    }
 
-  // Model name fallback
-  if (!detectedEffort && targetModel) {
-    const tmLower = targetModel.toLowerCase();
-    if (tmLower.includes("-high") || tmLower.includes("-ultra") || tmLower.includes("-thinking")) {
-      detectedEffort = "high";
-    } else if (tmLower.includes("-medium")) {
-      detectedEffort = "medium";
-    } else if (tmLower.includes("-low")) {
-      detectedEffort = "low";
+    // Model name fallback
+    if (!detectedEffort && targetModel) {
+      const tmLower = targetModel.toLowerCase();
+      if (tmLower.includes("-high") || tmLower.includes("-ultra") || tmLower.includes("-thinking")) {
+        detectedEffort = "high";
+      } else if (tmLower.includes("-medium")) {
+        detectedEffort = "medium";
+      } else if (tmLower.includes("-low")) {
+        detectedEffort = "low";
+      }
     }
   }
 
-  if (detectedEffort && detectedEffort !== "none") {
+  if (detectedEffort && detectedEffort !== "none" && detectedEffort !== "off") {
     payload.reasoning_effort = detectedEffort;
     payload.reasoning = { effort: detectedEffort };
+  } else {
+    delete payload.reasoning_effort;
+    delete payload.reasoning;
   }
 
   if (openAiTools && openAiTools.length > 0) {

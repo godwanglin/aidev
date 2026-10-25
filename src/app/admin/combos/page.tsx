@@ -54,6 +54,7 @@ interface ComboItem {
     priority: number;
     weight: number;
     isActive: boolean;
+    reasoningEffort?: string | null;
   }[];
 }
 
@@ -124,7 +125,13 @@ export default function AdminCombosPage() {
   const [isPublic, setIsPublic] = useState(true);
   const [rateInUsdPer1m, setRateInPer1m] = useState(0.15);
   const [rateOutUsdPer1m, setRateOutPer1m] = useState(0.60);
-  const [selectedItems, setSelectedItems] = useState<{ modelId: string; priority: number; weight: number; isActive?: boolean }[]>([]);
+  const [selectedItems, setSelectedItems] = useState<{
+    modelId: string;
+    priority: number;
+    weight: number;
+    isActive?: boolean;
+    reasoningEffort?: string | null;
+  }[]>([]);
   const [saving, setSaving] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [manualModelInput, setManualModelInput] = useState("");
@@ -195,6 +202,7 @@ export default function AdminCombosPage() {
         priority: selectedItems.length + 1,
         weight: 1,
         isActive: true,
+        reasoningEffort: null,
       },
     ]);
     setManualModelInput("");
@@ -263,6 +271,7 @@ export default function AdminCombosPage() {
         priority: it.priority,
         weight: it.weight,
         isActive: it.isActive !== false,
+        reasoningEffort: it.reasoningEffort || null,
       }))
     );
     setPickerSearch("");
@@ -477,6 +486,47 @@ export default function AdminCombosPage() {
       fetchCombos(); // Revert from server
     } finally {
       setTogglingCandidateKey(null);
+    }
+  }
+
+  async function handleUpdateCandidateReasoningEffort(combo: ComboItem, itemIndex: number, newEffort: string) {
+    const item = combo.items[itemIndex];
+    if (!item) return;
+
+    const effortVal = (!newEffort || newEffort === "default") ? null : newEffort.toLowerCase();
+    const newItems = combo.items.map((it, idx) =>
+      idx === itemIndex ? { ...it, reasoningEffort: effortVal } : it
+    );
+
+    // Optimistically update table immediately
+    setCombos((prev) =>
+      prev.map((c) => (c.id === combo.id ? { ...c, items: newItems } : c))
+    );
+
+    try {
+      const res = await fetch(`/api/admin/combos/${combo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: newItems }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Gagal memperbarui reasoning effort candidate.");
+      }
+      if (data.combo) {
+        setCombos((prev) =>
+          prev.map((c) => (c.id === combo.id ? data.combo : c))
+        );
+      }
+      setSuccessMsg(
+        effortVal
+          ? `Bypass reasoning '${item.modelId}' diatur ke ${effortVal.toUpperCase()}`
+          : `Bypass reasoning '${item.modelId}' dikembalikan ke AUTO (mengikuti client)`
+      );
+      setTimeout(() => setSuccessMsg(""), 2500);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Gagal memperbarui reasoning effort.");
+      fetchCombos(); // Revert from server
     }
   }
 
@@ -1006,6 +1056,85 @@ export default function AdminCombosPage() {
                                 <span style={{ fontWeight: 500, textDecoration: item.isActive === false ? "line-through" : "none" }}>
                                   {item.modelId}
                                 </span>
+
+                                {/* Quick Candidate Reasoning Effort Bypass Selector */}
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    position: "relative",
+                                    marginLeft: "3px",
+                                  }}
+                                  title={`Bypass reasoning effort untuk ${item.modelId}. Pilih AUTO untuk mengikuti reasoning dari Claude Code / client.`}
+                                >
+                                  <select
+                                    value={item.reasoningEffort || "default"}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateCandidateReasoningEffort(combo, idx, e.target.value);
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    disabled={item.isActive === false}
+                                    style={{
+                                      fontSize: "9px",
+                                      fontWeight: item.reasoningEffort && item.reasoningEffort !== "default" ? 800 : 600,
+                                      fontFamily: "'JetBrains Mono', monospace",
+                                      padding: "1px 4px",
+                                      borderRadius: "4px",
+                                      borderWidth: "1px",
+                                      borderStyle: item.reasoningEffort && item.reasoningEffort !== "default" ? "solid" : "dashed",
+                                      borderColor: item.reasoningEffort === "high"
+                                        ? "rgba(245, 158, 11, 0.5)"
+                                        : item.reasoningEffort === "medium"
+                                        ? "rgba(168, 85, 247, 0.5)"
+                                        : item.reasoningEffort === "low"
+                                        ? "rgba(6, 182, 212, 0.5)"
+                                        : item.reasoningEffort === "xhigh"
+                                        ? "rgba(244, 63, 94, 0.5)"
+                                        : item.reasoningEffort === "off"
+                                        ? "rgba(113, 113, 122, 0.5)"
+                                        : "rgba(255, 255, 255, 0.15)",
+                                      backgroundColor: item.reasoningEffort === "high"
+                                        ? "rgba(245, 158, 11, 0.15)"
+                                        : item.reasoningEffort === "medium"
+                                        ? "rgba(168, 85, 247, 0.15)"
+                                        : item.reasoningEffort === "low"
+                                        ? "rgba(6, 182, 212, 0.15)"
+                                        : item.reasoningEffort === "xhigh"
+                                        ? "rgba(244, 63, 94, 0.15)"
+                                        : item.reasoningEffort === "off"
+                                        ? "rgba(113, 113, 122, 0.15)"
+                                        : "rgba(255, 255, 255, 0.04)",
+                                      color: item.reasoningEffort === "high"
+                                        ? "#f59e0b"
+                                        : item.reasoningEffort === "medium"
+                                        ? "#c084fc"
+                                        : item.reasoningEffort === "low"
+                                        ? "#22d3ee"
+                                        : item.reasoningEffort === "xhigh"
+                                        ? "#fb7185"
+                                        : item.reasoningEffort === "off"
+                                        ? "#a1a1aa"
+                                        : "#94a3b8",
+                                      cursor: "pointer",
+                                      outline: "none",
+                                      letterSpacing: "0.02em",
+                                      transition: "all 0.15s ease",
+                                    }}
+                                  >
+                                    <option value="default" style={{ background: "#18181b", color: "#94a3b8" }}>⚡ AUTO</option>
+                                    <option value="low" style={{ background: "#18181b", color: "#22d3ee" }}>⚡ LOW</option>
+                                    <option value="medium" style={{ background: "#18181b", color: "#c084fc" }}>⚡ MED</option>
+                                    <option value="high" style={{ background: "#18181b", color: "#f59e0b" }}>⚡ HIGH</option>
+                                    <option value="xhigh" style={{ background: "#18181b", color: "#fb7185" }}>⚡ MAX</option>
+                                    <option value="off" style={{ background: "#18181b", color: "#a1a1aa" }}>⚡ OFF</option>
+                                  </select>
+                                </div>
 
                                 {/* Quick Candidate Active / Disable Toggle Switch */}
                                 <div
@@ -1673,6 +1802,7 @@ export default function AdminCombosPage() {
                                             priority: selectedItems.length + 1,
                                             weight: 1,
                                             isActive: true,
+                                            reasoningEffort: null,
                                           },
                                         ]);
                                       }
@@ -1818,6 +1948,53 @@ export default function AdminCombosPage() {
                           </div>
 
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            {/* Candidate Reasoning Effort Bypass Select */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px", marginRight: "8px" }}>
+                              <span style={{ fontSize: "10px", color: "var(--muted)", whiteSpace: "nowrap" }}>Reasoning:</span>
+                              <select
+                                value={it.reasoningEffort || "default"}
+                                onChange={(e) => {
+                                  const val = e.target.value === "default" ? null : e.target.value;
+                                  setSelectedItems(
+                                    selectedItems.map((item, i) =>
+                                      i === idx ? { ...item, reasoningEffort: val } : item
+                                    )
+                                  );
+                                }}
+                                disabled={it.isActive === false}
+                                className="control text-xs"
+                                style={{
+                                  height: "26px",
+                                  fontSize: "11px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  backgroundColor: "var(--surface)",
+                                  border: "1px solid var(--line)",
+                                  color: !it.reasoningEffort || it.reasoningEffort === "default"
+                                    ? "var(--muted)"
+                                    : it.reasoningEffort === "high"
+                                    ? "#f59e0b"
+                                    : it.reasoningEffort === "medium"
+                                    ? "#c084fc"
+                                    : it.reasoningEffort === "low"
+                                    ? "#22d3ee"
+                                    : it.reasoningEffort === "xhigh"
+                                    ? "#fb7185"
+                                    : "#94a3b8",
+                                  fontWeight: !it.reasoningEffort || it.reasoningEffort === "default" ? 500 : 700,
+                                  cursor: "pointer",
+                                }}
+                                title="Bypass reasoning effort khusus untuk model candidate ini. Pilih Auto untuk mengikuti pilihan client/Claude Code."
+                              >
+                                <option value="default">⚡ Auto (Follow Client)</option>
+                                <option value="low">⚡ Low (Rendah)</option>
+                                <option value="medium">⚡ Medium (Sedang)</option>
+                                <option value="high">⚡ High (Tinggi)</option>
+                                <option value="xhigh">⚡ Extra High / Max</option>
+                                <option value="off">⚡ Off / None (Matikan)</option>
+                              </select>
+                            </div>
+
                             {/* Toggle Enable / Disable Candidate */}
                             <label
                               style={{

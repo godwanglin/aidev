@@ -520,7 +520,38 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       ? candidateModel
       : (resolvedRoute?.upstreamModel || candidateModel);
 
-    const candidateReasoningEffort = extractReasoningEffort(parsedCandidateJson, candidateModel) || resolvedRoute?.thinkingLevel?.toLowerCase();
+    // 1. Check if candidate has an explicit reasoning effort bypass from combo configuration
+    const candidateBypassEffort = comboInfo?.candidateEfforts?.[candidateModel.toLowerCase()]
+      || comboInfo?.candidateEfforts?.[candidateModel.toLowerCase().replace(/^([a-z0-9_-]+)\//, "")];
+
+    // 2. Determine candidateReasoningEffort
+    let candidateReasoningEffort: string | undefined;
+    if (candidateBypassEffort) {
+      if (candidateBypassEffort === "off" || candidateBypassEffort === "none") {
+        candidateReasoningEffort = undefined;
+        // Strip thinking/reasoning from candidate JSON
+        delete parsedCandidateJson.thinking;
+        delete parsedCandidateJson.output_config;
+        delete parsedCandidateJson.effort;
+        delete parsedCandidateJson.reasoning_effort;
+        if (parsedCandidateJson.reasoning) delete parsedCandidateJson.reasoning;
+      } else {
+        candidateReasoningEffort = candidateBypassEffort.toLowerCase();
+        // Inject explicit bypass reasoning into candidate JSON
+        parsedCandidateJson.output_config = { effort: candidateReasoningEffort };
+        parsedCandidateJson.effort = candidateReasoningEffort;
+        if (!parsedCandidateJson.thinking || typeof parsedCandidateJson.thinking !== "object") {
+          parsedCandidateJson.thinking = { type: "adaptive" };
+        }
+        parsedCandidateJson.reasoning_effort = candidateReasoningEffort;
+        parsedCandidateJson.reasoning = { effort: candidateReasoningEffort };
+      }
+      candidateRawBody = JSON.stringify(parsedCandidateJson);
+      candidateChatBody = candidateRawBody;
+    } else {
+      // Follow client's requested reasoning effort (or route thinking level)
+      candidateReasoningEffort = extractReasoningEffort(parsedCandidateJson, candidateModel) || resolvedRoute?.thinkingLevel?.toLowerCase();
+    }
 
     adminLogger.post({
       model: clientRequestedModel,
@@ -542,7 +573,8 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         const chatPayload = convertAnthropicToOpenAiPayload(
           parsedCandidateJson,
           candidateModel,
-          clientWantsStream
+          clientWantsStream,
+          candidateBypassEffort ? (candidateBypassEffort === "off" || candidateBypassEffort === "none" ? "none" : candidateBypassEffort) : undefined
         );
         candidateChatBody = JSON.stringify(chatPayload);
         parsedCandidateJson = chatPayload;
@@ -586,7 +618,15 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         // Forward reasoning_effort if client specified reasoning configuration or inferred from model
-        if (parsedCandidateJson.reasoning && typeof parsedCandidateJson.reasoning === "object") {
+        if (candidateBypassEffort) {
+          if (candidateBypassEffort === "off" || candidateBypassEffort === "none") {
+            delete chatPayload.reasoning_effort;
+            delete chatPayload.reasoning;
+          } else {
+            chatPayload.reasoning_effort = candidateBypassEffort;
+            chatPayload.reasoning = { effort: candidateBypassEffort };
+          }
+        } else if (parsedCandidateJson.reasoning && typeof parsedCandidateJson.reasoning === "object") {
           const effort = parsedCandidateJson.reasoning.effort;
           if (effort && effort !== "none") {
             chatPayload.reasoning_effort = effort;
