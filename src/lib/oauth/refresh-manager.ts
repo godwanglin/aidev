@@ -196,7 +196,37 @@ async function callUpstreamRefreshToken(
     };
   }
 
-  // 4. Qoder / Kimi / xAI / Grok / Cline / ClinePass / CodeBuddy / Xiaomi MiMo / Generic OAuth
+  // 4. CodeBuddy International (Tencent CodeBuddy .ai)
+  if (p === "CODEBUDDY" || p === "CODEBUDDY_INTL" || p === "CBAI") {
+    const refreshUrl = config.tokenUrl?.replace(/\/token$/, "/token/refresh") || "https://www.codebuddy.ai/v2/plugin/auth/token/refresh";
+    const res = await fetch(refreshUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "IDE/2.63.2 CodeBuddy/2.63.2",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Domain": "www.codebuddy.ai",
+        "X-Refresh-Token": refreshToken,
+        "X-Auth-Refresh-Source": "plugin",
+        "X-Product": "SaaS",
+      },
+      body: "{}",
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.code !== 0 || !data.data?.accessToken) {
+      throw new Error(data.msg || `CodeBuddy token refresh HTTP ${res.status}`);
+    }
+
+    return {
+      accessToken: data.data.accessToken,
+      refreshToken: data.data.refreshToken || refreshToken,
+      expiresIn: Number(data.data.expiresIn) || 86400,
+    };
+  }
+
+  // 5. Qoder / Kimi / xAI / Grok / Cline / ClinePass / Generic OAuth
   const bodyParams = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,

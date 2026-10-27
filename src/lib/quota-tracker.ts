@@ -299,6 +299,113 @@ async function fetchCodexAccountQuota(accessToken: string): Promise<QuotaBucketI
 }
 
 /**
+ * Fetches real live quota for a CodeBuddy account from billing meter.
+ */
+async function fetchCodeBuddyAccountQuota(token: string): Promise<QuotaBucketItem[]> {
+  const quotas: QuotaBucketItem[] = [];
+
+  try {
+    const res = await fetch("https://www.codebuddy.ai/v2/billing/meter/get-user-resource", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+        "X-Product": "SaaS",
+        "X-IDE-Type": "IDE",
+        "X-IDE-Name": "IDE",
+        "x-requested-with": "XMLHttpRequest",
+        "x-codebuddy-request": "1",
+      },
+      body: "{}",
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const accounts = json?.data?.Response?.Data?.Accounts || [];
+
+      const cycleEndMs = (acc: any) => {
+        if (!acc.CycleEndTime) return Number.POSITIVE_INFINITY;
+        const d = new Date(acc.CycleEndTime);
+        return isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime();
+      };
+
+      const REFILL_GAP_MS = 2 * 24 * 60 * 60 * 1000;
+      const isRefill = (acc: any) => {
+        const ce = cycleEndMs(acc);
+        const de = Number(acc.DeductionEndTime);
+        return Number.isFinite(ce) && Number.isFinite(de) && de - ce > REFILL_GAP_MS;
+      };
+
+      const byExpiry = (a: any, b: any) => cycleEndMs(a) - cycleEndMs(b);
+      const refills = accounts.filter(isRefill).sort(byExpiry);
+      const bonuses = accounts.filter((a: any) => !isRefill(a)).sort(byExpiry);
+
+      refills.forEach((acc: any, i: number) => {
+        const used = Number(acc.CycleCapacityUsedPrecise ?? acc.CycleCapacityUsed ?? 0);
+        const total = Number(acc.CycleCapacitySizePrecise ?? acc.CycleCapacitySize ?? 0);
+        const rem = Math.max(0, total - used);
+        const pct = total > 0 ? Math.round((rem / total) * 100) : 0;
+        const resetIso = acc.CycleEndTime ? new Date(acc.CycleEndTime).toISOString() : undefined;
+        const resetHuman = resetIso ? `Resets in ${formatResetRemaining(resetIso)}` : "";
+
+        quotas.push({
+          id: `codebuddy-refill-${i + 1}`,
+          name: refills.length > 1 ? `Monthly Refill ${i + 1}` : "Monthly Refill",
+          remainingFraction: total > 0 ? rem / total : 0,
+          usedAmount: Math.round(used),
+          totalAmount: Math.round(total),
+          percentage: pct,
+          resetTime: resetIso,
+          resetHuman,
+          status: pct <= 0 ? "EMPTY" : pct <= 20 ? "LOW" : "HEALTHY",
+        });
+      });
+
+      bonuses.forEach((acc: any, i: number) => {
+        const used = Number(acc.CapacityUsedPrecise ?? acc.CapacityUsed ?? 0);
+        const total = Number(acc.CapacitySizePrecise ?? acc.CapacitySize ?? 0);
+        const rem = Math.max(0, total - used);
+        const pct = total > 0 ? Math.round((rem / total) * 100) : 0;
+        const resetIso = acc.CycleEndTime ? new Date(acc.CycleEndTime).toISOString() : undefined;
+        const resetHuman = resetIso ? `Expires in ${formatResetRemaining(resetIso)}` : "";
+
+        quotas.push({
+          id: `codebuddy-bonus-${i + 1}`,
+          name: `Bonus Pack ${i + 1}`,
+          remainingFraction: total > 0 ? rem / total : 0,
+          usedAmount: Math.round(used),
+          totalAmount: Math.round(total),
+          percentage: pct,
+          resetTime: resetIso,
+          resetHuman,
+          status: pct <= 0 ? "EMPTY" : pct <= 20 ? "LOW" : "HEALTHY",
+        });
+      });
+    }
+  } catch (err) {
+    console.error("Failed to fetch CodeBuddy quota:", err);
+  }
+
+  if (quotas.length === 0) {
+    quotas.push({
+      id: "codebuddy-default",
+      name: "CodeBuddy Quota",
+      remainingFraction: 1.0,
+      usedAmount: 0,
+      totalAmount: 1000,
+      percentage: 100,
+      resetHuman: "Connected",
+      status: "HEALTHY",
+    });
+  }
+
+  return quotas;
+}
+
+/**
  * Fetches real live quota for an Anthropic / Claude Code account.
  * Primary: Claude Code OAuth usage endpoint (https://api.anthropic.com/api/oauth/usage?cedar_ember=1)
  * Profile: https://api.anthropic.com/api/oauth/profile (to resolve user email/org name)
@@ -850,7 +957,10 @@ export function isProviderQuotaTrackable(provider: string): boolean {
     p === "DEEPSEEK" ||
     p === "OLLAMA" ||
     p === "OLLAMA_CLOUD" ||
-    p === "OPENROUTER"
+    p === "OPENROUTER" ||
+    p === "CODEBUDDY" ||
+    p === "CODEBUDDY_INTL" ||
+    p === "CBAI"
   );
 }
 
@@ -924,6 +1034,8 @@ export async function getSingleAccountQuota(
       provUpper === "GEMINI" || provUpper === "GOOGLE";
     const isClaude =
       provUpper === "CLAUDE" || provUpper === "CLAUDE_CODE" || provUpper === "ANTHROPIC";
+    const isCodeBuddy =
+      provUpper === "CODEBUDDY" || provUpper === "CODEBUDDY_INTL" || provUpper === "CBAI";
 
     if (isAntigravity && conn.accessTokenEnc) {
       try {
@@ -992,6 +1104,15 @@ export async function getSingleAccountQuota(
         if (res.accountEmail && !conn.accountEmail) {
           conn.accountEmail = res.accountEmail;
         }
+      } catch {
+        quotas = [];
+      }
+    } else if (isCodeBuddy && (conn.accessTokenEnc || conn.apiKeyEncrypted)) {
+      try {
+        const token = conn.accessTokenEnc
+          ? decryptCredential(conn.accessTokenEnc)
+          : decryptCredential(conn.apiKeyEncrypted!);
+        quotas = await fetchCodeBuddyAccountQuota(token);
       } catch {
         quotas = [];
       }

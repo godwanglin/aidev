@@ -352,6 +352,73 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
         break;
       }
 
+      case "CODEBUDDY":
+      case "CODEBUDDY_INTL":
+      case "CBAI": {
+        let token = connection.accessTokenEnc ? decryptCredential(connection.accessTokenEnc) : apiKey;
+        if (!token && connection.refreshTokenEnc) {
+          try {
+            token = await refreshOAuthToken(connection.id);
+          } catch {}
+        }
+        if (token) {
+          const fetchQuota = async (t: string) => {
+            return await fetch("https://www.codebuddy.ai/v2/billing/meter/get-user-resource", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${t}`,
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+                "X-Product": "SaaS",
+                "X-IDE-Type": "IDE",
+                "X-IDE-Name": "IDE",
+                "x-requested-with": "XMLHttpRequest",
+                "x-codebuddy-request": "1",
+              },
+              body: "{}",
+              signal: AbortSignal.timeout(7000),
+            });
+          };
+
+          let res = await fetchQuota(token);
+          if (res.status === 401 && connection.refreshTokenEnc) {
+            try {
+              token = await refreshOAuthToken(connection.id);
+              res = await fetchQuota(token);
+            } catch {}
+          }
+
+          if (res.ok) {
+            const json = await res.json().catch(() => ({}));
+            if (json.code === 0) {
+              const accounts = json.data?.Response?.Data?.Accounts || [];
+              let totalCap = 0;
+              let usedCap = 0;
+              for (const acc of accounts) {
+                totalCap += Number(acc.CycleCapacitySizePrecise ?? acc.CycleCapacitySize ?? acc.CapacitySizePrecise ?? acc.CapacitySize ?? 0);
+                usedCap += Number(acc.CycleCapacityUsedPrecise ?? acc.CycleCapacityUsed ?? acc.CapacityUsedPrecise ?? acc.CapacityUsed ?? 0);
+              }
+              const rem = Math.max(0, totalCap - usedCap);
+              quotaRemainingUsd = rem;
+              quotaLimitTokens = BigInt(Math.round(totalCap * 1000));
+              quotaUsedTokens = BigInt(Math.round(usedCap * 1000));
+              status = rem > 0 ? "NORMAL" : "EXHAUSTED";
+            } else {
+              status = "ERROR";
+              errorMsg = json.msg || "CodeBuddy quota error";
+            }
+          } else {
+            status = "ERROR";
+            errorMsg = `CodeBuddy quota HTTP ${res.status}`;
+          }
+        } else {
+          status = "ERROR";
+          errorMsg = "No access token found";
+        }
+        break;
+      }
+
       case "OPENROUTER": {
         if (apiKey) {
           const res = await fetch("https://openrouter.ai/api/v1/auth/key", {

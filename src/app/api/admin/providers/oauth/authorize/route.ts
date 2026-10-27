@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const defaultRedirectUri = `${protocol}://${host}/api/admin/providers/oauth/callback`;
     const redirectUri = userRedirectUri || defaultRedirectUri;
 
-    const session = initiateOAuthSession({
+    const session = await initiateOAuthSession({
       provider,
       connectionName: name || `${provider} OAuth Account`,
       redirectUri,

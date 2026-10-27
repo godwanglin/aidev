@@ -61,6 +61,13 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     defaultUpstreamModel: "gemini-2.5-flash",
   },
   {
+    prefix: "cb/",
+    providerId: "CODEBUDDY",
+    providerName: "CodeBuddy",
+    aliases: ["codebuddy/", "cbai/"],
+    defaultUpstreamModel: "deepseek-v4.1-flash",
+  },
+  {
     prefix: "or/",
     providerId: "OPENROUTER",
     providerName: "OpenRouter",

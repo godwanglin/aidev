@@ -1443,9 +1443,52 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
     if (targetKey.startsWith("AIza") || activeProvider === "GEMINI" || activeProvider === "GOOGLE") {
       forwardHeaders.set("x-goog-api-key", targetKey);
     }
+    if (activeProvider === "CODEBUDDY" || activeProvider === "CODEBUDDY_INTL" || activeProvider === "CBAI") {
+      forwardHeaders.set("User-Agent", "IDE/2.108.1 CodeBuddy/2.108.1");
+      forwardHeaders.set("X-Product", "SaaS");
+      forwardHeaders.set("X-IDE-Type", "IDE");
+      forwardHeaders.set("X-IDE-Name", "IDE");
+      forwardHeaders.set("x-requested-with", "XMLHttpRequest");
+      forwardHeaders.set("x-codebuddy-request", "1");
+    }
 
     const { normalizedBody } = normalizeRequestBody(candidateChatBody || "{}");
     let bodyToSend = normalizedBody || candidateChatBody || "{}";
+
+    // CodeBuddy payload formatting (requires stream: true, system role prefix, and block-typed user content)
+    if (activeProvider === "CODEBUDDY" || activeProvider === "CODEBUDDY_INTL" || activeProvider === "CBAI") {
+      try {
+        const parsed = JSON.parse(bodyToSend);
+        parsed.stream = true; // CodeBuddy server rejects non-stream requests
+
+        // Handle reasoning summary
+        const eff = candidateReasoningEffort || parsed.reasoning_effort;
+        if (eff === "none" || eff === "off") {
+          delete parsed.reasoning_effort;
+        } else if (eff) {
+          parsed.reasoning_summary = "auto";
+        }
+
+        // Prepend system prompt and format user messages as typed text blocks
+        const source = Array.isArray(parsed.messages) ? parsed.messages : [];
+        const newMessages: any[] = [{ role: "system", content: "You are CodeBuddy Code." }];
+        for (const msg of source) {
+          if (!msg || typeof msg !== "object" || msg.role === "system" || msg.role === "developer") continue;
+          if (msg.role === "user" && typeof msg.content === "string") {
+            newMessages.push({ ...msg, content: [{ type: "text", text: msg.content }] });
+          } else {
+            newMessages.push({ ...msg });
+          }
+        }
+        parsed.messages = newMessages;
+
+        if (typeof parsed.model === "string") {
+          parsed.model = parsed.model.replace(/^(cb|codebuddy|cbai)\//i, "");
+        }
+
+        bodyToSend = JSON.stringify(parsed);
+      } catch {}
+    }
 
     // DeepSeek & Thinking Model payload sanitization (prevents upstream HTTP 400)
     const isDeepSeekOrThinking =
@@ -1830,6 +1873,49 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           if (parsedModel) {
             finalPayload.model = parsedModel;
           }
+        }
+
+        // If upstream returned an SSE stream (e.g. CodeBuddy forced stream) but client requested JSON
+        if (!finalPayload && text.includes("data: ")) {
+          let accumulatedContent = "";
+          let chunkId = "chatcmpl-" + crypto.randomUUID();
+          const lines = text.split("\n");
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            const jsonStr = trimmed.slice(6).trim();
+            if (jsonStr === "[DONE]") continue;
+            try {
+              const chunk = JSON.parse(jsonStr);
+              if (chunk.id) chunkId = chunk.id;
+              const delta = chunk.choices?.[0]?.delta?.content || chunk.choices?.[0]?.text || "";
+              accumulatedContent += delta;
+            } catch {}
+          }
+          finalPayload = {
+            id: chunkId,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: parsedModel || candidateModel,
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: accumulatedContent,
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: Math.max(1, (estimatedPromptTokens || 15) - tokensSavedRtk),
+              completion_tokens: Math.max(1, Math.ceil(accumulatedContent.length / 4)),
+              total_tokens: Math.max(1, (estimatedPromptTokens || 15) - tokensSavedRtk) + Math.max(1, Math.ceil(accumulatedContent.length / 4)),
+            },
+          };
+          promptTokens = finalPayload.usage.prompt_tokens;
+          completionTokens = finalPayload.usage.completion_tokens;
+          totalTokens = finalPayload.usage.total_tokens;
         }
       } catch {}
 

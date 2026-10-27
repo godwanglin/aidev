@@ -41,7 +41,7 @@ function pruneSessions() {
 /**
  * Initiates an OAuth authorization session, generating PKCE verifier and challenge.
  */
-export function initiateOAuthSession({
+export async function initiateOAuthSession({
   provider,
   connectionName,
   redirectUri,
@@ -53,6 +53,53 @@ export function initiateOAuthSession({
   customClientId?: string;
 }) {
   pruneSessions();
+
+  const provUpper = provider.toUpperCase();
+
+  // Special device polling flow for CodeBuddy
+  if (provUpper === "CODEBUDDY" || provUpper === "CODEBUDDY_INTL" || provUpper === "CBAI") {
+    const stateRes = await fetch("https://www.codebuddy.ai/v2/plugin/auth/state?platform=ide", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "IDE/2.63.2 CodeBuddy/2.63.2",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Domain": "www.codebuddy.ai",
+        "X-No-Authorization": "true",
+        "X-No-User-Id": "true",
+        "X-Product": "SaaS",
+      },
+      body: "{}",
+    });
+    if (!stateRes.ok) {
+      throw new Error(`CodeBuddy state request failed: HTTP ${stateRes.status}`);
+    }
+    const stateJson = await stateRes.json().catch(() => ({}));
+    if (stateJson.code !== 0 || !stateJson.data?.state || !stateJson.data?.authUrl) {
+      throw new Error(`CodeBuddy error: ${stateJson.msg || "Missing state / authUrl"}`);
+    }
+
+    const state = stateJson.data.state;
+    const authUrl = stateJson.data.authUrl;
+
+    sessions.set(state, {
+      state,
+      provider: "CODEBUDDY",
+      connectionName,
+      codeVerifier: "",
+      redirectUri: "",
+      createdAt: Date.now(),
+    });
+
+    return {
+      state,
+      authorizeUrl: authUrl,
+      codeVerifier: "",
+      redirectUri: "",
+      isPolling: true,
+    };
+  }
 
   const config = getProviderOAuthConfig(provider);
   if (!config) {
@@ -466,4 +513,105 @@ export async function refreshOAuthToken(connectionId: string): Promise<string> {
   });
 
   return newAccessToken;
+}
+
+/**
+ * Polls CodeBuddy token endpoint with the state parameter until user completes authorization.
+ */
+export async function pollCodeBuddyOAuth({
+  state,
+  name,
+}: {
+  state: string;
+  name?: string;
+}) {
+  const session = sessions.get(state);
+  const connName = name?.trim() || session?.connectionName || "CodeBuddy Account";
+
+  const res = await fetch(`https://www.codebuddy.ai/v2/plugin/auth/token?state=${encodeURIComponent(state)}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "IDE/2.63.2 CodeBuddy/2.63.2",
+      "X-Requested-With": "XMLHttpRequest",
+      "X-Domain": "www.codebuddy.ai",
+      "X-No-Authorization": "true",
+      "X-No-User-Id": "true",
+      "X-No-Enterprise-Id": "true",
+      "X-No-Department-Info": "true",
+      "X-Product": "SaaS",
+    },
+  });
+
+  if (!res.ok) {
+    return { pending: false, error: `CodeBuddy response HTTP ${res.status}` };
+  }
+
+  const data = await res.json().catch(() => ({}));
+  // code 11217 = pending (user hasn't logged in yet)
+  if (data.code === 11217) {
+    return { pending: true };
+  }
+
+  if (data.code === 0 && data.data?.accessToken) {
+    const accessToken = data.data.accessToken;
+    const refreshToken = data.data.refreshToken || "";
+    const expiresIn = Number(data.data.expiresIn) || 86400;
+    const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+
+    // Upsert connection
+    const existing = await prisma.providerConnection.findFirst({
+      where: { provider: "CODEBUDDY", name: connName },
+    });
+
+    let connection;
+    if (existing) {
+      connection = await prisma.providerConnection.update({
+        where: { id: existing.id },
+        data: {
+          accessTokenEnc: encryptCredential(accessToken),
+          refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : existing.refreshTokenEnc,
+          tokenExpiresAt,
+          baseUrl: "https://www.codebuddy.ai/v2",
+          isActive: true,
+          syncStatus: "NORMAL",
+        },
+      });
+    } else {
+      connection = await prisma.providerConnection.create({
+        data: {
+          provider: "CODEBUDDY",
+          name: connName,
+          authType: "OAUTH",
+          baseUrl: "https://www.codebuddy.ai/v2",
+          accessTokenEnc: encryptCredential(accessToken),
+          refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : null,
+          tokenExpiresAt,
+          isActive: true,
+          syncStatus: "NORMAL",
+        },
+      });
+    }
+
+    sessions.delete(state);
+    invalidateProviderConnectionsCache();
+
+    // Trigger sync in background
+    try {
+      const { syncConnectionQuota } = await import("@/lib/quota-sync");
+      syncConnectionQuota(connection.id).catch(() => {});
+    } catch {}
+
+    return {
+      pending: false,
+      success: true,
+      data: {
+        id: connection.id,
+        name: connection.name,
+        provider: connection.provider,
+      },
+    };
+  }
+
+  return { pending: false, error: data.msg || "Gagal mendapatkan token dari CodeBuddy" };
 }

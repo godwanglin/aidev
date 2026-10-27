@@ -88,6 +88,41 @@ export default function OAuthDarkModal({
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
+  // Polling effect for device-flow providers (CodeBuddy)
+  useEffect(() => {
+    if (provider.id !== "CODEBUDDY" || !oauthState) return;
+
+    let stopped = false;
+    const interval = setInterval(async () => {
+      if (stopped || isExchanging) return;
+      try {
+        const res = await fetch("/api/admin/providers/oauth/poll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: provider.id,
+            state: oauthState,
+            name: accountName.trim() || `Akun ${provider.name}`,
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          stopped = true;
+          clearInterval(interval);
+          onSuccess(`Berhasil menghubungkan ${provider.name} via OAuth!`);
+          onClose();
+        } else if (json.error && !json.pending) {
+          setModalError(json.error);
+        }
+      } catch {}
+    }, 3000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [provider.id, oauthState, accountName, isExchanging]);
+
   async function copyUrl() {
     if (!oauthAuthorizeUrl) return;
     try {
@@ -250,22 +285,33 @@ export default function OAuthDarkModal({
             </div>
           </div>
 
-          {/* Step 2: Paste Callback */}
-          <div className="oauth-step-block">
-            <label className="oauth-step-label">
-              Langkah 2: Tempelkan URL Callback dari Browser
-            </label>
-            <p className="oauth-step-subtext">
-              Setelah login, salin seluruh URL dari address bar browser (misal: <code>http://localhost:1455/auth/callback?code=...</code> atau <code>http://localhost:443/...</code>). Abaikan jika browser menampilkan <i>&apos;This site can&apos;t be reached&apos;</i>.
-            </p>
-            <input
-              type="text"
-              className="oauth-input-control"
-              value={oauthCallbackInput}
-              onChange={(e) => setOauthCallbackInput(e.target.value)}
-              placeholder="http://localhost:.../callback?code=...&state=..."
-            />
-          </div>
+          {/* Step 2: Paste Callback or Auto-Poll note */}
+          {provider.id === "CODEBUDDY" ? (
+            <div className="oauth-step-block">
+              <label className="oauth-step-label">
+                Langkah 2: Otorisasi Otomatis
+              </label>
+              <p className="oauth-step-subtext">
+                Buka URL di atas pada browser, lakukan login ke akun CodeBuddy. Sistem gateway ini akan otomatis mendeteksi keberhasilan login dan menghubungkan akun Anda dalam beberapa detik.
+              </p>
+            </div>
+          ) : (
+            <div className="oauth-step-block">
+              <label className="oauth-step-label">
+                Langkah 2: Tempelkan URL Callback dari Browser
+              </label>
+              <p className="oauth-step-subtext">
+                Setelah login, salin seluruh URL dari address bar browser (misal: <code>http://localhost:1455/auth/callback?code=...</code> atau <code>http://localhost:443/...</code>). Abaikan jika browser menampilkan <i>&apos;This site can&apos;t be reached&apos;</i>.
+              </p>
+              <input
+                type="text"
+                className="oauth-input-control"
+                value={oauthCallbackInput}
+                onChange={(e) => setOauthCallbackInput(e.target.value)}
+                placeholder="http://localhost:.../callback?code=...&state=..."
+              />
+            </div>
+          )}
 
           {/* Optional Account Label */}
           <div className="oauth-step-block">
@@ -292,21 +338,65 @@ export default function OAuthDarkModal({
           >
             Batal
           </button>
-          <button
-            type="button"
-            className="oauth-footer-submit-btn"
-            onClick={() => handleExchange()}
-            disabled={!oauthCallbackInput.trim() || isExchanging}
-          >
-            {isExchanging ? (
-              <>
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Menghubungkan...</span>
-              </>
-            ) : (
-              <span>Hubungkan Akun</span>
-            )}
-          </button>
+          {provider.id === "CODEBUDDY" ? (
+            <button
+              type="button"
+              className="oauth-footer-submit-btn"
+              onClick={async () => {
+                if (!oauthState) return;
+                setIsExchanging(true);
+                try {
+                  const res = await fetch("/api/admin/providers/oauth/poll", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      provider: provider.id,
+                      state: oauthState,
+                      name: accountName.trim() || `Akun ${provider.name}`,
+                    }),
+                  });
+                  const json = await res.json();
+                  if (json.success) {
+                    onSuccess(`Berhasil menghubungkan ${provider.name} via OAuth!`);
+                    onClose();
+                  } else if (json.pending) {
+                    setModalError("Login belum selesai di browser. Silakan selesaikan login terlebih dahulu.");
+                  } else {
+                    setModalError(json.error || "Gagal mendapatkan status login");
+                  }
+                } catch {
+                  setModalError("Gagal menghubungi server untuk polling status.");
+                }
+                setIsExchanging(false);
+              }}
+              disabled={isExchanging || !oauthState}
+            >
+              {isExchanging ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Memeriksa...</span>
+                </>
+              ) : (
+                <span>Periksa Status Login</span>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="oauth-footer-submit-btn"
+              onClick={() => handleExchange()}
+              disabled={!oauthCallbackInput.trim() || isExchanging}
+            >
+              {isExchanging ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Menghubungkan...</span>
+                </>
+              ) : (
+                <span>Hubungkan Akun</span>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
