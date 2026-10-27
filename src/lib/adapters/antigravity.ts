@@ -520,17 +520,35 @@ function mapToWireModel(model: string, effortStr?: string): string {
     return "gemini-4-argon-high";
   }
 
-  // Claude 3.7 / 4.6 aliases on Cloud Code assist (Google mapped 3.7/4.6 to 5.5)
-  if (clean.includes("claude-opus-4-6") || clean.includes("claude-3-7-opus") || clean.includes("claude-opus-3-7")) {
+  // Claude Opus 5.5 tiers (Pro/Ultra accounts)
+  if (clean === "claude-opus-5-5" || clean.startsWith("claude-opus-5-5-")) {
     if (clean.includes("low") || effortStr === "low") return "claude-opus-5-5-low";
     if (clean.includes("medium") || effortStr === "medium") return "claude-opus-5-5-medium";
     return "claude-opus-5-5-high";
   }
 
-  if (clean.includes("claude-sonnet-4-6") || clean.includes("claude-3-7-sonnet") || clean.includes("claude-sonnet-3-7")) {
+  // Claude Sonnet 5.5 tiers (Pro/Ultra accounts)
+  if (clean === "claude-sonnet-5-5" || clean.startsWith("claude-sonnet-5-5-")) {
     if (clean.includes("high") || effortStr === "high") return "claude-sonnet-5-5-high";
     if (clean.includes("low") || effortStr === "low") return "claude-sonnet-5-5-low";
     return "claude-sonnet-5-5-medium";
+  }
+
+  // Claude Opus 4.6 (Thinking) - keep native wire model as in Antigravity catalog
+  if (clean.includes("claude-opus-4-6") || clean.includes("claude-3-7-opus") || clean.includes("claude-opus-3-7")) {
+    return "claude-opus-4-6-thinking";
+  }
+
+  // Claude Sonnet 4.6 - keep native wire model as in Antigravity catalog
+  if (clean.includes("claude-sonnet-4-6") || clean.includes("claude-3-7-sonnet") || clean.includes("claude-sonnet-3-7")) {
+    return "claude-sonnet-4-6";
+  }
+
+  // Gemini 3.8 Flash tiers
+  if (clean === "gemini-3.8-flash" || clean.startsWith("gemini-3.8-flash-")) {
+    if (clean.includes("low") || effortStr === "low") return "gemini-3.8-flash-low";
+    if (clean.includes("medium") || effortStr === "medium") return "gemini-3.8-flash-medium";
+    return "gemini-3.8-flash-high";
   }
 
   // Gemini 2.0 sunset fallback to 2.5 flash

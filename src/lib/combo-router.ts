@@ -94,14 +94,24 @@ function stripClientNamespace(model: string): string {
 }
 
 /**
- * Normalizes user-requested model aliases/suffixes (e.g. '6.1 Sol Ultra', 'cx/gpt-6.1-sol', '6.1-sol-ultra')
+ * Detects whether a model string has an explicit upstream provider prefix.
+ * If true and not explicitly prefixed with 'combo/', it must NEVER be routed to a combo model.
+ */
+function hasExplicitProviderPrefix(model: string): boolean {
+  const lower = stripClientNamespace(model).toLowerCase();
+  if (lower.startsWith("combo/") || lower.startsWith("combo:")) {
+    return false;
+  }
+  return /^(ag|antigravity|google-ag|cx|codex|openai-codex|openai|gptweb|chatgpt-web|chatgpt|cw|cc|claude|anthropic|gem|gemini|google|gcli|gemini-cli|or|openrouter|oc|opencode|kimi|moonshot|ollama|deepseek|ds|qwen|ali|alibaba|groq|mistral|codestral|together)\//i.test(lower);
+}
+
+/**
+ * Normalizes user-requested model aliases/suffixes (e.g. '6.1 Sol Ultra', '6.1-sol-ultra')
  * so they match registered combo IDs (e.g. 'gpt-6.1-sol').
  */
 function normalizeComboModelName(model: string): string {
   let lower = stripClientNamespace(model).toLowerCase();
   lower = lower.replace(/^combo[:/]/, "");
-  // strip provider prefixes if any
-  lower = lower.replace(/^(cx|codex|openai-codex|openai|ag|gem|antigravity)\//, "");
   // strip reasoning / size suffixes
   lower = lower.replace(/[-_\s]+(ultra|xhigh|high|medium|med|low|none|thinking|extra-low)$/i, "");
   lower = lower.replace(/\[.*\]$/, "");
@@ -126,6 +136,7 @@ function normalizeComboModelName(model: string): string {
  */
 export async function isComboModel(rawModel?: string | null): Promise<boolean> {
   if (!rawModel) return false;
+  if (hasExplicitProviderPrefix(rawModel)) return false;
   const stripped = stripClientNamespace(rawModel);
   const clean = stripped.replace(/^combo[:/]/, "");
   const normalized = normalizeComboModelName(rawModel);
@@ -149,6 +160,7 @@ export async function isComboModel(rawModel?: string | null): Promise<boolean> {
  * Find a combo definition by raw model string.
  */
 export async function findCombo(rawModel: string): Promise<CachedCombo | null> {
+  if (hasExplicitProviderPrefix(rawModel)) return null;
   const stripped = stripClientNamespace(rawModel);
   const clean = stripped.replace(/^combo[:/]/, "");
   const normalized = normalizeComboModelName(rawModel);
