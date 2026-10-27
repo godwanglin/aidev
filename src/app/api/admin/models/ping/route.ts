@@ -65,6 +65,8 @@ export async function POST(req: NextRequest) {
 
     // Provider-specific ping endpoint
     let pingUrl = `${targetBase.replace(/\/$/, "")}/models`;
+    let pingMethod = "GET";
+    let pingBody: string | undefined = undefined;
     const headers: Record<string, string> = {};
 
     if (providerName === "GEMINI" || (targetKey && (targetKey.startsWith("AIza") || targetKey.startsWith("AQ.")))) {
@@ -73,6 +75,19 @@ export async function POST(req: NextRequest) {
     } else if (providerName === "ANTIGRAVITY") {
       pingUrl = "https://www.googleapis.com/oauth2/v3/userinfo";
       if (targetKey) headers["Authorization"] = `Bearer ${targetKey}`;
+    } else if (providerName === "CODEBUDDY" || providerName === "CODEBUDDY_INTL" || providerName === "CBAI") {
+      pingUrl = "https://www.codebuddy.ai/v2/billing/meter/get-user-resource";
+      pingMethod = "POST";
+      pingBody = "{}";
+      headers["Authorization"] = `Bearer ${targetKey}`;
+      headers["Content-Type"] = "application/json";
+      headers["Accept"] = "application/json";
+      headers["User-Agent"] = "IDE/2.108.1 CodeBuddy/2.108.1";
+      headers["X-Product"] = "SaaS";
+      headers["X-IDE-Type"] = "IDE";
+      headers["X-IDE-Name"] = "IDE";
+      headers["x-requested-with"] = "XMLHttpRequest";
+      headers["x-codebuddy-request"] = "1";
     } else if ((providerName === "OPENAI_CODEX" || providerName === "CODEX") && targetKey.length > 200) {
       pingUrl = "https://chatgpt.com/backend-api/wham/usage";
       headers["Authorization"] = `Bearer ${targetKey}`;
@@ -110,10 +125,27 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      let res = await fetch(pingUrl, { headers });
+      let res = await fetch(pingUrl, {
+        method: pingMethod,
+        headers,
+        ...(pingBody ? { body: pingBody } : {}),
+        signal: AbortSignal.timeout(6000),
+      });
       const latencyMs = Date.now() - start;
 
       let isHealthy = res.ok;
+      let upstreamError: string | undefined = undefined;
+
+      // Extra check for CodeBuddy response body
+      if (isHealthy && (providerName === "CODEBUDDY" || providerName === "CODEBUDDY_INTL" || providerName === "CBAI")) {
+        try {
+          const json = await res.json();
+          if (json && typeof json.code === "number" && json.code !== 0) {
+            isHealthy = false;
+            upstreamError = json.msg || `CodeBuddy upstream error (${json.code})`;
+          }
+        } catch {}
+      }
 
       // Fallback check for CHATGPT_WEB via /api/auth/session if /backend-api/models failed
       if (!isHealthy && (providerName === "CHATGPT_WEB" || providerName === "CHATGPT") && route.cookieString) {
@@ -144,11 +176,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: isHealthy,
         latencyMs,
-        statusCode: isHealthy ? (res.ok ? res.status : 200) : res.status,
+        statusCode: isHealthy ? (res.ok ? res.status : 200) : (upstreamError ? 400 : res.status),
         provider: providerName,
         connectionName,
         status,
-        error: !isHealthy ? `Upstream HTTP ${res.status}` : undefined,
+        error: !isHealthy ? (upstreamError || `Upstream HTTP ${res.status}`) : undefined,
       });
     } catch (fetchErr: any) {
       const latencyMs = Date.now() - start;

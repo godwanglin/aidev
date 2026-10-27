@@ -50,14 +50,41 @@ export async function POST(req: NextRequest) {
 
     const { normalizedBody } = normalizeRequestBody(pingPayload);
 
+    const isCodeBuddy = route.provider === "CODEBUDDY" || route.provider === "CODEBUDDY_INTL" || route.provider === "CBAI";
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${route.apiKey}`,
+      "Content-Type": "application/json",
+    };
+    let bodyToSend = normalizedBody || pingPayload;
+
+    if (isCodeBuddy) {
+      headers["User-Agent"] = "IDE/2.108.1 CodeBuddy/2.108.1";
+      headers["X-Product"] = "SaaS";
+      headers["X-IDE-Type"] = "IDE";
+      headers["X-IDE-Name"] = "IDE";
+      headers["x-requested-with"] = "XMLHttpRequest";
+      headers["x-codebuddy-request"] = "1";
+      headers["X-Conversation-ID"] = crypto.randomUUID();
+      headers["X-Conversation-Request-ID"] = crypto.randomUUID();
+      headers["X-Conversation-Message-ID"] = crypto.randomUUID();
+
+      const strippedModel = modelId.replace(/^(cb|codebuddy|cbai)\//i, "");
+      bodyToSend = JSON.stringify({
+        model: strippedModel,
+        stream: true,
+        messages: [
+          { role: "system", content: "You are CodeBuddy Code." },
+          { role: "user", content: [{ type: "text", text: "ping" }] },
+        ],
+        max_tokens: 1,
+      });
+    }
+
     try {
       const res = await fetch(targetUrl, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${route.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: normalizedBody || pingPayload,
+        headers,
+        body: bodyToSend,
         signal: AbortSignal.timeout(8000), // 8s timeout
       });
 

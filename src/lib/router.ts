@@ -335,6 +335,11 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
       case 'TOGETHER':
         baseUrl = 'https://api.together.xyz/v1';
         break;
+      case 'CODEBUDDY':
+      case 'CODEBUDDY_INTL':
+      case 'CBAI':
+        baseUrl = 'https://www.codebuddy.ai/v2';
+        break;
       default:
         baseUrl = connection.baseUrl || 'https://api.openai.com/v1';
     }
