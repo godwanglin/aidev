@@ -988,6 +988,53 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           delete anthropicPayload.tool_choice;
         }
 
+        // Normalize thinking / reasoning effort for Anthropic Extended Thinking
+        const rawEffort = candidateReasoningEffort
+          || anthropicPayload.output_config?.effort
+          || anthropicPayload.effort
+          || anthropicPayload.reasoning_effort
+          || anthropicPayload.reasoning?.effort
+          || anthropicPayload.thinking?.effort;
+
+        if (rawEffort && (rawEffort === "off" || rawEffort === "none")) {
+          delete anthropicPayload.thinking;
+        } else if (rawEffort || (anthropicPayload.thinking && typeof anthropicPayload.thinking === "object")) {
+          const effortLower = rawEffort ? String(rawEffort).toLowerCase() : "";
+          let budget = 8192;
+          if (effortLower === "low" || effortLower === "minimal") {
+            budget = 2048;
+          } else if (effortLower === "high" || effortLower === "xhigh" || effortLower === "ultra" || effortLower === "max") {
+            budget = 16384;
+          } else if (typeof anthropicPayload.thinking?.budget_tokens === "number" && anthropicPayload.thinking.budget_tokens > 0) {
+            budget = anthropicPayload.thinking.budget_tokens;
+          }
+
+          anthropicPayload.thinking = {
+            type: "enabled",
+            budget_tokens: budget,
+          };
+
+          const minMaxTokens = budget + 4096;
+          if (!anthropicPayload.max_tokens || anthropicPayload.max_tokens < minMaxTokens) {
+            anthropicPayload.max_tokens = Math.max(anthropicPayload.max_tokens || 4096, minMaxTokens);
+          }
+
+          // Anthropic rule: When thinking is enabled, temperature must not be set or must be 1.0
+          delete anthropicPayload.temperature;
+          delete anthropicPayload.top_p;
+          delete anthropicPayload.top_k;
+        }
+
+        if (!anthropicPayload.max_tokens) {
+          anthropicPayload.max_tokens = 4096;
+        }
+
+        // CRITICAL: Strip any non-standard parameters that Anthropic rejects
+        delete anthropicPayload.effort;
+        delete anthropicPayload.reasoning_effort;
+        delete anthropicPayload.reasoning;
+        delete anthropicPayload.output_config;
+
         const isOAuth = targetKey.startsWith("sk-ant-oat") || activeProvider === "CLAUDE_CODE";
         const forwardHeaders = new Headers();
 
@@ -1007,6 +1054,12 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         forwardHeaders.set("Content-Type", "application/json");
+
+        // Guarantee clean payload for Anthropic (no non-standard fields)
+        delete anthropicPayload.effort;
+        delete anthropicPayload.reasoning_effort;
+        delete anthropicPayload.reasoning;
+        delete anthropicPayload.output_config;
 
         const targetUrl = `${targetBase}/messages`;
         const upstreamRes = await fetch(targetUrl, {

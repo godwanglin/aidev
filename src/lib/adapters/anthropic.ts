@@ -356,6 +356,11 @@ export function convertAnthropicToOpenAiPayload(
     delete payload.reasoning;
   }
 
+  // Strip Anthropic-specific fields from OpenAI payload
+  delete payload.thinking;
+  delete payload.output_config;
+  delete payload.effort;
+
   if (openAiTools && openAiTools.length > 0) {
     payload.tools = openAiTools;
     if (openAiToolChoice) {
@@ -996,6 +1001,12 @@ export function applyClaudeCodeCloaking(body: any, apiKey: string, sessionId: st
       };
     });
   }
+
+  // Strip non-standard Anthropic fields
+  delete result.effort;
+  delete result.reasoning_effort;
+  delete result.reasoning;
+  delete result.output_config;
 
   return result;
 }
