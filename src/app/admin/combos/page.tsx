@@ -1360,7 +1360,7 @@ export default function AdminCombosPage() {
         {/* Create / Edit Modal */}
         {modalOpen && (
           <div className="modal-overlay">
-            <div className="modal-card" style={{ width: "680px", maxHeight: "90vh", overflowY: "auto" }}>
+            <div className="modal-card" style={{ width: "940px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
               <div className="modal-header">
                 <div className="modal-title-wrap">
                   <Layers size={16} className="text-blue" style={{ flexShrink: 0 }} />
@@ -1867,7 +1867,9 @@ export default function AdminCombosPage() {
                       style={{
                         border: "1px solid var(--line)",
                         borderRadius: "var(--radius-md)",
-                        overflow: "hidden",
+                        overflowX: "auto",
+                        overflowY: "hidden",
+                        WebkitOverflowScrolling: "touch",
                       }}
                     >
                       <div
@@ -1877,6 +1879,7 @@ export default function AdminCombosPage() {
                           justifyContent: "space-between",
                           alignItems: "center",
                           padding: "8px 12px",
+                          minWidth: "780px",
                         }}
                       >
                         <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-soft)" }}>
@@ -1901,9 +1904,11 @@ export default function AdminCombosPage() {
                             opacity: it.isActive === false ? 0.55 : 1,
                             backgroundColor: it.isActive === false ? "rgba(239, 68, 68, 0.03)" : "transparent",
                             transition: "all 0.15s ease",
+                            minWidth: "780px",
+                            gap: "12px",
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: "220px" }}>
                             <span
                               className={strategy === "ROUND_ROBIN" ? "combo-item-badge-rr" : "combo-item-badge-fallback"}
                               style={{
@@ -1915,6 +1920,7 @@ export default function AdminCombosPage() {
                                 minWidth: "42px",
                                 textAlign: "center",
                                 filter: it.isActive === false ? "grayscale(1)" : "none",
+                                flexShrink: 0,
                               }}
                             >
                               {strategy === "ROUND_ROBIN" ? `W:${it.weight}` : `Tier ${it.priority}`}
@@ -1925,6 +1931,7 @@ export default function AdminCombosPage() {
                                 fontWeight: 500,
                                 color: it.isActive === false ? "var(--muted)" : "var(--ink)",
                                 textDecoration: it.isActive === false ? "line-through" : "none",
+                                whiteSpace: "nowrap",
                               }}
                             >
                               {it.modelId}
@@ -1940,6 +1947,7 @@ export default function AdminCombosPage() {
                                   padding: "1px 6px",
                                   borderRadius: "3px",
                                   letterSpacing: "0.5px",
+                                  flexShrink: 0,
                                 }}
                               >
                                 DISABLED
@@ -1947,7 +1955,7 @@ export default function AdminCombosPage() {
                             )}
                           </div>
 
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
                             {/* Candidate Reasoning Effort Bypass Select */}
                             <div style={{ display: "flex", alignItems: "center", gap: "4px", marginRight: "8px" }}>
                               <span style={{ fontSize: "10px", color: "var(--muted)", whiteSpace: "nowrap" }}>Reasoning:</span>
