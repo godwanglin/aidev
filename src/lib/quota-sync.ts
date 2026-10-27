@@ -361,6 +361,31 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
             token = await refreshOAuthToken(connection.id);
           } catch {}
         }
+
+        // Auto-extract account email and name from JWT token if missing
+        if (token && token.includes(".")) {
+          try {
+            const parts = token.split(".");
+            if (parts.length >= 2) {
+              const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+              if (!accountEmail) {
+                if (payload.email && typeof payload.email === "string") {
+                  accountEmail = payload.email.trim();
+                } else if (payload.preferred_username && typeof payload.preferred_username === "string" && payload.preferred_username.includes("@")) {
+                  accountEmail = payload.preferred_username.trim();
+                }
+              }
+              if (connection.name === "Akun CodeBuddy" || connection.name === "CodeBuddy Account") {
+                const newName = (payload.name && typeof payload.name === "string" && payload.name.trim()) || "Cbai 1";
+                await prisma.providerConnection.update({
+                  where: { id: connection.id },
+                  data: { name: newName },
+                }).catch(() => {});
+              }
+            }
+          } catch {}
+        }
+
         if (token) {
           const fetchQuota = async (t: string) => {
             return await fetch("https://www.codebuddy.ai/v2/billing/meter/get-user-resource", {

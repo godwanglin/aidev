@@ -23,7 +23,9 @@ export default function OAuthDarkModal({
   const [oauthState, setOauthState] = useState("");
   const [oauthCodeVerifier, setOauthCodeVerifier] = useState("");
   const [oauthCallbackInput, setOauthCallbackInput] = useState("");
-  const [accountName, setAccountName] = useState(`Akun ${provider.name}`);
+  const [accountName, setAccountName] = useState(
+    provider.id === "CODEBUDDY" ? "" : `Akun ${provider.name}`
+  );
   const [isInitiating, setIsInitiating] = useState(false);
   const [isExchanging, setIsExchanging] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -102,7 +104,7 @@ export default function OAuthDarkModal({
           body: JSON.stringify({
             provider: provider.id,
             state: oauthState,
-            name: accountName.trim() || `Akun ${provider.name}`,
+            name: accountName.trim() || undefined,
           }),
         });
         const json = await res.json();
@@ -323,7 +325,11 @@ export default function OAuthDarkModal({
               className="oauth-input-control"
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
-              placeholder={`Contoh: Akun ${provider.name} Utama`}
+              placeholder={
+                provider.id === "CODEBUDDY"
+                  ? "Otomatis dari profil akun / Cbai (atau isi kustom)"
+                  : `Contoh: Akun ${provider.name} Utama`
+              }
             />
           </div>
         </div>
@@ -352,7 +358,7 @@ export default function OAuthDarkModal({
                     body: JSON.stringify({
                       provider: provider.id,
                       state: oauthState,
-                      name: accountName.trim() || `Akun ${provider.name}`,
+                      name: accountName.trim() || undefined,
                     }),
                   });
                   const json = await res.json();

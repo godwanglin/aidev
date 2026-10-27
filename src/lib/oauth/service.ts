@@ -526,7 +526,7 @@ export async function pollCodeBuddyOAuth({
   name?: string;
 }) {
   const session = sessions.get(state);
-  const connName = name?.trim() || session?.connectionName || "CodeBuddy Account";
+  const connName = name?.trim() || session?.connectionName || "";
 
   const res = await fetch(`https://www.codebuddy.ai/v2/plugin/auth/token?state=${encodeURIComponent(state)}`, {
     method: "GET",
@@ -559,18 +559,78 @@ export async function pollCodeBuddyOAuth({
     const expiresIn = Number(data.data.expiresIn) || 86400;
     const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
 
-    // Upsert connection
-    const existing = await prisma.providerConnection.findFirst({
-      where: { provider: "CODEBUDDY", name: connName },
+    // 1. Extract email and display name from JWT accessToken
+    let accountEmail: string | null = null;
+    let extractedName: string | null = null;
+
+    if (accessToken && accessToken.includes(".")) {
+      try {
+        const parts = accessToken.split(".");
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+          if (payload.email && typeof payload.email === "string") {
+            accountEmail = payload.email.trim();
+          } else if (payload.preferred_username && typeof payload.preferred_username === "string" && payload.preferred_username.includes("@")) {
+            accountEmail = payload.preferred_username.trim();
+          }
+          if (payload.name && typeof payload.name === "string" && payload.name.trim()) {
+            extractedName = payload.name.trim();
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Fetch all existing CODEBUDDY connections
+    const existingCbConns = await prisma.providerConnection.findMany({
+      where: { provider: "CODEBUDDY" },
+      orderBy: { createdAt: "asc" },
     });
 
+    // 3. Match existing connection by accountEmail (case-insensitive)
+    let matchingConn = accountEmail
+      ? existingCbConns.find(
+          (c) => c.accountEmail && c.accountEmail.trim().toLowerCase() === accountEmail.trim().toLowerCase()
+        )
+      : null;
+
+    // Fallback: If only 1 connection exists without an email yet, treat as existing to upgrade
+    if (!matchingConn && existingCbConns.length === 1 && !existingCbConns[0].accountEmail) {
+      matchingConn = existingCbConns[0];
+    }
+
+    // 4. Resolve connection label/name:
+    // If user provided a specific custom name, respect it.
+    // Otherwise, auto-fill with extractedName, or default to "Cbai X".
+    const isCustomNameProvided =
+      connName !== "" &&
+      !connName.toLowerCase().startsWith("akun ") &&
+      !connName.toLowerCase().endsWith(" account") &&
+      connName.toLowerCase() !== "codebuddy" &&
+      connName.toLowerCase() !== "cbai";
+
+    let finalName: string;
+    if (isCustomNameProvided) {
+      finalName = connName;
+    } else if (matchingConn && matchingConn.name && !matchingConn.name.toLowerCase().startsWith("akun codebuddy")) {
+      finalName = matchingConn.name;
+    } else if (extractedName && extractedName.toLowerCase() !== "user" && extractedName.toLowerCase() !== "codebuddy") {
+      finalName = extractedName;
+    } else {
+      const nextIndex = matchingConn
+        ? existingCbConns.indexOf(matchingConn) + 1
+        : existingCbConns.length + 1;
+      finalName = `Cbai ${nextIndex}`;
+    }
+
     let connection;
-    if (existing) {
+    if (matchingConn) {
       connection = await prisma.providerConnection.update({
-        where: { id: existing.id },
+        where: { id: matchingConn.id },
         data: {
+          name: finalName,
+          accountEmail: accountEmail || matchingConn.accountEmail,
           accessTokenEnc: encryptCredential(accessToken),
-          refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : existing.refreshTokenEnc,
+          refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : matchingConn.refreshTokenEnc,
           tokenExpiresAt,
           baseUrl: "https://www.codebuddy.ai/v2",
           isActive: true,
@@ -581,7 +641,8 @@ export async function pollCodeBuddyOAuth({
       connection = await prisma.providerConnection.create({
         data: {
           provider: "CODEBUDDY",
-          name: connName,
+          name: finalName,
+          accountEmail: accountEmail || null,
           authType: "OAUTH",
           baseUrl: "https://www.codebuddy.ai/v2",
           accessTokenEnc: encryptCredential(accessToken),
@@ -589,6 +650,8 @@ export async function pollCodeBuddyOAuth({
           tokenExpiresAt,
           isActive: true,
           syncStatus: "NORMAL",
+          priority: existingCbConns.length + 1,
+          weight: 1,
         },
       });
     }
@@ -608,6 +671,7 @@ export async function pollCodeBuddyOAuth({
       data: {
         id: connection.id,
         name: connection.name,
+        accountEmail: connection.accountEmail,
         provider: connection.provider,
       },
     };

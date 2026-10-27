@@ -1108,8 +1108,13 @@ export default function ProviderDetailPage() {
                         <div className="conn-identity-wrap">
                           <div className="flex items-center gap-2">
                             <span className="conn-email-text font-semibold">
-                              {conn.accountEmail || conn.name}
+                              {conn.name || conn.accountEmail}
                             </span>
+                            {conn.accountEmail && conn.name && conn.accountEmail !== conn.name && (
+                              <span className="text-[11.5px] text-[var(--muted)] font-mono">
+                                ({conn.accountEmail})
+                              </span>
+                            )}
                             {pingResult[conn.id] && !pingResult[conn.id].ok && (
                               <span className="text-[10.5px] font-mono text-red-400 bg-red-950/70 px-1.5 py-0.5 rounded border border-red-900/60 max-w-[280px] truncate">
                                 [Error]: Ping Failed
