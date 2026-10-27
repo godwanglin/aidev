@@ -349,7 +349,7 @@ async function fetchCodeBuddyAccountQuota(token: string): Promise<QuotaBucketIte
         const rem = Math.max(0, total - used);
         const pct = total > 0 ? Math.round((rem / total) * 100) : 0;
         const resetIso = acc.CycleEndTime ? new Date(acc.CycleEndTime).toISOString() : undefined;
-        const resetHuman = resetIso ? `Resets in ${formatResetRemaining(resetIso)}` : "";
+        const resetHuman = resetIso ? `Resets ${formatResetRemaining(resetIso)}` : "";
 
         quotas.push({
           id: `codebuddy-refill-${i + 1}`,
@@ -370,7 +370,7 @@ async function fetchCodeBuddyAccountQuota(token: string): Promise<QuotaBucketIte
         const rem = Math.max(0, total - used);
         const pct = total > 0 ? Math.round((rem / total) * 100) : 0;
         const resetIso = acc.CycleEndTime ? new Date(acc.CycleEndTime).toISOString() : undefined;
-        const resetHuman = resetIso ? `Expires in ${formatResetRemaining(resetIso)}` : "";
+        const resetHuman = resetIso ? `Expires ${formatResetRemaining(resetIso)}` : "";
 
         quotas.push({
           id: `codebuddy-bonus-${i + 1}`,

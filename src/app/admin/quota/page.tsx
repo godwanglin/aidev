@@ -1205,6 +1205,11 @@ export default function AdminQuotaTrackerPage() {
                                   style={{ backgroundColor: dotColor }}
                                 />
                                 <span className="quota-bucket-name">{quota.name}</span>
+                                {typeof quota.totalAmount === "number" && quota.totalAmount > 0 && quota.totalAmount !== 1000 && (
+                                  <span className="mono text-[11px] text-muted ml-2">
+                                    {quota.usedAmount ?? 0} / {quota.totalAmount}
+                                  </span>
+                                )}
                               </div>
                               <div className="quota-bucket-right">
                                 {(() => {

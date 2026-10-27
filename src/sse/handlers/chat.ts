@@ -1450,6 +1450,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       forwardHeaders.set("X-IDE-Name", "IDE");
       forwardHeaders.set("x-requested-with", "XMLHttpRequest");
       forwardHeaders.set("x-codebuddy-request", "1");
+      forwardHeaders.set("X-Conversation-ID", crypto.randomUUID());
+      forwardHeaders.set("X-Conversation-Request-ID", crypto.randomUUID());
+      forwardHeaders.set("X-Conversation-Message-ID", crypto.randomUUID());
     }
 
     const { normalizedBody } = normalizeRequestBody(candidateChatBody || "{}");
