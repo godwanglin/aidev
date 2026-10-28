@@ -532,7 +532,19 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   const logModel = params.upstreamLogModel || params.model;
 
   const accountId = extractAccountId(params.accessToken);
-  const codexBody = formatCodexPayload(params.parsedBody, targetModel);
+  const codexBody: any = formatCodexPayload(params.parsedBody, targetModel);
+  let effectiveEffort =
+    params.reasoningEffort ||
+    params.parsedBody?.reasoning?.effort ||
+    params.parsedBody?.reasoning_effort ||
+    params.parsedBody?.output_config?.effort ||
+    params.parsedBody?.effort;
+  if (effectiveEffort === "max" || effectiveEffort === "ultra") {
+    effectiveEffort = "xhigh";
+  }
+  if (effectiveEffort && effectiveEffort !== "none" && effectiveEffort !== "off") {
+    codexBody.reasoning = { effort: effectiveEffort };
+  }
 
   const getHeaders = (token: string): Record<string, string> => {
     const headers: Record<string, string> = {
