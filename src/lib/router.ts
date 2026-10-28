@@ -395,15 +395,23 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
   };
 }
 
-export async function markConnectionCooldown(connectionId: string, durationSeconds: number = 60): Promise<void> {
+export async function markConnectionCooldown(
+  connectionId: string,
+  durationSeconds: number = 60,
+  syncStatus?: "NORMAL" | "LOW_QUOTA" | "EXHAUSTED" | "ERROR"
+): Promise<void> {
   if (!connectionId || connectionId.startsWith("default-")) return;
   try {
     invalidateProviderConnectionsCache();
     const cooldownUntil = new Date(Date.now() + durationSeconds * 1000);
     await prisma.providerConnection.update({
       where: { id: connectionId },
-      data: { cooldownUntil }
+      data: {
+        cooldownUntil,
+        ...(syncStatus ? { syncStatus } : {}),
+      },
     });
+    invalidateProviderConnectionsCache();
   } catch {}
 }
 

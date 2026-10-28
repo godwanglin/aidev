@@ -729,7 +729,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
           if (isRetryableError) {
             if (currentConnId) {
-              markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
+              await markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
             }
 
             // Attempt to find another healthy connection for Codex
@@ -759,7 +759,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           break;
         } catch (err: any) {
           if (currentConnId) {
-            markConnectionCooldown(currentConnId, 60);
+            await markConnectionCooldown(currentConnId, 60);
           }
           if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
             const nextRoute = await resolveUpstreamConnection({
@@ -844,7 +844,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
           if (isRetryableError) {
             if (currentConnId) {
-              markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
+              await markConnectionCooldown(currentConnId, codexResponse.status === 401 ? 3600 : 60);
             }
 
             if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
@@ -873,7 +873,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           break;
         } catch (err: any) {
           if (currentConnId) {
-            markConnectionCooldown(currentConnId, 60);
+            await markConnectionCooldown(currentConnId, 60);
           }
           if (attempt < MAX_CODEX_CONNECTION_ATTEMPTS - 1) {
             const nextRoute = await resolveUpstreamConnection({

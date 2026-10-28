@@ -572,16 +572,25 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   }
 
   if (!response.ok) {
-    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
-      markConnectionCooldown(params.connectionId, response.status === 401 ? 3600 : 60);
-    }
-
     const errText = await response.text();
     let errMsg = errText;
     try {
       const errJson = JSON.parse(errText);
       errMsg = errJson.detail || errJson.error?.message || errText;
     } catch {}
+
+    const isQuotaExhausted =
+      response.status === 429 &&
+      /usage limit|quota|limit_reached/i.test(errMsg);
+
+    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
+      const cooldownSec = response.status === 401 ? 3600 : isQuotaExhausted ? 1800 : 60;
+      await markConnectionCooldown(
+        params.connectionId,
+        cooldownSec,
+        isQuotaExhausted ? "EXHAUSTED" : response.status === 401 ? "ERROR" : undefined
+      );
+    }
 
     logUpstreamRequest({
       connectionId: params.connectionId,
@@ -599,7 +608,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       totalTokens: 15,
       latencyMs: Date.now() - startTime,
       statusCode: response.status,
-      isFailover: false,
+      isFailover: response.status === 401 || response.status === 429 || response.status >= 500,
       failoverReason: `Codex upstream HTTP ${response.status}: ${errMsg}`,
     }).catch(() => {});
 
@@ -1334,16 +1343,25 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   }
 
   if (!response.ok) {
-    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
-      markConnectionCooldown(params.connectionId, response.status === 401 ? 3600 : 60);
-    }
-
     const errText = await response.text();
     let errMsg = errText;
     try {
       const errJson = JSON.parse(errText);
       errMsg = errJson.detail || errJson.error?.message || errText;
     } catch {}
+
+    const isQuotaExhausted =
+      response.status === 429 &&
+      /usage limit|quota|limit_reached/i.test(errMsg);
+
+    if (params.connectionId && (response.status === 401 || response.status === 429 || response.status >= 500)) {
+      const cooldownSec = response.status === 401 ? 3600 : isQuotaExhausted ? 1800 : 60;
+      await markConnectionCooldown(
+        params.connectionId,
+        cooldownSec,
+        isQuotaExhausted ? "EXHAUSTED" : response.status === 401 ? "ERROR" : undefined
+      );
+    }
 
     adminLogger.error({
       message: `Codex error: ${errMsg.slice(0, 150)}`,
@@ -1369,7 +1387,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       totalTokens: 15,
       latencyMs: Date.now() - startTime,
       statusCode: response.status,
-      isFailover: false,
+      isFailover: response.status === 401 || response.status === 429 || response.status >= 500,
       failoverReason: `Codex Responses HTTP ${response.status}: ${errMsg}`,
     }).catch(() => {});
 

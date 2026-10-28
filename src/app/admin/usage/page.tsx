@@ -205,6 +205,8 @@ interface ParsedChatMessage {
   toolsList?: Array<{ name: string; type?: string; description?: string }>;
   rawToolsJson?: string;
   isFinalResponse?: boolean;
+  isErrorResponse?: boolean;
+  statusCode?: number;
 }
 
 function extractToolsFromSchema(toolsArray: any[]): Array<{ name: string; type?: string; description?: string }> {
@@ -223,7 +225,7 @@ function extractToolsFromSchema(toolsArray: any[]): Array<{ name: string; type?:
   return result;
 }
 
-function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage[] {
+function extractChatMessages(rawBody: any, rawResponse?: any, statusCode?: number): ParsedChatMessage[] {
   const messages: ParsedChatMessage[] = [];
   let bodyObj: any = null;
   if (typeof rawBody === "string") {
@@ -684,6 +686,11 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
       accText = rawResponse.trim();
     }
 
+    const isErrorStatus = Boolean(
+      (typeof statusCode === "number" && statusCode >= 400) ||
+      (accText && !accReasoning && accToolCalls.length === 0 && /^(The usage limit has been reached|Upstream .* returned HTTP \d+|\{"error":)/i.test(accText))
+    );
+
     if (accText || accReasoning || accToolCalls.length > 0) {
       messages.push({
         id: "response-final",
@@ -692,6 +699,8 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
         reasoning: accReasoning || undefined,
         toolCalls: accToolCalls.length > 0 ? accToolCalls : undefined,
         isFinalResponse: true,
+        isErrorResponse: isErrorStatus,
+        statusCode,
       });
     }
   }
@@ -723,6 +732,7 @@ function extractChatMessages(rawBody: any, rawResponse?: any): ParsedChatMessage
 function ChatConversationView({
   rawBody,
   rawResponse,
+  statusCode,
   loading = false,
   maxHeight = "500px",
   onOpenFullModal,
@@ -730,6 +740,7 @@ function ChatConversationView({
 }: {
   rawBody: any;
   rawResponse?: any;
+  statusCode?: number;
   loading?: boolean;
   maxHeight?: string;
   onOpenFullModal?: () => void;
@@ -747,7 +758,7 @@ function ChatConversationView({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
-  const messages = useMemo(() => extractChatMessages(rawBody, rawResponse), [rawBody, rawResponse]);
+  const messages = useMemo(() => extractChatMessages(rawBody, rawResponse, statusCode), [rawBody, rawResponse, statusCode]);
 
   const dialogCount = messages.filter((m) => !m.isToolExec && !m.isToolOutput && !m.isAdditionalTools && (m.role === "user" || m.role === "assistant")).length;
   const systemCount = messages.filter((m) => m.role === "system" || m.isAdditionalTools).length;
@@ -1323,22 +1334,40 @@ function ChatConversationView({
                 <div
                   className="rounded-2xl rounded-tl-sm p-3.5 max-w-[88%] text-xs shadow-sm transition border"
                   style={{
-                    backgroundColor: msg.isFinalResponse ? "rgba(16, 185, 129, 0.04)" : "var(--surface)",
-                    borderColor: msg.isFinalResponse ? "rgba(16, 185, 129, 0.3)" : "var(--border)",
+                    backgroundColor: msg.isErrorResponse
+                      ? "rgba(239, 68, 68, 0.08)"
+                      : msg.isFinalResponse
+                      ? "rgba(16, 185, 129, 0.04)"
+                      : "var(--surface)",
+                    borderColor: msg.isErrorResponse
+                      ? "rgba(239, 68, 68, 0.4)"
+                      : msg.isFinalResponse
+                      ? "rgba(16, 185, 129, 0.3)"
+                      : "var(--border)",
                     color: "var(--ink)",
                   }}
                 >
-                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b" style={{ borderColor: "var(--border)" }}>
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b" style={{ borderColor: msg.isErrorResponse ? "rgba(239, 68, 68, 0.25)" : "var(--border)" }}>
                     <div className="flex items-center gap-1.5 font-bold text-[11px]">
-                      <Bot size={13} style={{ color: msg.isFinalResponse ? "#10b981" : "#a855f7" }} />
-                      <span style={{ color: msg.isFinalResponse ? "#10b981" : "var(--ink)" }}>Assistant</span>
+                      {msg.isErrorResponse ? (
+                        <AlertTriangle size={13} style={{ color: "#ef4444" }} />
+                      ) : (
+                        <Bot size={13} style={{ color: msg.isFinalResponse ? "#10b981" : "#a855f7" }} />
+                      )}
+                      <span style={{ color: msg.isErrorResponse ? "#ef4444" : msg.isFinalResponse ? "#10b981" : "var(--ink)" }}>
+                        {msg.isErrorResponse ? `Upstream Error${msg.statusCode ? ` (HTTP ${msg.statusCode})` : ""}` : "Assistant"}
+                      </span>
                       <span className="text-[10px] text-muted font-mono">#{idx + 1}</span>
-                      {msg.isFinalResponse && (
+                      {msg.isErrorResponse ? (
+                        <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-red-500/15 text-red-400 border border-red-500/30 flex items-center gap-1">
+                          <span>Rejected / Auto-Failover</span>
+                        </span>
+                      ) : msg.isFinalResponse ? (
                         <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/25 flex items-center gap-1">
                           <Sparkles size={9} />
                           <span>Final Upstream Output</span>
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -3781,6 +3810,7 @@ print(response.choices[0].message.content)`,
                       <ChatConversationView
                         rawBody={inspectEvent.rawBody}
                         rawResponse={inspectEvent.rawResponse}
+                        statusCode={inspectEvent.statusCode}
                         loading={loadingInspectDetail}
                         maxHeight="440px"
                         onOpenFullModal={() => {
@@ -4022,6 +4052,7 @@ print(response.choices[0].message.content)`,
                 <ChatConversationView
                   rawBody={chatModalEvent.rawBody}
                   rawResponse={chatModalEvent.rawResponse}
+                  statusCode={chatModalEvent.statusCode}
                   loading={loadingChatDetail}
                   maxHeight="calc(90vh - 160px)"
                   onSwitchToRaw={() => {

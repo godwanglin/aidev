@@ -142,7 +142,12 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
               const data = await res.json();
               if (data.email) accountEmail = data.email;
               const rl = data.rate_limit;
-              if (rl?.limit_reached || rl?.allowed === false) {
+              const primaryPct = Number(rl?.primary_window?.used_percent ?? 0);
+              const secondaryPct = Number(rl?.secondary_window?.used_percent ?? 0);
+              if (rl?.limit_reached || rl?.allowed === false || primaryPct >= 100 || secondaryPct >= 100) {
+                status = "EXHAUSTED";
+                errorMsg = "Usage limit reached (100% used)";
+              } else if (primaryPct >= 75 || secondaryPct >= 75) {
                 status = "LOW_QUOTA";
               } else {
                 status = "NORMAL";
