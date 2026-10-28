@@ -732,6 +732,8 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           }
         }
 
+        completionTokens = Math.max(1, Math.ceil(accumulatedText.length / 4));
+        const durationMs = Date.now() - startTime;
         const finishReason = emittedToolCallsCount > 0 ? "tool_calls" : "stop";
         const finalChunk = {
           id: completionId,
@@ -745,12 +747,14 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
               finish_reason: finishReason,
             },
           ],
+          usage: {
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: promptTokens + completionTokens,
+          },
         };
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
         controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-
-        completionTokens = Math.max(1, Math.ceil(accumulatedText.length / 4));
-        const durationMs = Date.now() - startTime;
 
         logUpstreamRequest({
           connectionId: params.connectionId,

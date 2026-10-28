@@ -869,6 +869,16 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       flush(controller) {
         const hasToolCalls = activeToolCalls.size > 0;
         const hasContent = Boolean(accumulatedText.trim().length > 0 || hasToolCalls);
+        const durationMs = Date.now() - startTime;
+        const fallbackPrompt = params.estimatedPromptTokens || Math.max(15, Math.ceil((params.rawBody?.length || 0) / 4));
+        const finalPromptTokens = promptTokens || fallbackPrompt;
+        const finalCompletionTokens = completionTokens > 0 
+          ? completionTokens 
+          : hasContent 
+          ? Math.max(1, Math.ceil(accumulatedText.length / 4)) 
+          : 0;
+        const effectiveStatus = (hasContent || finalCompletionTokens > 0) ? 200 : 502;
+
         if (!hasContent) {
           const errorChunk = {
             id: completionId,
@@ -903,20 +913,15 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
                 finish_reason: hasToolCalls ? "tool_calls" : "stop",
               },
             ],
+            usage: {
+              prompt_tokens: finalPromptTokens,
+              completion_tokens: finalCompletionTokens,
+              total_tokens: finalPromptTokens + finalCompletionTokens,
+            },
           };
           controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
           controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
         }
-
-        const durationMs = Date.now() - startTime;
-        const fallbackPrompt = params.estimatedPromptTokens || Math.max(15, Math.ceil((params.rawBody?.length || 0) / 4));
-        const finalPromptTokens = promptTokens || fallbackPrompt;
-        const finalCompletionTokens = completionTokens > 0 
-          ? completionTokens 
-          : hasContent 
-          ? Math.max(1, Math.ceil(accumulatedText.length / 4)) 
-          : 0;
-        const effectiveStatus = (hasContent || finalCompletionTokens > 0) ? 200 : 502;
 
         logUpstreamRequest({
           connectionId: params.connectionId,

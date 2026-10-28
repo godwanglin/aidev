@@ -472,6 +472,7 @@ export async function transformChatResponseToAnthropic(
   params: {
     model: string;
     clientWantsStream: boolean;
+    estimatedPromptTokens?: number;
   }
 ): Promise<Response> {
   const messageId = `msg_${Date.now()}`;
@@ -540,8 +541,10 @@ export async function transformChatResponseToAnthropic(
 
     let messageDeltaSent = false;
     let finishReason: string | null = null;
-    let promptTokens = 20;
+    let promptTokens = params.estimatedPromptTokens || 20;
     let completionTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheCreationTokens = 0;
     let pingInterval: NodeJS.Timeout | null = null;
     let lastEventTime = Date.now();
 
@@ -615,6 +618,38 @@ export async function transformChatResponseToAnthropic(
           }
           if (!trimmed.startsWith("data: ")) continue;
           if (trimmed === "data: [DONE]") {
+            stopThinkingBlock(controller);
+            stopTextBlock(controller);
+            stopAllToolBlocks(controller);
+
+            if (sentMessageStart && !messageDeltaSent) {
+              messageDeltaSent = true;
+              let stopReason = "end_turn";
+              if (
+                finishReason === "tool_calls" ||
+                finishReason === "function_call" ||
+                activeToolCalls.size > 0
+              ) {
+                stopReason = "tool_use";
+              } else if (finishReason === "length") {
+                stopReason = "max_tokens";
+              }
+
+              emitEvent(controller, "message_delta", {
+                type: "message_delta",
+                delta: {
+                  stop_reason: stopReason,
+                  stop_sequence: null,
+                },
+                usage: {
+                  input_tokens: promptTokens,
+                  output_tokens: Math.max(1, completionTokens),
+                  ...(cacheReadTokens > 0 ? { cache_read_input_tokens: cacheReadTokens } : {}),
+                  ...(cacheCreationTokens > 0 ? { cache_creation_input_tokens: cacheCreationTokens } : {}),
+                },
+              });
+              emitEvent(controller, "message_stop", { type: "message_stop" });
+            }
             continue;
           }
 
@@ -640,8 +675,17 @@ export async function transformChatResponseToAnthropic(
             }
 
             if (data.usage) {
-              promptTokens = data.usage.prompt_tokens || promptTokens;
-              completionTokens = data.usage.completion_tokens || completionTokens;
+              promptTokens = data.usage.prompt_tokens || data.usage.input_tokens || promptTokens;
+              completionTokens = data.usage.completion_tokens || data.usage.output_tokens || completionTokens;
+              cacheReadTokens =
+                data.usage.cache_read_input_tokens ||
+                data.usage.prompt_cache_hit_tokens ||
+                data.usage.prompt_tokens_details?.cached_tokens ||
+                cacheReadTokens;
+              cacheCreationTokens =
+                data.usage.cache_creation_input_tokens ||
+                data.usage.prompt_cache_write_tokens ||
+                cacheCreationTokens;
             }
 
             // 1. First chunk - ALWAYS send message_start first
@@ -763,38 +807,12 @@ export async function transformChatResponseToAnthropic(
               }
             }
 
-            // 5. Handle Finish Reason
+            // 5. Handle Finish Reason (defer message_delta until [DONE] or flush so trailing usage chunk is captured)
             if (choice?.finish_reason) {
               finishReason = choice.finish_reason;
               stopThinkingBlock(controller);
               stopTextBlock(controller);
               stopAllToolBlocks(controller);
-
-              if (!messageDeltaSent) {
-                messageDeltaSent = true;
-                let stopReason = "end_turn";
-                if (
-                  finishReason === "tool_calls" ||
-                  finishReason === "function_call" ||
-                  activeToolCalls.size > 0
-                ) {
-                  stopReason = "tool_use";
-                } else if (finishReason === "length") {
-                  stopReason = "max_tokens";
-                }
-
-                emitEvent(controller, "message_delta", {
-                  type: "message_delta",
-                  delta: {
-                    stop_reason: stopReason,
-                    stop_sequence: null,
-                  },
-                  usage: {
-                    output_tokens: Math.max(1, completionTokens),
-                  },
-                });
-                emitEvent(controller, "message_stop", { type: "message_stop" });
-              }
             }
           } catch {}
         }
@@ -846,7 +864,10 @@ export async function transformChatResponseToAnthropic(
               stop_sequence: null,
             },
             usage: {
+              input_tokens: promptTokens,
               output_tokens: Math.max(1, completionTokens),
+              ...(cacheReadTokens > 0 ? { cache_read_input_tokens: cacheReadTokens } : {}),
+              ...(cacheCreationTokens > 0 ? { cache_creation_input_tokens: cacheCreationTokens } : {}),
             },
           });
           emitEvent(controller, "message_stop", { type: "message_stop" });
@@ -872,7 +893,7 @@ export async function transformChatResponseToAnthropic(
   // Case 2: Non-streaming JSON response
   const rawText = await chatResponse.text();
   const contentList: any[] = [];
-  let promptTokens = 20;
+  let promptTokens = params.estimatedPromptTokens || 20;
   let completionTokens = 25;
   let stopReason = "end_turn";
   let actualMessageId = messageId;
@@ -1559,8 +1580,11 @@ export async function transformAnthropicResponseToOpenAi(
                 if (data.message?.id) {
                   messageId = `chatcmpl-${data.message.id}`;
                 }
-                if (data.message?.usage?.input_tokens) {
-                  promptTokens = data.message.usage.input_tokens;
+                if (data.message?.usage) {
+                  promptTokens =
+                    (data.message.usage.input_tokens || 0) +
+                    (data.message.usage.cache_read_input_tokens || 0) +
+                    (data.message.usage.cache_creation_input_tokens || 0);
                 }
                 if (!roleSent) {
                   roleSent = true;
@@ -1779,7 +1803,10 @@ export async function transformAnthropicResponseToOpenAi(
         ? "length"
         : "stop";
 
-    const promptTokens = data.usage?.input_tokens || 0;
+    const promptTokens =
+      (data.usage?.input_tokens || 0) +
+      (data.usage?.cache_read_input_tokens || 0) +
+      (data.usage?.cache_creation_input_tokens || 0);
     const completionTokens = data.usage?.output_tokens || 0;
 
     const message: any = {

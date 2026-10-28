@@ -808,6 +808,7 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
+    let cachedTokens = 0;
     let toolCallCounter = 0;
     let hasToolCalls = false;
     let firstTokenTime: number | null = null;
@@ -937,6 +938,7 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
           promptTokens = data.response.usageMetadata.promptTokenCount || promptTokens;
           completionTokens = data.response.usageMetadata.candidatesTokenCount || completionTokens;
           totalTokens = data.response.usageMetadata.totalTokenCount || (promptTokens + completionTokens);
+          cachedTokens = data.response.usageMetadata.cachedContentTokenCount || cachedTokens;
         }
       } catch {}
     };
@@ -965,7 +967,12 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
           processCandidateLine(sseBuffer.trim(), controller);
           sseBuffer = "";
         }
-        // Send final chunk with correct finish_reason and [DONE]
+        const rtkSaved = params.tokensSavedRtk || 0;
+        const finalPrompt = (promptTokens || 15) + rtkSaved;
+        const finalCompletion = completionTokens || 25;
+        const finalTotal = (totalTokens || ((promptTokens || 15) + finalCompletion)) + rtkSaved;
+
+        // Send final chunk with correct finish_reason, usage, and [DONE]
         const finalChunk = {
           id: completionId,
           object: "chat.completion.chunk",
@@ -978,13 +985,23 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
               finish_reason: hasToolCalls ? "tool_calls" : "stop",
             },
           ],
+          usage: {
+            prompt_tokens: finalPrompt,
+            completion_tokens: finalCompletion,
+            total_tokens: finalTotal,
+            ...(cachedTokens > 0
+              ? {
+                  prompt_tokens_details: { cached_tokens: cachedTokens },
+                  cache_read_input_tokens: cachedTokens,
+                }
+              : {}),
+          },
         };
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
         controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
 
         const durationMs = Date.now() - startTime;
         const ttftMs = firstTokenTime ? firstTokenTime - startTime : undefined;
-        const rtkSaved = params.tokensSavedRtk || 0;
 
         adminLogger.done({
           durationMs,

@@ -220,6 +220,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           if (jsonBody.system) {
             charCount += extractContentChars(jsonBody.system);
           }
+          if (Array.isArray(jsonBody.tools)) {
+            charCount += JSON.stringify(jsonBody.tools).length;
+          }
           estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
         } else if (Array.isArray(jsonBody.input)) {
           let charCount = 0;
@@ -229,6 +232,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           }
           if (jsonBody.instructions) {
             charCount += extractContentChars(jsonBody.instructions);
+          }
+          if (Array.isArray(jsonBody.tools)) {
+            charCount += JSON.stringify(jsonBody.tools).length;
           }
           estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
         } else {
@@ -367,8 +373,9 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
 
       if (payloadModified) {
         rawBody = JSON.stringify(jsonBody);
+        const toolsTokens = Array.isArray(jsonBody.tools) ? Math.ceil(JSON.stringify(jsonBody.tools).length / 3.5) : 0;
         if (Array.isArray(jsonBody.messages)) {
-          estimatedPromptTokens = estimateMessagesTokens(jsonBody.messages, jsonBody.system);
+          estimatedPromptTokens = estimateMessagesTokens(jsonBody.messages, jsonBody.system) + toolsTokens;
         } else if (Array.isArray(jsonBody.input)) {
           let charCount = 0;
           for (const item of jsonBody.input) {
@@ -376,7 +383,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
             else if (item && typeof item === "object") charCount += calculateMessageChars(item);
           }
           if (jsonBody.instructions) charCount += extractContentChars(jsonBody.instructions);
-          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0));
+          estimatedPromptTokens = Math.max(1, Math.ceil(charCount / 3.0)) + toolsTokens;
         }
       }
     } catch {}
@@ -905,7 +912,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         if (subPath === "messages") {
-          return await transformChatResponseToAnthropic(codexResponse, { model: clientRequestedModel, clientWantsStream });
+          return await transformChatResponseToAnthropic(codexResponse, { model: clientRequestedModel, clientWantsStream, estimatedPromptTokens });
         }
 
         return codexResponse;
@@ -1296,7 +1303,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         if (subPath === "messages") {
-          return await transformChatResponseToAnthropic(finalAgResponse, { model: clientRequestedModel, clientWantsStream });
+          return await transformChatResponseToAnthropic(finalAgResponse, { model: clientRequestedModel, clientWantsStream, estimatedPromptTokens });
         } else if (subPath === "responses") {
           return await transformChatResponseToResponses(finalAgResponse, {
             model: clientRequestedModel,
@@ -1388,7 +1395,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         if (subPath === "messages") {
-          return await transformChatResponseToAnthropic(response, { model: clientRequestedModel, clientWantsStream });
+          return await transformChatResponseToAnthropic(response, { model: clientRequestedModel, clientWantsStream, estimatedPromptTokens });
         } else if (subPath === "responses") {
           return await transformChatResponseToResponses(response, {
             model: clientRequestedModel,
@@ -1671,7 +1678,28 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
               let modified = false;
               const newLines = lines.map((line) => {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed === "data: [DONE]") return line;
+                if (!trimmed) return line;
+                if (trimmed === "data: [DONE]") {
+                  if (promptTokens === 0) {
+                    const fallbackPrompt = Math.max(1, estimatedPromptTokens || 15);
+                    const fallbackComp = Math.max(1, Math.ceil(generatedChars / 3.5));
+                    const usageChunk = {
+                      id: `chatcmpl-usage-${Date.now()}`,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: clientRequestedModel,
+                      choices: [],
+                      usage: {
+                        prompt_tokens: fallbackPrompt,
+                        completion_tokens: fallbackComp,
+                        total_tokens: fallbackPrompt + fallbackComp,
+                      },
+                    };
+                    modified = true;
+                    return `data: ${JSON.stringify(usageChunk)}\n\ndata: [DONE]`;
+                  }
+                  return line;
+                }
 
                 const jsonStr = trimmed.startsWith("data: ") ? trimmed.slice(6) : trimmed;
                 try {
@@ -1832,7 +1860,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         if (subPath === "messages") {
-          return await transformChatResponseToAnthropic(streamResponse, { model: clientRequestedModel, clientWantsStream: true });
+          return await transformChatResponseToAnthropic(streamResponse, { model: clientRequestedModel, clientWantsStream: true, estimatedPromptTokens });
         } else if (subPath === "responses") {
           return await transformChatResponseToResponses(streamResponse, {
             model: clientRequestedModel,
@@ -1999,7 +2027,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
 
       if (subPath === "messages") {
-        return await transformChatResponseToAnthropic(successResponse, { model: clientRequestedModel, clientWantsStream: false });
+        return await transformChatResponseToAnthropic(successResponse, { model: clientRequestedModel, clientWantsStream: false, estimatedPromptTokens });
       } else if (subPath === "responses") {
         return await transformChatResponseToResponses(successResponse, {
           model: clientRequestedModel,
