@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401, markConnectionCooldown } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
-import { extractAnthropicText, fixMissingToolResponsesOpenAI } from "./anthropic";
+import { extractAnthropicText, fixMissingToolResponsesOpenAI, fixOrphanedToolResponsesOpenAI } from "./anthropic";
 
 export const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 export const CODEX_CLIENT_VERSION = "0.200.0";
@@ -232,18 +232,44 @@ function formatCodexPayload(parsedBody: any, targetModel: string) {
 
     // Ensure tool call integrity in windowed slice
     fixMissingToolResponsesOpenAI(activeConv);
+    fixOrphanedToolResponsesOpenAI(activeConv);
+  } else {
+    // Also protect un-windowed turns from orphaned tool calls/responses
+    fixMissingToolResponsesOpenAI(activeConv);
+    fixOrphanedToolResponsesOpenAI(activeConv);
+  }
+
+  // Track valid assistant function_call call_ids in the active conversation
+  const emittedCallIds = new Set<string>();
+  for (const m of activeConv) {
+    if (m && m.role === "assistant" && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        if (tc && tc.id) emittedCallIds.add(tc.id);
+      }
+    }
   }
 
   // 3. Convert active conversation turns to Codex input format
   for (const m of activeConv) {
     const content = m.content || "";
     if (m.role === "tool") {
-      const callId = m.tool_call_id || m.id || `call_${Date.now()}`;
-      input.push({
-        type: "function_call_output",
-        call_id: callId,
-        output: content,
-      });
+      const callId = m.tool_call_id || m.id;
+      if (callId && emittedCallIds.has(callId)) {
+        input.push({
+          type: "function_call_output",
+          call_id: callId,
+          output: content,
+        });
+      } else {
+        // Orphaned tool response (no matching preceding assistant function_call).
+        // OpenAI Codex will reject with: "No tool call found for function call output with call_id..."
+        // Downgrade cleanly to user message so OpenAI Codex accepts the request without failing!
+        const toolLabel = callId ? `[Tool Output: ${callId}]` : "[Tool Output]";
+        input.push({
+          role: "user",
+          content: `${toolLabel}\n${content || "(empty result)"}`,
+        });
+      }
     } else if (m.role === "assistant") {
       if (content.trim()) {
         input.push({
@@ -410,18 +436,51 @@ async function peekSseTransientError(response: Response): Promise<{
       const errorHit = CODEX_SSE_ERROR_PATTERNS.find((p) => lowerText.includes(p));
       if (errorHit) {
         matched = errorHit;
-        accountFallback = true;
         let errMsg: string | null = null;
-        try {
-          const m = text.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-          if (m) errMsg = JSON.parse(`"${m[1]}"`);
-        } catch {}
+        const lines = text.split("\n");
+        for (const l of lines) {
+          const trimmed = l.trim();
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const obj = JSON.parse(trimmed.slice(6));
+              const candidate =
+                obj.error?.message ||
+                obj.message ||
+                obj.response?.status_details?.error?.message ||
+                obj.detail;
+              if (typeof candidate === "string" && candidate.trim()) {
+                errMsg = candidate.trim();
+                break;
+              }
+            } catch {}
+          }
+        }
+        if (!errMsg) {
+          try {
+            const m = text.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+            if (m) errMsg = JSON.parse(`"${m[1]}"`);
+          } catch {}
+        }
+
+        const lowerMsg = (errMsg || lowerText).toLowerCase();
+        const isClientError =
+          lowerMsg.includes("tool call") ||
+          lowerMsg.includes("function call") ||
+          lowerMsg.includes("invalid_request") ||
+          lowerMsg.includes("context_length") ||
+          lowerMsg.includes("maximum context") ||
+          lowerMsg.includes("content_policy") ||
+          lowerMsg.includes("unrecognized parameter") ||
+          lowerMsg.includes("extra inputs are not permitted");
+
+        const isAccountFallback = !isClientError;
+
         try { await reader.cancel(); } catch {}
         try { reader.releaseLock(); } catch {}
         return {
           matched,
           message: errMsg || (lowerText.includes("capacity") ? "Selected model is at capacity. Please try a different model." : "Our servers are currently overloaded. Please try again later."),
-          accountFallback: true,
+          accountFallback: isAccountFallback,
           replacementBody: null,
         };
       }
@@ -541,7 +600,7 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       latencyMs: Date.now() - startTime,
       statusCode: response.status,
       isFailover: false,
-      failoverReason: `Codex upstream HTTP ${response.status}: ${errMsg.slice(0, 100)}`,
+      failoverReason: `Codex upstream HTTP ${response.status}: ${errMsg}`,
     }).catch(() => {});
 
     return new Response(
@@ -567,9 +626,15 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
   // Peek SSE stream for capacity / transient errors inside 200 OK
   const peek = await peekSseTransientError(response);
   if (peek.matched) {
-    if (params.connectionId) {
+    const isClientError = !peek.accountFallback;
+    const finalStatus = isClientError ? 400 : 503;
+
+    // Only cooldown connection if it was truly a server/account capacity issue, not a bad payload
+    if (!isClientError && params.connectionId) {
       markConnectionCooldown(params.connectionId, 60);
     }
+
+    const fullErrorMsg = peek.message || `Codex SSE error: ${peek.matched}`;
 
     logUpstreamRequest({
       connectionId: params.connectionId,
@@ -581,27 +646,27 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
       reasoningEffort: params.reasoningEffort,
       rawHeaders: params.rawHeaders,
       rawBody: params.parsedBody || params.rawBody,
-      rawResponse: peek.message || "Capacity/overload",
+      rawResponse: fullErrorMsg,
       promptTokens: 15,
       completionTokens: 0,
       totalTokens: 15,
       latencyMs: Date.now() - startTime,
-      statusCode: 503,
-      isFailover: true,
-      failoverReason: `Codex SSE transient error: ${peek.matched}`,
+      statusCode: finalStatus,
+      isFailover: peek.accountFallback,
+      failoverReason: fullErrorMsg,
     }).catch(() => {});
 
     return new Response(
       JSON.stringify({
         error: {
-          message: peek.message || "Selected model is at capacity. Please try a different model.",
-          type: "server_error",
-          code: "service_unavailable",
+          message: `[OpenAI Codex] ${fullErrorMsg}`,
+          type: isClientError ? "invalid_request_error" : "server_error",
+          code: isClientError ? "invalid_request" : "service_unavailable",
           account_fallback: peek.accountFallback,
         },
       }),
       {
-        status: 503,
+        status: finalStatus,
         headers: {
           "Content-Type": "application/json",
           "X-Aidev-Account-Fallback": peek.accountFallback ? "true" : "false",
@@ -1092,6 +1157,44 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     formattedInput = windowed;
   }
 
+  // Sanitize orphaned tool responses in formattedInput (prevent OpenAI rejection: No tool call found...)
+  const directEmittedCallIds = new Set<string>();
+  for (const item of formattedInput) {
+    if (item) {
+      if (item.type === "function_call" && item.call_id) {
+        directEmittedCallIds.add(item.call_id);
+      } else if (item.role === "assistant" && Array.isArray(item.tool_calls)) {
+        for (const tc of item.tool_calls) {
+          if (tc && tc.id) directEmittedCallIds.add(tc.id);
+        }
+      }
+    }
+  }
+
+  formattedInput = formattedInput.map((item: any) => {
+    if (!item) return item;
+    if (item.type === "function_call_output") {
+      const callId = item.call_id;
+      if (!callId || !directEmittedCallIds.has(callId)) {
+        const toolLabel = callId ? `[Tool Output: ${callId}]` : "[Tool Output]";
+        return {
+          role: "user",
+          content: `${toolLabel}\n${item.output || "(empty result)"}`,
+        };
+      }
+    } else if (item.role === "tool") {
+      const callId = item.tool_call_id || item.id;
+      if (!callId || !directEmittedCallIds.has(callId)) {
+        const toolLabel = callId ? `[Tool Output: ${callId}]` : "[Tool Output]";
+        return {
+          role: "user",
+          content: `${toolLabel}\n${item.content || "(empty result)"}`,
+        };
+      }
+    }
+    return item;
+  });
+
   // Ensure formattedInput does not end with assistant or function_call
   const lastDirect = formattedInput[formattedInput.length - 1];
   if (lastDirect) {
@@ -1262,7 +1365,7 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       latencyMs: Date.now() - startTime,
       statusCode: response.status,
       isFailover: false,
-      failoverReason: `Codex Responses HTTP ${response.status}: ${errMsg.slice(0, 100)}`,
+      failoverReason: `Codex Responses HTTP ${response.status}: ${errMsg}`,
     }).catch(() => {});
 
     return new Response(
@@ -1288,9 +1391,15 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
   // Peek SSE stream for capacity / transient errors inside 200 OK
   const peek = await peekSseTransientError(response);
   if (peek.matched) {
-    if (params.connectionId) {
+    const isClientError = !peek.accountFallback;
+    const finalStatus = isClientError ? 400 : 503;
+
+    // Only cooldown connection if it was truly a server/account capacity issue, not a bad payload
+    if (!isClientError && params.connectionId) {
       markConnectionCooldown(params.connectionId, 60);
     }
+
+    const fullErrorMsg = peek.message || `Codex SSE error: ${peek.matched}`;
 
     logUpstreamRequest({
       connectionId: params.connectionId,
@@ -1302,26 +1411,27 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
       reasoningEffort: params.reasoningEffort,
       rawHeaders: params.rawHeaders,
       rawBody: params.parsedBody || params.rawBody,
-      rawResponse: peek.message || "Capacity/overload",
+      rawResponse: fullErrorMsg,
       promptTokens: 15,
       completionTokens: 0,
       totalTokens: 15,
       latencyMs: Date.now() - startTime,
-      statusCode: 503,
-      isFailover: true,
-      failoverReason: `Codex SSE transient error: ${peek.matched}`,
+      statusCode: finalStatus,
+      isFailover: peek.accountFallback,
+      failoverReason: fullErrorMsg,
     }).catch(() => {});
 
     return new Response(
       JSON.stringify({
         error: {
-          message: peek.message || "Selected model is at capacity. Please try a different model.",
-          type: "server_error",
-          code: "service_unavailable",
+          message: `[OpenAI Codex Responses] ${fullErrorMsg}`,
+          type: isClientError ? "invalid_request_error" : "server_error",
+          code: isClientError ? "invalid_request" : "service_unavailable",
+          account_fallback: peek.accountFallback,
         },
       }),
       {
-        status: 503,
+        status: finalStatus,
         headers: {
           "Content-Type": "application/json",
           "X-Aidev-Account-Fallback": peek.accountFallback ? "true" : "false",

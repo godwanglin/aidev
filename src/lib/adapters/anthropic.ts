@@ -72,6 +72,36 @@ export function fixMissingToolResponsesOpenAI(messages: any[]): void {
 }
 
 /**
+ * Ensures that any 'tool' message has a preceding assistant turn with matching tool_calls.
+ * If orphaned tool messages exist (due to context truncation, timeout, or interrupted session),
+ * they are safely downgraded to 'user' turns to prevent OpenAI / Codex HTTP 400 errors:
+ * "No tool call found for function call output with call_id..."
+ */
+export function fixOrphanedToolResponsesOpenAI(messages: any[]): void {
+  const validCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m && m.role === "assistant" && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        if (tc && tc.id) validCallIds.add(tc.id);
+      }
+    }
+  }
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m && m.role === "tool") {
+      const id = m.tool_call_id;
+      if (!id || !validCallIds.has(id)) {
+        messages[i] = {
+          role: "user",
+          content: `[Tool Output${id ? ` (${id})` : ""}]:\n${typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")}`,
+        };
+      }
+    }
+  }
+}
+
+/**
  * Converts Anthropic tools schema into standard OpenAI function tools format.
  */
 export function convertAnthropicToolsToOpenAi(tools?: any[]): any[] | undefined {
@@ -274,6 +304,8 @@ export function convertAnthropicToOpenAiMessages(parsedBody: any): any[] {
 
   // Ensure every tool_call in an assistant message has a matching tool response
   fixMissingToolResponsesOpenAI(messages);
+  // Ensure every tool response has a valid preceding tool_call
+  fixOrphanedToolResponsesOpenAI(messages);
 
   // If the conversation ends with an assistant message (e.g. assistant prefill in Anthropic),
   // OpenAI APIs require a user prompt to respond to, otherwise they return empty content or fail.

@@ -3406,10 +3406,25 @@ print(response.choices[0].message.content)`,
                 {inspectEvent.isFailover && (
                   <div className="banner-alert badge-amber" style={{ margin: 0 }}>
                     <Zap size={15} className="text-amber shrink-0" />
-                    <div className="banner-text">
+                    <div className="banner-text" style={{ flex: 1, minWidth: 0 }}>
                       <strong style={{ fontSize: "12px" }}>Automated Failover Triggered</strong>
-                      <p style={{ fontSize: "11.5px", margin: "2px 0 0" }}>
+                      <p style={{ fontSize: "11.5px", margin: "2px 0 0", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
                         {inspectEvent.failoverReason || "Primary connection failed or rate limited; successfully rerouted to secondary."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error Alert (if request failed without failover) */}
+                {inspectEvent.statusCode >= 400 && !inspectEvent.isFailover && (
+                  <div className="banner-alert badge-red" style={{ margin: 0, border: "1px solid #fecaca", background: "#fef2f2" }}>
+                    <AlertTriangle size={15} className="text-red-500 shrink-0" />
+                    <div className="banner-text" style={{ flex: 1, minWidth: 0 }}>
+                      <strong style={{ fontSize: "12px", color: "#991b1b" }}>
+                        {inspectEvent.statusCode >= 500 ? "Upstream Provider Error" : "Client / Request Error"} (HTTP {inspectEvent.statusCode})
+                      </strong>
+                      <p style={{ fontSize: "11.5px", margin: "3px 0 0", color: "#b91c1c", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+                        {inspectEvent.failoverReason || inspectEvent.rawResponse || "Request failed at upstream provider."}
                       </p>
                     </div>
                   </div>

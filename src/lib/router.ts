@@ -703,7 +703,7 @@ export async function logUpstreamRequest(data: {
     rawHeaders: rawHeadersStr,
     rawBody: rawBodyStr,
     rawResponse: rawResponseStr,
-    failoverReason: data.failoverReason ? String(data.failoverReason).slice(0, 180) : null,
+    failoverReason: data.failoverReason ? String(data.failoverReason).slice(0, 4000) : null,
   };
 
   try {

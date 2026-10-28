@@ -268,7 +268,7 @@ class AdminLogger {
  * Extracts a human-readable error message from raw provider response body or error object.
  * Handles OpenAI, DeepSeek, Anthropic, Gemini, Ollama, FastAPI, and HTML error pages.
  */
-export function extractProviderErrorMessage(raw: string | any, maxLength = 250): string {
+export function extractProviderErrorMessage(raw: string | any, maxLength = 2000): string {
   if (!raw) return "";
   if (typeof raw === "object") {
     return parseErrorObj(raw, maxLength);
@@ -299,7 +299,7 @@ export function extractProviderErrorMessage(raw: string | any, maxLength = 250):
   return text.slice(0, maxLength);
 }
 
-function parseErrorObj(obj: any, maxLength = 250): string {
+function parseErrorObj(obj: any, maxLength = 2000): string {
   if (!obj) return "";
   if (Array.isArray(obj)) {
     return parseErrorObj(obj[0], maxLength);
