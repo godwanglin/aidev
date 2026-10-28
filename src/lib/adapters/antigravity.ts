@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401 } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
+import { createKeepAliveTransform, SSE_HEADERS } from "@/sse/utils/keepalive";
 
 export const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
 export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
@@ -944,9 +945,42 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     };
 
     let accumulatedRawResponse = "";
+    let initialThinkingPingTimer: ReturnType<typeof setTimeout> | null = null;
 
     const transformStream = new TransformStream({
+      start(controller) {
+        if (thinkingBudget > 0) {
+          initialThinkingPingTimer = setTimeout(() => {
+            if (!firstTokenTime) {
+              try {
+                const pingChunk = {
+                  id: completionId,
+                  object: "chat.completion.chunk",
+                  created,
+                  model: responseModel,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {
+                        role: "assistant",
+                        reasoning_content: "\n",
+                        reasoning: "\n",
+                      },
+                      finish_reason: null,
+                    },
+                  ],
+                };
+                controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(pingChunk)}\n\n`));
+              } catch {}
+            }
+          }, 8000);
+        }
+      },
       transform(chunk, controller) {
+        if (initialThinkingPingTimer) {
+          clearTimeout(initialThinkingPingTimer);
+          initialThinkingPingTimer = null;
+        }
         const decoded = new TextDecoder().decode(chunk);
         if (accumulatedRawResponse.length < 50000) {
           accumulatedRawResponse += decoded;
@@ -963,6 +997,10 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
         }
       },
       flush(controller) {
+        if (initialThinkingPingTimer) {
+          clearTimeout(initialThinkingPingTimer);
+          initialThinkingPingTimer = null;
+        }
         if (sseBuffer.trim()) {
           processCandidateLine(sseBuffer.trim(), controller);
           sseBuffer = "";
@@ -1052,13 +1090,10 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
       },
     });
 
-    return new Response(upstreamBody.pipeThrough(transformStream), {
+    const pipedStream = upstreamBody.pipeThrough(transformStream).pipeThrough(createKeepAliveTransform(10000));
+    return new Response(pipedStream, {
       status: 200,
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        "Connection": "keep-alive",
-      },
+      headers: SSE_HEADERS,
     });
   }
 

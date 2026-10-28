@@ -969,9 +969,10 @@ export async function dispatchCodexChat(params: CodexDispatchParams): Promise<Re
     return new Response(upstreamBody.pipeThrough(transformStream), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }
@@ -1608,9 +1609,10 @@ export async function dispatchCodexResponsesDirect(params: CodexDispatchParams):
     return new Response(upstreamBody.pipeThrough(transformStream), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }

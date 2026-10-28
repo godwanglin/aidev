@@ -884,8 +884,9 @@ export async function transformChatResponseToAnthropic(
       status: 200,
       headers: {
         "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }
@@ -1763,8 +1764,9 @@ export async function transformAnthropicResponseToOpenAi(
       status: 200,
       headers: {
         "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }

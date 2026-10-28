@@ -804,9 +804,10 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     return new Response(upstreamBody.pipeThrough(transformStream), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }

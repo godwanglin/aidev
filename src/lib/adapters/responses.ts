@@ -745,9 +745,10 @@ export async function dispatchResponsesCrossProvider(params: ResponsesDispatchPa
     return new Response(upstreamBody.pipeThrough(transformStream), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }
@@ -2138,9 +2139,10 @@ export async function transformChatResponseToResponses(
     return new Response(chatResponse.body.pipeThrough(transformStream), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform, must-revalidate",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }
