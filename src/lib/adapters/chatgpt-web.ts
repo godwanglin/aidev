@@ -467,6 +467,76 @@ export function formatChatGptWebPayload(parsedBody: any, targetModel: string) {
 }
 
 /**
+ * Strips faux UI tags (<badge>...</badge>, <icon.../>) outside code blocks.
+ */
+export function stripFauxUiTags(text: string): string {
+  if (!text) return "";
+  const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g);
+  return parts
+    .map((part, i) => {
+      // Code blocks or inline code - preserve completely
+      if (i % 2 === 1) return part;
+      return part
+        .replace(/<badge[\s\S]*?<\/badge>/gi, "")
+        .replace(/<badge[^>]*\/>/gi, "")
+        .replace(/<icon[^>]*\/?>/gi, "");
+    })
+    .join("");
+}
+
+/**
+ * Decomposes cumulative ChatGPT Web text into:
+ * - reasoningText: text accumulated inside <thought>/<thinking>/<think>
+ * - inThinking: whether a thought tag is currently open (unclosed)
+ * - proseText: clean text outside thought and tool calls, with faux UI tags stripped
+ */
+export function parseChatGptWebStreamText(fullText: string) {
+  let reasoningText = "";
+  let inThinking = false;
+
+  // 1. Extract thought / thinking blocks
+  const thoughtTagRegex = /<[\s|｜]*(?:thought|thinking|think)[\s|｜]*>([\s\S]*?)(?:<\/[\s|｜]*(?:thought|thinking|think)[\s|｜]*>|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = thoughtTagRegex.exec(fullText)) !== null) {
+    reasoningText += (reasoningText ? "\n" : "") + match[1];
+    if (!/<\/[\s|｜]*(?:thought|thinking|think)[\s|｜]*>$/i.test(match[0])) {
+      inThinking = true;
+    }
+  }
+
+  // 2. Remove thought blocks from text
+  const nonThought = fullText.replace(thoughtTagRegex, "");
+
+  // 3. Remove tool call blocks from non-thought text
+  const toolMarkupRegex = /<[\s|｜]*(?:DSML[\s|｜]*(?:calls|tool_calls)|function_calls?|tool_calls?|function_call|tool_call)[\s|｜]*>([\s\S]*?)(?:<\/[\s|｜]*(?:DSML[\s|｜]*(?:calls|tool_calls)|function_calls?|tool_calls?|function_call|tool_call)[\s|｜]*>|$)/gi;
+  const bareInvokeRegex = /<[\s|｜]*(?:DSML[\s|｜]*)?invoke\b[\s\S]*?(?:<\/[\s|｜]*(?:DSML[\s|｜]*)?invoke[\s|｜]*>|$)/gi;
+  const dsSpecialRegex = /<[｜|]tool call begin[｜|]>[\s\S]*?(?:<[｜|]tool call end[｜|]>|$)/gi;
+
+  let prose = nonThought
+    .replace(toolMarkupRegex, "")
+    .replace(bareInvokeRegex, "")
+    .replace(dsSpecialRegex, "");
+
+  // 4. Strip faux UI tags outside code blocks
+  prose = stripFauxUiTags(prose);
+
+  // If in thinking mode, hold back trailing partial closing tag in reasoningText
+  let safeReasoning = reasoningText;
+  if (inThinking) {
+    const pendingClosing = reasoningText.match(/<\/?(?:thought|thinking|think)?$/i);
+    if (pendingClosing) {
+      safeReasoning = reasoningText.slice(0, reasoningText.length - pendingClosing[0].length);
+    }
+  }
+
+  return {
+    reasoningText: safeReasoning,
+    inThinking,
+    proseText: prose,
+  };
+}
+
+/**
  * Dispatches a Chat Completion request to ChatGPT Web (/backend-api/conversation)
  * and streams back OpenAI-compatible Chat Completion SSE or returns standard JSON.
  */
@@ -614,9 +684,10 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     let promptTokens = Math.max(15, Math.ceil(params.rawBody.length / 4));
     let completionTokens = 0;
     let accumulatedText = "";
-    let lastEmittedLength = 0;
-    let buffer = "";
+    let emittedReasoningLength = 0;
+    let emittedProseLength = 0;
     let emittedToolCallsCount = 0;
+    let buffer = "";
 
     const transformStream = new TransformStream({
       transform(chunk, controller) {
@@ -633,7 +704,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           try {
             const data = JSON.parse(raw);
 
-            // In ChatGPT Web conversation endpoint, only stream messages from assistant
+            // In ChatGPT Web conversation endpoint, stream messages from assistant
             if (
               data.message?.author?.role === "assistant" &&
               data.message?.content?.parts &&
@@ -643,18 +714,35 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
               if (typeof currentFullText === "string") {
                 accumulatedText = currentFullText;
 
-                // Check if text contains tool invocation
-                const toolCallTagIdx = currentFullText.search(/<tool_call|<function_call|<invoke/i);
+                const parsed = parseChatGptWebStreamText(currentFullText);
 
-                if (toolCallTagIdx === -1) {
-                  // No tool call markup detected yet.
-                  // Hold back trailing partial tag (e.g. "<" or "<tool") if present
-                  const pendingTagMatch = currentFullText.match(/<[a-zA-Z0-9_:｜|]*$/);
-                  const safeLength = pendingTagMatch ? currentFullText.length - pendingTagMatch[0].length : currentFullText.length;
-                  if (safeLength > lastEmittedLength) {
-                    const deltaText = currentFullText.slice(lastEmittedLength, safeLength);
-                    lastEmittedLength = safeLength;
+                // 1. Emit reasoning/thought delta if present
+                if (parsed.reasoningText.length > emittedReasoningLength) {
+                  const deltaReasoning = parsed.reasoningText.slice(emittedReasoningLength);
+                  emittedReasoningLength = parsed.reasoningText.length;
 
+                  const chunkPayload = {
+                    id: completionId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: clientRequestedModel,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { reasoning_content: deltaReasoning },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+                }
+
+                // 2. Extract and emit tool calls if present
+                const extracted = extractToolCallsFromText(currentFullText);
+                if (extracted.length > emittedToolCallsCount) {
+                  for (let i = emittedToolCallsCount; i < extracted.length; i++) {
+                    const tc = extracted[i];
+                    const callId = `call_${Date.now()}_${i}`;
                     const chunkPayload = {
                       id: completionId,
                       object: "chat.completion.chunk",
@@ -663,72 +751,53 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
                       choices: [
                         {
                           index: 0,
-                          delta: { content: deltaText },
-                          finish_reason: null,
-                        },
-                      ],
-                    };
-                    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
-                  }
-                } else {
-                  // Tool call markup detected!
-                  // 1. Emit any pre-tool commentary text
-                  if (toolCallTagIdx > lastEmittedLength) {
-                    const deltaText = currentFullText.slice(lastEmittedLength, toolCallTagIdx);
-                    lastEmittedLength = toolCallTagIdx;
-
-                    const chunkPayload = {
-                      id: completionId,
-                      object: "chat.completion.chunk",
-                      created,
-                      model: clientRequestedModel,
-                      choices: [
-                        {
-                          index: 0,
-                          delta: { content: deltaText },
-                          finish_reason: null,
-                        },
-                      ],
-                    };
-                    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
-                  }
-
-                  // 2. Try extracting completed tool calls from the markup
-                  const extracted = extractToolCallsFromText(currentFullText);
-                  if (extracted.length > emittedToolCallsCount) {
-                    for (let i = emittedToolCallsCount; i < extracted.length; i++) {
-                      const tc = extracted[i];
-                      const callId = `call_${Date.now()}_${i}`;
-                      const chunk = {
-                        id: completionId,
-                        object: "chat.completion.chunk",
-                        created,
-                        model: clientRequestedModel,
-                        choices: [
-                          {
-                            index: 0,
-                            delta: {
-                              role: "assistant",
-                              tool_calls: [
-                                {
-                                  index: i,
-                                  id: callId,
-                                  type: "function",
-                                  function: {
-                                    name: tc.name,
-                                    arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
-                                  },
+                          delta: {
+                            role: "assistant",
+                            tool_calls: [
+                              {
+                                index: i,
+                                id: callId,
+                                type: "function",
+                                function: {
+                                  name: tc.name,
+                                  arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
                                 },
-                              ],
-                            },
-                            finish_reason: null,
+                              },
+                            ],
                           },
-                        ],
-                      };
-                      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
-                    }
-                    emittedToolCallsCount = extracted.length;
+                          finish_reason: null,
+                        },
+                      ],
+                    };
+                    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
                   }
+                  emittedToolCallsCount = extracted.length;
+                }
+
+                // 3. Emit clean prose delta (holding back trailing partial markup tag if present)
+                const pendingTagMatch = parsed.proseText.match(/<[a-zA-Z0-9_\-:|｜]*$/);
+                const safeProseLength = pendingTagMatch
+                  ? parsed.proseText.length - pendingTagMatch[0].length
+                  : parsed.proseText.length;
+
+                if (safeProseLength > emittedProseLength) {
+                  const deltaText = parsed.proseText.slice(emittedProseLength, safeProseLength);
+                  emittedProseLength = safeProseLength;
+
+                  const chunkPayload = {
+                    id: completionId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: clientRequestedModel,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: deltaText },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
                 }
               }
             }
@@ -770,7 +839,29 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
         }
       },
       flush(controller) {
-        // Final check: Extract any tool calls from accumulatedText
+        const parsed = parseChatGptWebStreamText(accumulatedText);
+
+        // 1. Flush any remaining reasoning
+        if (parsed.reasoningText.length > emittedReasoningLength) {
+          const deltaReasoning = parsed.reasoningText.slice(emittedReasoningLength);
+          emittedReasoningLength = parsed.reasoningText.length;
+          const chunkPayload = {
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: clientRequestedModel,
+            choices: [
+              {
+                index: 0,
+                delta: { reasoning_content: deltaReasoning },
+                finish_reason: null,
+              },
+            ],
+          };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+        }
+
+        // 2. Final check: Extract any tool calls from accumulatedText
         const finalExtracted = extractToolCallsFromText(accumulatedText);
         if (finalExtracted.length > emittedToolCallsCount) {
           for (let i = emittedToolCallsCount; i < finalExtracted.length; i++) {
@@ -807,9 +898,10 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           emittedToolCallsCount = finalExtracted.length;
         }
 
-        // If no tool calls were emitted and there's remaining held text, flush it
-        if (emittedToolCallsCount === 0 && accumulatedText.length > lastEmittedLength) {
-          const remainingText = accumulatedText.slice(lastEmittedLength);
+        // 3. Flush any remaining prose
+        if (parsed.proseText.length > emittedProseLength) {
+          const remainingText = parsed.proseText.slice(emittedProseLength);
+          emittedProseLength = parsed.proseText.length;
           if (remainingText) {
             const chunk = {
               id: completionId,
@@ -828,7 +920,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           }
         }
 
-        completionTokens = Math.max(1, Math.ceil(accumulatedText.length / 4));
+        completionTokens = Math.max(1, Math.ceil((parsed.proseText.length + parsed.reasoningText.length) / 4));
         const durationMs = Date.now() - startTime;
         const finishReason = emittedToolCallsCount > 0 ? "tool_calls" : "stop";
         const finalChunk = {
@@ -862,7 +954,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
           reasoningEffort: params.reasoningEffort || null,
           rawHeaders: params.rawHeaders,
           rawBody: params.parsedBody || params.rawBody,
-          rawResponse: accumulatedText,
+          rawResponse: parsed.proseText || accumulatedText,
           promptTokens,
           completionTokens,
           totalTokens: promptTokens + completionTokens,
@@ -990,8 +1082,12 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     );
   }
 
+  const parsed = parseChatGptWebStreamText(accumulatedText);
+  const extractedToolCalls = extractToolCallsFromText(accumulatedText);
+  const hasExtractedTools = extractedToolCalls.length > 0;
+
   const promptTokens = Math.max(15, Math.ceil(params.rawBody.length / 4));
-  const completionTokens = Math.max(1, Math.ceil(accumulatedText.length / 4));
+  const completionTokens = Math.max(1, Math.ceil((parsed.proseText.length + parsed.reasoningText.length) / 4));
   const totalTokens = promptTokens + completionTokens;
   const durationMs = Date.now() - startTime;
 
@@ -1005,7 +1101,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     reasoningEffort: params.reasoningEffort || null,
     rawHeaders: params.rawHeaders,
     rawBody: params.parsedBody || params.rawBody,
-    rawResponse: accumulatedText,
+    rawResponse: parsed.proseText || accumulatedText,
     promptTokens,
     completionTokens,
     totalTokens,
@@ -1038,16 +1134,9 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     account: "ChatGPT Web",
   });
 
-  const extractedToolCalls = extractToolCallsFromText(accumulatedText);
-  const hasExtractedTools = extractedToolCalls.length > 0;
-
-  let finalContent: string | null = null;
-  let finalToolCalls: any[] | undefined = undefined;
   const finishReason = hasExtractedTools ? "tool_calls" : "stop";
-
+  let finalToolCalls: any[] | undefined = undefined;
   if (hasExtractedTools) {
-    const cleanText = cleanToolMarkupFromText(accumulatedText);
-    finalContent = cleanText || null;
     finalToolCalls = extractedToolCalls.map((tc, idx) => ({
       id: `call_${Date.now()}_${idx}`,
       type: "function",
@@ -1056,9 +1145,14 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
         arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
       },
     }));
-  } else {
-    finalContent = accumulatedText;
   }
+
+  const assistantMessage: any = {
+    role: "assistant",
+    content: parsed.proseText.trim() || (hasExtractedTools ? null : ""),
+    ...(parsed.reasoningText.trim() ? { reasoning_content: parsed.reasoningText.trim() } : {}),
+    ...(finalToolCalls ? { tool_calls: finalToolCalls } : {}),
+  };
 
   return NextResponse.json({
     id: completionId,
@@ -1068,11 +1162,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
     choices: [
       {
         index: 0,
-        message: {
-          role: "assistant",
-          content: finalContent,
-          ...(finalToolCalls ? { tool_calls: finalToolCalls } : {}),
-        },
+        message: assistantMessage,
         finish_reason: finishReason,
       },
     ],
