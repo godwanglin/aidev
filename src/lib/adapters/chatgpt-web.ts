@@ -733,25 +733,40 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
               }
             }
 
-            if (data.error && !accumulatedText) {
-              const errContent = typeof data.error === "string" ? data.error : data.error.message || "Usage limit reached";
-              accumulatedText = `[ChatGPT Web]: ${errContent}`;
-              const chunkPayload = {
-                id: completionId,
-                object: "chat.completion.chunk",
-                created,
-                model: clientRequestedModel,
-                choices: [
-                  {
-                    index: 0,
-                    delta: { content: accumulatedText },
-                    finish_reason: null,
-                  },
-                ],
-              };
-              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunkPayload)}\n\n`));
+            if (data.error || data.message?.status === "failed" || data.message?.error) {
+              const errContent = typeof data.error === "string"
+                ? data.error
+                : data.error?.message || (typeof data.message?.error === "string" ? data.message.error : data.message?.error?.message) || "Usage limit reached";
+
+              logUpstreamRequest({
+                connectionId: params.connectionId,
+                provider: "CHATGPT_WEB",
+                model: logModel,
+                clientApiKeyId: params.clientApiKeyId,
+                clientUserId: params.clientUserId,
+                clientUserEmail: params.clientUserEmail,
+                reasoningEffort: params.reasoningEffort || null,
+                rawHeaders: params.rawHeaders,
+                rawBody: params.parsedBody || params.rawBody,
+                rawResponse: `Error: ${errContent}`,
+                promptTokens,
+                completionTokens: 0,
+                totalTokens: promptTokens,
+                latencyMs: Date.now() - startTime,
+                statusCode: 429,
+                isFailover: true,
+                failoverReason: `ChatGPT Web quota/rate limit: ${errContent}`,
+              }).catch(() => {});
+
+              // Cut off stream cleanly as error so client does not treat it as valid assistant content
+              controller.error(new Error(`[ChatGPT Web] ${errContent}`));
+              return;
             }
-          } catch {}
+          } catch (e: any) {
+            if (e?.message?.startsWith("[ChatGPT Web]")) {
+              throw e;
+            }
+          }
         }
       },
       flush(controller) {
@@ -899,6 +914,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
   let accumulatedText = "";
   let buffer = "";
 
+  let streamError: string | null = null;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -914,6 +930,13 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
 
       try {
         const data = JSON.parse(raw);
+        if (data.error || data.message?.status === "failed" || data.message?.error) {
+          streamError = typeof data.error === "string"
+            ? data.error
+            : data.error?.message || (typeof data.message?.error === "string" ? data.message.error : data.message?.error?.message) || "Usage limit reached";
+          break;
+        }
+
         if (
           data.message?.author?.role === "assistant" &&
           data.message?.content?.parts &&
@@ -924,13 +947,47 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
             accumulatedText = currentFullText;
           }
         }
-
-        if (data.error && !accumulatedText) {
-          const errContent = typeof data.error === "string" ? data.error : data.error.message || "Usage limit reached";
-          accumulatedText = `[ChatGPT Web]: ${errContent}`;
-        }
       } catch {}
     }
+    if (streamError) break;
+  }
+
+  if (streamError) {
+    const durationMs = Date.now() - startTime;
+    const promptTokens = Math.max(15, Math.ceil(params.rawBody.length / 4));
+    logUpstreamRequest({
+      connectionId: params.connectionId,
+      provider: "CHATGPT_WEB",
+      model: logModel,
+      clientApiKeyId: params.clientApiKeyId,
+      clientUserId: params.clientUserId,
+      clientUserEmail: params.clientUserEmail,
+      reasoningEffort: params.reasoningEffort || null,
+      rawHeaders: params.rawHeaders,
+      rawBody: params.parsedBody || params.rawBody,
+      rawResponse: `Error: ${streamError}`,
+      promptTokens,
+      completionTokens: 0,
+      totalTokens: promptTokens,
+      latencyMs: durationMs,
+      statusCode: 429,
+      isFailover: true,
+      failoverReason: `ChatGPT Web quota/rate limit: ${streamError}`,
+    }).catch(() => {});
+
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `[ChatGPT Web] ${streamError}`,
+          type: "rate_limit_error",
+          code: 429,
+        },
+      }),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   const promptTokens = Math.max(15, Math.ceil(params.rawBody.length / 4));
