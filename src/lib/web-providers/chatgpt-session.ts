@@ -11,6 +11,7 @@ export interface ParsedCookieResult {
 export interface ChatGptSessionResult {
   success: boolean;
   accessToken?: string;
+  accountId?: string;
   user?: {
     id: string;
     name: string;
@@ -217,12 +218,17 @@ export async function verifyAndFetchChatGptSession(
     const res = await fetch("https://chatgpt.com/api/auth/session", {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
         Accept: "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Ch-Ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-Ch-Ua": '"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
+        Originator: "Codex Browser",
+        "X-Openai-Web-Frontend": "codex_webview",
+        "Oai-Language": "id-ID",
+        "Oai-Device-Id": oaiDid,
+        "Oai-Did": oaiDid,
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
@@ -256,9 +262,24 @@ export async function verifyAndFetchChatGptSession(
       };
     }
 
+    let accountId = data.account?.id;
+    if (!accountId && typeof data.accessToken === "string") {
+      try {
+        const parts = data.accessToken.split(".");
+        if (parts.length >= 2) {
+          const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
+          accountId =
+            decoded["https://api.openai.com/auth"]?.chatgpt_account_id ||
+            decoded.account_id ||
+            decoded["chatgpt_account_id"];
+        }
+      } catch {}
+    }
+
     return {
       success: true,
       accessToken: data.accessToken,
+      accountId,
       user: data.user,
       expires: data.expires,
     };

@@ -12,7 +12,30 @@ export const CHATGPT_WEB_REQUIREMENTS_ENDPOINT = "https://chatgpt.com/backend-ap
 export const CHATGPT_WEB_CONVERSATION_ENDPOINT = "https://chatgpt.com/backend-api/conversation";
 
 export const CHATGPT_WEB_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+
+export function extractAccountIdFromToken(token?: string): string | undefined {
+  if (!token) return undefined;
+  try {
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const decoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
+      return (
+        decoded["https://api.openai.com/auth"]?.chatgpt_account_id ||
+        decoded.account_id ||
+        decoded["chatgpt_account_id"]
+      );
+    }
+  } catch {}
+  return undefined;
+}
+
+export function extractDeviceIdFromCookie(cookieString?: string): string {
+  if (!cookieString) return "9ba88336-3aaa-4e17-a1d0-8547451d69e4";
+  const match = cookieString.match(/(?:oai-did|__Host-oai-did|oai-device-id)=([a-f0-9\-]+)/i);
+  if (match && match[1]) return match[1];
+  return "9ba88336-3aaa-4e17-a1d0-8547451d69e4";
+}
 
 export function isChatGptWebProvider(provider?: string, authType?: string): boolean {
   if (!provider && !authType) return false;
@@ -192,16 +215,13 @@ export function solveProofOfWork(seed: string, difficulty: string, userAgent: st
     null,
     0,
     userAgent,
-    "https://tcr9i.chat.openai.com/v2/35536E1E-65B4-4D96-9D97-6ADB7EFF8147/api.js",
-    "dpl=1440a687921de39ff5ee56b92807faaadce73f13",
-    "en",
-    "en-US",
     null,
-    "plugins−[object PluginArray]",
-    ["_reactListeningcfilawjnerp", "_reactListening9ne2dfo1i47", "_reactListening410nzwhan2a"][
-      Math.floor(Math.random() * 3)
-    ],
-    ["alert", "ontransitionend", "onprogress"][Math.floor(Math.random() * 3)],
+    "en-US",
+    "en-US,en",
+    0,
+    true,
+    8,
+    null,
   ];
 
   const diffLen = difficulty.length;
@@ -226,18 +246,32 @@ export function solveProofOfWork(seed: string, difficulty: string, userAgent: st
 export async function getChatRequirements(
   accessToken: string,
   cookieString: string,
-  userAgent: string
+  userAgent: string,
+  accountId?: string,
+  deviceId?: string
 ): Promise<{ token?: string; proofToken?: string }> {
   try {
+    const devId = deviceId || extractDeviceIdFromCookie(cookieString);
+    const accId = accountId || extractAccountIdFromToken(accessToken) || "ebed8daa-4806-42ea-ac5a-1294ab7932ba";
+
     const res = await fetch(CHATGPT_WEB_REQUIREMENTS_ENDPOINT, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        Cookie: cookieString,
-        "Content-Type": "application/json",
+        "Chatgpt-Account-Id": accId,
+        "Oai-Device-Id": devId,
+        "Oai-Did": devId,
+        "Oai-Language": "id-ID",
+        Originator: "Codex Browser",
+        "X-Openai-Web-Frontend": "codex_webview",
+        "Sec-Ch-Ua": '"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
         "User-Agent": userAgent,
         Referer: "https://chatgpt.com/",
         Origin: "https://chatgpt.com",
+        "Content-Type": "application/json",
+        Cookie: cookieString,
       },
       body: JSON.stringify({}),
       signal: AbortSignal.timeout(8000),
@@ -381,26 +415,54 @@ export function formatChatGptWebPayload(parsedBody: any, targetModel: string) {
     }
   }
 
-  const formattedMessages = finalMessages.map((msg) => ({
-    id: crypto.randomUUID(),
-    author: { role: msg.role },
-    content: {
-      content_type: "text",
-      parts: [msg.content],
-    },
-    metadata: {},
-  }));
+  const nowSec = Date.now() / 1000;
+  const formattedMessages = finalMessages.map((msg) => {
+    const msgId = crypto.randomUUID();
+    return {
+      author: {
+        metadata: {},
+        name: null,
+        role: msg.role,
+      },
+      channel: null,
+      content: {
+        content_type: "text",
+        parts: [msg.content],
+      },
+      create_time: nowSec,
+      end_turn: null,
+      id: msgId,
+      metadata: {
+        automation_creation_attribution: {
+          origin: "conversation",
+          flow_id: msgId,
+        },
+      },
+      recipient: "all",
+      status: "finished_successfully",
+      update_time: null,
+      weight: 1,
+    };
+  });
 
   return {
+    turn_attribution: { turn_trigger: "composer" },
     action: "next",
-    messages: formattedMessages,
-    parent_message_id: crypto.randomUUID(),
-    model: targetModel,
+    model: targetModel === "default" || !targetModel ? "auto" : targetModel,
+    parent_message_id: "client-created-root",
+    timezone: "Asia/Jakarta",
     timezone_offset_min: -420,
-    suggestions: [],
-    history_and_training_disabled: true,
-    conversation_mode: { kind: "primary_assistant" },
-    force_paragen: false,
+    is_do_not_remember: false,
+    client_contextual_info: {
+      app_name: "chatgpt.com",
+      app_surface: "codex_browser",
+      has_web_push_capabilities: true,
+      web_push_notification_permission: "default",
+    },
+    local_function_names: ["local.continue_in_work"],
+    messages: formattedMessages,
+    genui_state_snapshots: [],
+    client_prepare_state: "sent",
   };
 }
 
@@ -419,21 +481,39 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
   let activeToken = params.accessToken;
   const cookieString = params.cookieString;
   const userAgent = CHATGPT_WEB_USER_AGENT;
+  const deviceId = extractDeviceIdFromCookie(cookieString);
+  let accountId = extractAccountIdFromToken(activeToken) || "ebed8daa-4806-42ea-ac5a-1294ab7932ba";
 
   // 1. Get Chat Requirements & Proof of Work
-  let { token: reqToken, proofToken } = await getChatRequirements(activeToken, cookieString, userAgent);
+  let { token: reqToken, proofToken } = await getChatRequirements(
+    activeToken,
+    cookieString,
+    userAgent,
+    accountId,
+    deviceId
+  );
 
   const payload = formatChatGptWebPayload(params.parsedBody, targetModel);
 
   const buildHeaders = (token: string, rToken?: string, pToken?: string) => {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      Cookie: cookieString,
+      "Chatgpt-Account-Id": accountId,
+      "Oai-Device-Id": deviceId,
+      "Oai-Did": deviceId,
+      "Oai-Language": "id-ID",
+      Originator: "Codex Browser",
+      Referer: "https://chatgpt.com/",
+      "Sec-Ch-Ua": '"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "User-Agent": userAgent,
+      "X-Openai-Codex-Window-Type": "browser",
+      "X-Openai-Rate-Limit-Join-Workspace": "1",
+      "X-Openai-Web-Frontend": "codex_webview",
       "Content-Type": "application/json",
       Accept: "text/event-stream",
-      "User-Agent": userAgent,
-      Referer: "https://chatgpt.com/",
-      Origin: "https://chatgpt.com",
+      Cookie: cookieString,
     };
     if (rToken) headers["openai-sentinel-chat-requirements-token"] = rToken;
     if (pToken) headers["openai-sentinel-proof-token"] = pToken;
@@ -453,6 +533,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
       const refreshed = await verifyAndFetchChatGptSession(cookieString);
       if (refreshed.success && refreshed.accessToken) {
         activeToken = refreshed.accessToken;
+        accountId = extractAccountIdFromToken(activeToken) || accountId;
         await prisma.providerConnection.update({
           where: { id: params.connectionId },
           data: {
@@ -462,7 +543,7 @@ export async function dispatchChatGptWebChat(params: ChatGptWebDispatchParams): 
         });
 
         // Re-obtain chat requirements with new token
-        const newReq = await getChatRequirements(activeToken, cookieString, userAgent);
+        const newReq = await getChatRequirements(activeToken, cookieString, userAgent, accountId, deviceId);
         reqToken = newReq.token;
         proofToken = newReq.proofToken;
 
