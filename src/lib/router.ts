@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { decryptCredential } from '@/lib/crypto';
 import { refreshConnectionToken } from '@/lib/oauth/refresh-manager';
 import { normalizeModelRequest, NormalizedModelResult } from '@/lib/model-normalizer';
-import { matchCustomProviderForModel } from '@/lib/custom-providers';
+import { matchCustomProviderForModel, getCustomProviderBySlug } from '@/lib/custom-providers';
 
 export interface RouteResult {
   baseUrl: string;
@@ -283,6 +283,14 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
 
 async function buildRouteResult(connection: any, norm?: NormalizedModelResult): Promise<RouteResult> {
   let baseUrl = connection.baseUrl;
+
+  if (connection.provider?.startsWith("CUSTOM_")) {
+    const slug = connection.provider.replace(/^CUSTOM_/, "").toLowerCase().replace(/_/g, "-");
+    const cp = await getCustomProviderBySlug(slug).catch(() => null);
+    if (cp?.baseUrl) {
+      baseUrl = cp.baseUrl;
+    }
+  }
   
   if (!baseUrl) {
     switch (connection.provider) {

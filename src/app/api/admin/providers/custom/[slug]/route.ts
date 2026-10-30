@@ -8,6 +8,7 @@ import {
   deleteCustomProvider,
   invalidateCustomProvidersCache,
 } from "@/lib/custom-providers";
+import { invalidateProviderConnectionsCache } from "@/lib/router";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -124,7 +125,26 @@ export async function PUT(
       createdAt: existing.createdAt,
     });
 
+    const providerKey = `CUSTOM_${existing.slug.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
+    const cleanBaseUrl = (baseUrl?.trim() || existing.baseUrl).replace(/\/+$/, "");
+    const compatibility = existing.compatibility || (apiType === "Anthropic Messages" ? "ANTHROPIC" : "OPENAI");
+
+    await prisma.providerConnection.updateMany({
+      where: {
+        OR: [
+          { provider: providerKey },
+          { provider: existing.slug.toUpperCase() },
+          { provider: existing.slug },
+        ],
+      },
+      data: {
+        baseUrl: cleanBaseUrl,
+        compatibility,
+      },
+    });
+
     invalidateCustomProvidersCache();
+    invalidateProviderConnectionsCache();
 
     return NextResponse.json(
       {
@@ -193,6 +213,7 @@ export async function DELETE(
     // 3. Remove from custom providers registry
     await deleteCustomProvider(slug);
     invalidateCustomProvidersCache();
+    invalidateProviderConnectionsCache();
 
     return NextResponse.json(
       {
