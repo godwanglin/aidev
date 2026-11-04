@@ -937,6 +937,518 @@ async function fetchGeminiAccountQuota(apiKey: string): Promise<QuotaBucketItem[
 }
 
 /**
+ * Decodes gRPC-web frames for xAI GetGrokCreditsConfig fallback.
+ */
+function decodeGrokCreditsFrame(buffer: Buffer): { percentUsed: number; resetAt: string | null } | null {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 5) return null;
+  try {
+    let offset = 0;
+    let payload: Buffer | null = null;
+    while (offset < buffer.length) {
+      if (buffer.length - offset < 5) break;
+      const flag = buffer[offset];
+      if (flag !== 0x00 && flag !== 0x01 && flag !== 0x80 && flag !== 0x81) break;
+      const payloadStart = offset + 5;
+      const payloadLength = buffer.readUInt32BE(offset + 1);
+      if (payloadLength > buffer.length - payloadStart) break;
+      if ((flag & 0x80) === 0) {
+        payload = buffer.subarray(payloadStart, payloadStart + payloadLength);
+        break;
+      }
+      offset = payloadStart + payloadLength;
+    }
+    if (!payload) payload = buffer;
+
+    let pos = 0;
+    while (pos < payload.length) {
+      const tagByte = payload[pos++];
+      const fieldNum = tagByte >>> 3;
+      const wireType = tagByte & 0x07;
+      if (wireType === 2) {
+        let len = 0;
+        let shift = 0;
+        while (pos < payload.length) {
+          const b = payload[pos++];
+          len |= (b & 0x7f) << shift;
+          if ((b & 0x80) === 0) break;
+          shift += 7;
+        }
+        if (fieldNum === 1 && pos + len <= payload.length) {
+          const sub = payload.subarray(pos, pos + len);
+          let subPos = 0;
+          let percentUsed: number | null = null;
+          let resetAt: string | null = null;
+          while (subPos < sub.length) {
+            const subTag = sub[subPos++];
+            const subField = subTag >>> 3;
+            const subWire = subTag & 0x07;
+            if (subWire === 5 && subPos + 4 <= sub.length) {
+              const val = sub.readFloatLE(subPos);
+              subPos += 4;
+              if (subField === 1 && Number.isFinite(val) && val >= 0) {
+                percentUsed = Math.min(100, Math.round(val * 100));
+              }
+            } else if (subWire === 1 && subPos + 8 <= sub.length) {
+              const val = sub.readDoubleLE(subPos);
+              subPos += 8;
+              if (subField === 1 && Number.isFinite(val) && val >= 0) {
+                percentUsed = Math.min(100, Math.round(val * 100));
+              }
+            } else if (subWire === 0) {
+              while (subPos < sub.length && (sub[subPos++] & 0x80) !== 0) {}
+            } else if (subWire === 2) {
+              let tLen = 0;
+              let tShift = 0;
+              while (subPos < sub.length) {
+                const b = sub[subPos++];
+                tLen |= (b & 0x7f) << tShift;
+                if ((b & 0x80) === 0) break;
+                tShift += 7;
+              }
+              if (subField === 5 && subPos + tLen <= sub.length) {
+                const tBuf = sub.subarray(subPos, subPos + tLen);
+                let tPos = 0;
+                let sec = 0;
+                while (tPos < tBuf.length) {
+                  const tt = tBuf[tPos++];
+                  const tf = tt >>> 3;
+                  const tw = tt & 0x07;
+                  if (tw === 0) {
+                    let v = 0;
+                    let s = 0;
+                    while (tPos < tBuf.length) {
+                      const b = tBuf[tPos++];
+                      v |= (b & 0x7f) << s;
+                      if ((b & 0x80) === 0) break;
+                      s += 7;
+                    }
+                    if (tf === 1) sec = v;
+                  } else {
+                    break;
+                  }
+                }
+                if (sec > 0) {
+                  resetAt = new Date(sec * 1000).toISOString();
+                }
+              }
+              subPos += tLen;
+            } else {
+              break;
+            }
+          }
+          if (percentUsed !== null) {
+            return { percentUsed, resetAt };
+          }
+        }
+        pos += len;
+      } else if (wireType === 0) {
+        while (pos < payload.length && (payload[pos++] & 0x80) !== 0) {}
+      } else {
+        break;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseGrokResetTime(resetValue: unknown): string | null {
+  if (!resetValue) return null;
+  try {
+    if (resetValue instanceof Date) return resetValue.toISOString();
+    if (typeof resetValue === "number") {
+      return new Date(resetValue < 1e12 ? resetValue * 1000 : resetValue).toISOString();
+    }
+    if (typeof resetValue === "string") {
+      if (/^\d+$/.test(resetValue)) {
+        const timestamp = Number(resetValue);
+        return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString();
+      }
+      return new Date(resetValue).toISOString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function unwrapGrokVal(value: unknown, fallback = 0): number {
+  if (value == null) return fallback;
+  if (typeof value === "object" && !Array.isArray(value) && "val" in (value as Record<string, unknown>)) {
+    const raw = (value as Record<string, unknown>).val;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : fallback;
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+/**
+ * Fetches real live quota for a Grok CLI / Grok Build account.
+ * Primary: https://cli-chat-proxy.grok.com/v1/billing?format=credits
+ * User info: https://cli-chat-proxy.grok.com/v1/user?include=subscription
+ * gRPC-web fallback: https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig
+ */
+async function fetchGrokCliAccountQuota(
+  token: string,
+  connId?: string,
+  currentEmail?: string | null
+): Promise<{ quotas: QuotaBucketItem[]; remainingUsd: number | null; accountEmail: string | null }> {
+  const quotas: QuotaBucketItem[] = [];
+  let remainingUsd: number | null = null;
+  let resolvedEmail: string | null = currentEmail || null;
+  let detectedPlan: string | null = null;
+
+  // Extract initial metadata from JWT payload if present
+  try {
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      const tiers: Record<number, string> = {
+        0: "Free",
+        1: "SuperGrok",
+        2: "X Basic",
+        3: "X Premium",
+        4: "X Premium Plus",
+        5: "SuperGrok Heavy",
+        6: "SuperGrok Lite",
+      };
+      if (typeof payload.tier === "number" && tiers[payload.tier]) {
+        detectedPlan = tiers[payload.tier];
+      }
+      if (!resolvedEmail) {
+        if (typeof payload.email === "string") resolvedEmail = payload.email;
+        else if (typeof payload.preferred_username === "string" && payload.preferred_username.includes("@")) {
+          resolvedEmail = payload.preferred_username;
+        }
+      }
+    }
+  } catch {}
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
+    "x-xai-token-auth": "xai-grok-cli",
+    "x-grok-client-identifier": "grok-shell",
+    "x-grok-client-version": "1.0.44",
+    "x-grok-client-mode": "headless",
+  };
+  if (resolvedEmail) {
+    headers["x-email"] = resolvedEmail;
+  }
+
+  try {
+    const [billingRes, userRes] = await Promise.all([
+      fetch("https://cli-chat-proxy.grok.com/v1/billing?format=credits", {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(6000),
+      }).catch(() => null),
+      fetch("https://cli-chat-proxy.grok.com/v1/user?include=subscription", {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(6000),
+      }).catch(() => null),
+    ]);
+
+    // Inspect user profile
+    if (userRes && userRes.ok) {
+      const userData = (await userRes.json().catch(() => ({}))) as Record<string, any>;
+      if (userData?.email && !resolvedEmail) {
+        resolvedEmail = userData.email;
+      }
+      if (userData?.subscriptionTier && !detectedPlan) {
+        detectedPlan = String(userData.subscriptionTier).replace(/[_-]+/g, " ");
+      }
+    }
+
+    // Auto-update DB connection with discovered email
+    if (resolvedEmail && resolvedEmail !== currentEmail && connId) {
+      prisma.providerConnection
+        .update({
+          where: { id: connId },
+          data: { accountEmail: resolvedEmail },
+        })
+        .catch(() => {});
+    }
+
+    if (billingRes) {
+      if (billingRes.status === 401 || billingRes.status === 403) {
+        quotas.push({
+          id: "grok-auth-error",
+          name: "Grok CLI Token Expired",
+          remainingFraction: 0,
+          usedAmount: 100,
+          totalAmount: 100,
+          percentage: 0,
+          resetHuman: "Re-authorization required",
+          status: "EMPTY",
+        });
+        return { quotas, remainingUsd: 0, accountEmail: resolvedEmail };
+      }
+
+      if (billingRes.ok) {
+        const billingJson = (await billingRes.json().catch(() => ({}))) as Record<string, any>;
+        const root = billingJson && typeof billingJson === "object" ? billingJson : {};
+        const config = (root.config && typeof root.config === "object" ? root.config : root) as Record<string, any>;
+
+        const periodEnd =
+          parseGrokResetTime(config.billingPeriodEnd) ||
+          parseGrokResetTime(config.billing_period_end) ||
+          parseGrokResetTime(config.currentPeriod?.end) ||
+          parseGrokResetTime(config.resetAt || config.resetsAt || config.periodEnd) ||
+          null;
+        const resetHuman = periodEnd ? `Resets ${formatResetRemaining(periodEnd)}` : undefined;
+
+        // 1. Monthly Credits (100 credits = $1.00 USD)
+        const monthlyLimit = unwrapGrokVal(config.monthlyLimit ?? config.monthly_limit, NaN);
+        const includedUsed = unwrapGrokVal(config.includedUsed ?? config.included_used ?? config.totalUsed ?? config.total_used, NaN);
+
+        if (Number.isFinite(monthlyLimit) && monthlyLimit > 0) {
+          const safeUsed = Math.max(0, Number.isFinite(includedUsed) ? includedUsed : 0);
+          const rem = Math.max(0, monthlyLimit - safeUsed);
+          const fraction = rem / monthlyLimit;
+          const pct = Math.round(fraction * 100);
+          remainingUsd = Number((rem / 100).toFixed(2));
+
+          quotas.push({
+            id: "grok-monthly-credits",
+            name: detectedPlan ? `${detectedPlan} Credits` : "Monthly Credits",
+            remainingFraction: fraction,
+            usedAmount: Math.round(safeUsed),
+            totalAmount: Math.round(monthlyLimit),
+            percentage: pct,
+            resetTime: periodEnd || undefined,
+            resetHuman: resetHuman || `$${(rem / 100).toFixed(2)} USD remaining`,
+            status: pct <= 0 ? "EMPTY" : pct <= 20 ? "LOW" : "HEALTHY",
+          });
+        }
+
+        // 2. On-demand pool
+        const onDemandCap = unwrapGrokVal(config.onDemandCap, NaN);
+        const onDemandUsed = unwrapGrokVal(config.onDemandUsed, NaN);
+        if (Number.isFinite(onDemandCap) && onDemandCap > 0) {
+          const safeUsed = Math.max(0, Number.isFinite(onDemandUsed) ? onDemandUsed : 0);
+          const rem = Math.max(0, onDemandCap - safeUsed);
+          const fraction = rem / onDemandCap;
+          const pct = Math.round(fraction * 100);
+
+          quotas.push({
+            id: "grok-ondemand",
+            name: "On-Demand Pool",
+            remainingFraction: fraction,
+            usedAmount: Math.round(safeUsed),
+            totalAmount: Math.round(onDemandCap),
+            percentage: pct,
+            resetTime: periodEnd || undefined,
+            resetHuman: resetHuman || `$${(rem / 100).toFixed(2)} USD remaining`,
+            status: pct <= 0 ? "EMPTY" : pct <= 20 ? "LOW" : "HEALTHY",
+          });
+        }
+
+        // 3. Weekly SuperGrok pool
+        const usedPct = unwrapGrokVal(config.creditUsagePercent ?? config.credit_usage_percent, NaN);
+        if (Number.isFinite(usedPct) && usedPct >= 0) {
+          const safeUsedPct = Math.max(0, Math.min(100, Math.round(usedPct)));
+          const remainingPct = 100 - safeUsedPct;
+          quotas.push({
+            id: "grok-weekly-pool",
+            name: "Weekly SuperGrok Pool",
+            remainingFraction: remainingPct / 100,
+            usedAmount: safeUsedPct,
+            totalAmount: 100,
+            percentage: remainingPct,
+            resetTime: periodEnd || undefined,
+            resetHuman: resetHuman || `${remainingPct}% remaining`,
+            status: remainingPct <= 0 ? "EMPTY" : remainingPct <= 20 ? "LOW" : "HEALTHY",
+          });
+        }
+
+        // 4. Prepaid balance
+        const prepaid = unwrapGrokVal(config.prepaidBalance, NaN);
+        if (Number.isFinite(prepaid) && prepaid > 0) {
+          const prepaidUsd = Number((prepaid / 100).toFixed(2));
+          remainingUsd = (remainingUsd ?? 0) + prepaidUsd;
+          quotas.push({
+            id: "grok-prepaid",
+            name: "Prepaid Balance",
+            remainingFraction: 1.0,
+            usedAmount: 0,
+            totalAmount: Math.round(prepaid),
+            percentage: 100,
+            resetHuman: `$${prepaidUsd.toFixed(2)} USD`,
+            status: "HEALTHY",
+          });
+        }
+      }
+    }
+
+    // 5. If no quota buckets found, try gRPC-web GetGrokCreditsConfig fallback
+    if (quotas.length === 0) {
+      try {
+        const grpcRes = await fetch("https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/grpc-web+proto",
+            "X-Grpc-Web": "1",
+            Accept: "application/grpc-web+proto",
+          },
+          body: Buffer.from([0, 0, 0, 0, 0]),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (grpcRes.ok) {
+          const ab = await grpcRes.arrayBuffer();
+          const decoded = decodeGrokCreditsFrame(Buffer.from(ab));
+          if (decoded && Number.isFinite(decoded.percentUsed)) {
+            const used = Math.round(Math.max(0, Math.min(100, decoded.percentUsed)));
+            const remPct = 100 - used;
+            const resetHuman = decoded.resetAt ? `Resets ${formatResetRemaining(decoded.resetAt)}` : `${remPct}% remaining`;
+            quotas.push({
+              id: "grok-weekly-pool",
+              name: "Weekly SuperGrok Pool",
+              remainingFraction: remPct / 100,
+              usedAmount: used,
+              totalAmount: 100,
+              percentage: remPct,
+              resetTime: decoded.resetAt || undefined,
+              resetHuman,
+              status: remPct <= 0 ? "EMPTY" : remPct <= 20 ? "LOW" : "HEALTHY",
+            });
+          }
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.error("Failed to fetch Grok CLI quota:", err);
+  }
+
+  // Fallback placeholder if active but no specific bucket returned
+  if (quotas.length === 0) {
+    quotas.push({
+      id: "grok-active",
+      name: detectedPlan ? `${detectedPlan} Active` : "Grok CLI Active",
+      remainingFraction: 1.0,
+      usedAmount: 0,
+      totalAmount: 100,
+      percentage: 100,
+      resetHuman: "Connected (Grok Build)",
+      status: "HEALTHY",
+    });
+  }
+
+  return { quotas, remainingUsd, accountEmail: resolvedEmail };
+}
+
+/**
+ * Fetches real live quota & health metrics for an xAI API account.
+ * Primary: https://api.x.ai/v1/models (verifies key and checks rate limits)
+ */
+async function fetchXaiAccountQuota(
+  token: string,
+  connId?: string,
+  currentEmail?: string | null
+): Promise<{ quotas: QuotaBucketItem[]; remainingUsd: number | null }> {
+  const quotas: QuotaBucketItem[] = [];
+  let remainingUsd: number | null = null;
+
+  try {
+    const res = await fetch("https://api.x.ai/v1/models", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "User-Agent": "grok-cli/9router",
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as Record<string, any>;
+      const modelList = Array.isArray(data?.data) ? data.data : [];
+      const modelCount = modelList.length;
+
+      // Rate limit headers inspection if provided upstream
+      const limitRequests = res.headers.get("x-ratelimit-limit-requests");
+      const remainingRequests = res.headers.get("x-ratelimit-remaining-requests");
+      const resetRequests = res.headers.get("x-ratelimit-reset-requests");
+
+      if (limitRequests && remainingRequests) {
+        const total = parseInt(limitRequests, 10);
+        const rem = parseInt(remainingRequests, 10);
+        if (total > 0 && Number.isFinite(rem)) {
+          const safeRem = Math.max(0, Math.min(total, rem));
+          const used = Math.max(0, total - safeRem);
+          const fraction = safeRem / total;
+          const pct = Math.round(fraction * 100);
+          quotas.push({
+            id: "xai-rate-requests",
+            name: "xAI Request Quota",
+            remainingFraction: fraction,
+            usedAmount: used,
+            totalAmount: total,
+            percentage: pct,
+            resetHuman: resetRequests ? `Reset in ${resetRequests}` : "Rolling window",
+            status: pct <= 0 ? "EMPTY" : pct <= 20 ? "LOW" : "HEALTHY",
+          });
+        }
+      }
+
+      quotas.push({
+        id: "xai-api-models",
+        name: `xAI API Access (${modelCount > 0 ? `${modelCount} models` : "Verified"})`,
+        remainingFraction: 1.0,
+        usedAmount: 0,
+        totalAmount: 100,
+        percentage: 100,
+        resetHuman: "Pay-as-you-go · Active",
+        status: "HEALTHY",
+      });
+    } else if (res.status === 401 || res.status === 403) {
+      quotas.push({
+        id: "xai-auth-error",
+        name: "xAI API Key / Token Expired",
+        remainingFraction: 0,
+        usedAmount: 100,
+        totalAmount: 100,
+        percentage: 0,
+        resetHuman: `Unauthorized (${res.status})`,
+        status: "EMPTY",
+      });
+    } else if (res.status === 429) {
+      quotas.push({
+        id: "xai-rate-limited",
+        name: "xAI Quota Exceeded (429)",
+        remainingFraction: 0,
+        usedAmount: 100,
+        totalAmount: 100,
+        percentage: 0,
+        resetHuman: "Rate limit reached / Credits depleted",
+        status: "EMPTY",
+      });
+    }
+  } catch (err) {
+    console.error("Failed to fetch xAI quota:", err);
+  }
+
+  if (quotas.length === 0) {
+    quotas.push({
+      id: "xai-default",
+      name: "xAI API Quota",
+      remainingFraction: 1.0,
+      usedAmount: 0,
+      totalAmount: 100,
+      percentage: 100,
+      resetHuman: "Connected",
+      status: "HEALTHY",
+    });
+  }
+
+  return { quotas, remainingUsd };
+}
+
+/**
  * Checks if a provider supports real live upstream quota / billing tracking.
  * Custom providers, self-hosted proxies, and untracked providers are excluded.
  */
@@ -960,7 +1472,11 @@ export function isProviderQuotaTrackable(provider: string): boolean {
     p === "OPENROUTER" ||
     p === "CODEBUDDY" ||
     p === "CODEBUDDY_INTL" ||
-    p === "CBAI"
+    p === "CBAI" ||
+    p === "XAI" ||
+    p === "GROK_CLI" ||
+    p === "GROK" ||
+    p === "GROK-CLI"
   );
 }
 
@@ -1036,6 +1552,10 @@ export async function getSingleAccountQuota(
       provUpper === "CLAUDE" || provUpper === "CLAUDE_CODE" || provUpper === "ANTHROPIC";
     const isCodeBuddy =
       provUpper === "CODEBUDDY" || provUpper === "CODEBUDDY_INTL" || provUpper === "CBAI";
+    const isGrokCli =
+      provUpper === "GROK_CLI" || provUpper === "GROK" || provUpper === "GROK-CLI";
+    const isXai =
+      provUpper === "XAI";
 
     if (isAntigravity && conn.accessTokenEnc) {
       try {
@@ -1113,6 +1633,31 @@ export async function getSingleAccountQuota(
           ? decryptCredential(conn.accessTokenEnc)
           : decryptCredential(conn.apiKeyEncrypted!);
         quotas = await fetchCodeBuddyAccountQuota(token);
+      } catch {
+        quotas = [];
+      }
+    } else if (isGrokCli && (conn.accessTokenEnc || conn.apiKeyEncrypted)) {
+      try {
+        const token = conn.accessTokenEnc
+          ? decryptCredential(conn.accessTokenEnc)
+          : decryptCredential(conn.apiKeyEncrypted!);
+        const res = await fetchGrokCliAccountQuota(token, conn.id, conn.accountEmail);
+        quotas = res.quotas;
+        remainingUsd = res.remainingUsd;
+        if (res.accountEmail && !conn.accountEmail) {
+          conn.accountEmail = res.accountEmail;
+        }
+      } catch {
+        quotas = [];
+      }
+    } else if (isXai && (conn.apiKeyEncrypted || conn.accessTokenEnc)) {
+      try {
+        const token = conn.apiKeyEncrypted
+          ? decryptCredential(conn.apiKeyEncrypted)
+          : decryptCredential(conn.accessTokenEnc!);
+        const res = await fetchXaiAccountQuota(token, conn.id, conn.accountEmail);
+        quotas = res.quotas;
+        remainingUsd = res.remainingUsd;
       } catch {
         quotas = [];
       }

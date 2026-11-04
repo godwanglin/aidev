@@ -46,6 +46,8 @@ function getProviderSlug(providerKey: string): string {
   if (p === "google") return "google";
   if (p === "openai") return "codex";
   if (p === "anthropic" || p === "claude" || p === "claude_code") return "claude";
+  if (p === "xai") return "xai";
+  if (p === "grok_cli" || p === "grok-cli" || p === "grok") return "grok-cli";
   return p.replace(/_/g, "-");
 }
 
