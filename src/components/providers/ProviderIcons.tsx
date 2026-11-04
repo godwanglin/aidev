@@ -100,7 +100,8 @@ export function getProviderDisplayName(providerKey: string): string {
   if (p === "GROQ") return "Groq";
   if (p === "MISTRAL") return "Mistral";
   if (p === "TOGETHER") return "Together AI";
-  if (p === "XAI" || p === "GROK" || p === "GROK_CLI") return "xAI Grok";
+  if (p === "XAI") return "xAI (Grok)";
+  if (p === "GROK" || p === "GROK_CLI" || p === "GROK-CLI") return "Grok CLI";
   if (p === "COMBO") return "Combo (Auto-Rotate)";
   return providerKey.charAt(0).toUpperCase() + providerKey.slice(1).toLowerCase();
 }
@@ -118,7 +119,8 @@ export function getProviderSlug(provKey: string): string {
   if (k.includes("openrouter")) return "openrouter";
   if (k.includes("deepseek")) return "deepseek";
   if (k.includes("groq")) return "groq";
-  if (k.includes("xai") || k.includes("grok")) return "grok-cli";
+  if (k === "xai" || k.startsWith("xai_") || k.startsWith("xai-")) return "xai";
+  if (k.includes("grok")) return "grok-cli";
   if (k.includes("together")) return "together";
   if (k.includes("mistral")) return "mistral";
   if (k.includes("qwen") || k.includes("alibaba") || k.includes("dashscope")) return "alibaba";

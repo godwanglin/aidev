@@ -8,6 +8,7 @@ import { normalizeRequestBody } from "@/lib/model-normalizer";
 import { isAntigravityProvider, dispatchAntigravityChat } from "@/lib/adapters/antigravity";
 import { isCodexProvider, dispatchCodexChat, dispatchCodexResponsesDirect } from "@/lib/adapters/codex";
 import { isChatGptWebProvider, dispatchChatGptWebChat } from "@/lib/adapters/chatgpt-web";
+import { isGrokCliProvider, dispatchGrokCliChat } from "@/lib/adapters/grok-cli";
 import {
   convertAnthropicToOpenAiMessages,
   convertAnthropicToOpenAiPayload,
@@ -1437,6 +1438,98 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
       }
     }
 
+    // Provider Dispatch 3c: Grok CLI / Grok Build (cli-chat-proxy.grok.com/v1/responses)
+    if (isGrokCliProvider(activeProvider) && targetKey) {
+      try {
+        const response = await dispatchGrokCliChat({
+          rawBody: candidateChatBody || "{}",
+          parsedBody: parsedCandidateJson,
+          accessToken: targetKey,
+          connectionId: activeConnectionId || "",
+          accountEmail: resolvedRoute?.accountEmail || null,
+          model: candidateModel || "grok-build",
+          clientRequestedModel,
+          upstreamLogModel,
+          clientApiKeyId: apiKeyId,
+          clientUserId,
+          clientUserEmail: userEmail,
+          reasoningEffort: candidateReasoningEffort,
+          rawHeaders: rawHeadersObj,
+          reqPath,
+          clientWantsStream,
+          estimatedPromptTokens,
+        });
+
+        if ((response.status === 401 || response.status === 402 || response.status === 429 || response.status >= 500) && !isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `Grok CLI returned HTTP ${response.status}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+
+        if (!response.ok) {
+          logRequest({
+            apiKeyId,
+            path: reqPath,
+            method: "POST",
+            statusCode: response.status,
+            model: clientRequestedModel,
+            promptTokens: estimatedPromptTokens || 15,
+            completionTokens: 0,
+            totalTokens: estimatedPromptTokens || 15,
+            costUsd: 0,
+            durationMs: Date.now() - startTime,
+          });
+          return response;
+        }
+
+        if (subPath === "messages") {
+          return await transformChatResponseToAnthropic(response, { model: clientRequestedModel, clientWantsStream, estimatedPromptTokens });
+        } else if (subPath === "responses") {
+          return await transformChatResponseToResponses(response, {
+            model: clientRequestedModel,
+            upstreamModel: candidateModel,
+            provider: activeProvider,
+            clientWantsStream,
+            customToolNames,
+            hasTools: Boolean(parsedCandidateJson?.tools?.length),
+            logContext: {
+              apiKeyId,
+              clientUserId,
+              reqPath,
+              startTime,
+              estimatedPromptTokens,
+            },
+          });
+        }
+
+        return response;
+      } catch (err: any) {
+        if (!isLastCandidate) {
+          adminLogger.fallback({
+            fromModel: candidateModel,
+            toModel: candidates[candIdx + 1],
+            reason: `Grok CLI exception: ${err.message}`,
+            account: upstreamAccount,
+          });
+          markComboModelCooldown(candidateModel, comboInfo?.combo.cooldownSeconds || 60);
+          continue;
+        }
+        adminLogger.error({
+          message: `Grok CLI error: ${err.message}`,
+          durationMs: Date.now() - startTime,
+          model: clientRequestedModel,
+          upstreamModel: candidateModel,
+          account: userEmail,
+        });
+        throw err;
+      }
+    }
+
     // Provider Dispatch 4: Standard Upstream (OpenAI / OpenRouter / DeepSeek / Claude / Gemini / Custom Providers)
     let targetSubPath = subPath;
     if (!isCustomProvider && (subPath === "responses" || subPath === "messages")) {
@@ -1449,6 +1542,10 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
     forwardHeaders.set("Content-Type", "application/json");
     if (targetKey.startsWith("AIza") || activeProvider === "GEMINI" || activeProvider === "GOOGLE") {
       forwardHeaders.set("x-goog-api-key", targetKey);
+    }
+    if (activeProvider === "XAI") {
+      forwardHeaders.set("User-Agent", "grok-cli/9router");
+      forwardHeaders.set("Accept", clientWantsStream ? "text/event-stream" : "application/json");
     }
     if (activeProvider === "CODEBUDDY" || activeProvider === "CODEBUDDY_INTL" || activeProvider === "CBAI") {
       forwardHeaders.set("User-Agent", "IDE/2.108.1 CodeBuddy/2.108.1");

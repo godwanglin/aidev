@@ -449,6 +449,146 @@ export async function syncConnectionQuota(connectionId: string): Promise<SyncRes
         break;
       }
 
+      case "XAI": {
+        let token = connection.accessTokenEnc ? decryptCredential(connection.accessTokenEnc) : apiKey;
+        if (!token && connection.refreshTokenEnc) {
+          try {
+            token = await refreshOAuthToken(connection.id);
+          } catch {}
+        }
+        if (token) {
+          let res = await fetch("https://api.x.ai/v1/models", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "grok-cli/9router",
+              Accept: "application/json",
+            },
+            signal: AbortSignal.timeout(7000),
+          });
+          if (res.status === 401 && connection.refreshTokenEnc) {
+            try {
+              token = await refreshOAuthToken(connection.id);
+              res = await fetch("https://api.x.ai/v1/models", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "User-Agent": "grok-cli/9router",
+                  Accept: "application/json",
+                },
+                signal: AbortSignal.timeout(7000),
+              });
+            } catch {}
+          }
+          if (res.status === 200) {
+            status = "NORMAL";
+          } else if (res.status === 429) {
+            status = "LOW_QUOTA";
+            errorMsg = "xAI rate limit reached (HTTP 429)";
+          } else if (res.status === 402) {
+            status = "EXHAUSTED";
+            errorMsg = "xAI credits exhausted (HTTP 402)";
+          } else {
+            status = "ERROR";
+            errorMsg = `xAI HTTP ${res.status}`;
+          }
+        } else {
+          status = "ERROR";
+          errorMsg = "No xAI token found";
+        }
+        break;
+      }
+
+      case "GROK_CLI":
+      case "GROK": {
+        let token = connection.accessTokenEnc ? decryptCredential(connection.accessTokenEnc) : apiKey;
+        if (!token && connection.refreshTokenEnc) {
+          try {
+            token = await refreshOAuthToken(connection.id);
+          } catch {}
+        }
+        if (token) {
+          const buildGrokCliHeaders = (t: string): Record<string, string> => ({
+            Authorization: `Bearer ${t}`,
+            Accept: "application/json",
+            "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
+            "x-xai-token-auth": "xai-grok-cli",
+            "x-grok-client-identifier": "grok-shell",
+            "x-grok-client-version": "1.0.44",
+            "x-grok-client-mode": "headless",
+            ...(accountEmail ? { "x-email": accountEmail } : {}),
+          });
+
+          let [billingRes, userRes] = await Promise.all([
+            fetch("https://cli-chat-proxy.grok.com/v1/billing?format=credits", {
+              headers: buildGrokCliHeaders(token),
+              signal: AbortSignal.timeout(7000),
+            }),
+            fetch("https://cli-chat-proxy.grok.com/v1/user?include=subscription", {
+              headers: buildGrokCliHeaders(token),
+              signal: AbortSignal.timeout(7000),
+            }),
+          ]);
+
+          if ((billingRes.status === 401 || userRes.status === 401) && connection.refreshTokenEnc) {
+            try {
+              token = await refreshOAuthToken(connection.id);
+              [billingRes, userRes] = await Promise.all([
+                fetch("https://cli-chat-proxy.grok.com/v1/billing?format=credits", {
+                  headers: buildGrokCliHeaders(token),
+                  signal: AbortSignal.timeout(7000),
+                }),
+                fetch("https://cli-chat-proxy.grok.com/v1/user?include=subscription", {
+                  headers: buildGrokCliHeaders(token),
+                  signal: AbortSignal.timeout(7000),
+                }),
+              ]);
+            } catch {}
+          }
+
+          if (userRes.ok) {
+            const userData = await userRes.json().catch(() => ({}));
+            if (typeof userData.email === "string" && userData.email.trim()) {
+              accountEmail = userData.email.trim();
+            }
+          }
+
+          if (billingRes.ok) {
+            const billing = await billingRes.json().catch(() => ({}));
+            const totalCredits = Number(billing.totalCredits ?? 0);
+            const usedCredits = Number(billing.usedCredits ?? 0);
+            const remainingCredits = Number(billing.remainingCredits ?? Math.max(0, totalCredits - usedCredits));
+
+            if (totalCredits > 0) {
+              // Convert cent-credits to USD (100 credits = $1)
+              quotaRemainingUsd = Math.round(remainingCredits) / 100;
+              quotaLimitTokens = BigInt(Math.round(totalCredits * 1000));
+              quotaUsedTokens = BigInt(Math.round(usedCredits * 1000));
+              if (remainingCredits <= 0) {
+                status = "EXHAUSTED";
+                errorMsg = "Grok CLI credits exhausted (0 remaining)";
+              } else if (remainingCredits / totalCredits <= 0.15) {
+                status = "LOW_QUOTA";
+              } else {
+                status = "NORMAL";
+              }
+            } else {
+              status = "NORMAL";
+            }
+          } else if (userRes.ok) {
+            status = "NORMAL";
+          } else if (billingRes.status === 429 || userRes.status === 429) {
+            status = "LOW_QUOTA";
+            errorMsg = "Grok CLI rate limit reached";
+          } else {
+            status = "ERROR";
+            errorMsg = `Grok CLI HTTP ${billingRes.status}`;
+          }
+        } else {
+          status = "ERROR";
+          errorMsg = "No Grok CLI access token found";
+        }
+        break;
+      }
+
       case "OPENROUTER": {
         if (apiKey) {
           const res = await fetch("https://openrouter.ai/api/v1/auth/key", {

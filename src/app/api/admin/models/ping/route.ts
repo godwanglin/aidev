@@ -120,6 +120,21 @@ export async function POST(req: NextRequest) {
       } else {
         headers["x-api-key"] = targetKey;
       }
+    } else if (providerName === "XAI") {
+      pingUrl = "https://api.x.ai/v1/models";
+      headers["Authorization"] = `Bearer ${targetKey}`;
+      headers["User-Agent"] = "grok-cli/9router";
+      headers["Accept"] = "application/json";
+    } else if (providerName === "GROK_CLI" || providerName === "GROK") {
+      pingUrl = "https://cli-chat-proxy.grok.com/v1/models";
+      headers["Authorization"] = `Bearer ${targetKey}`;
+      headers["Accept"] = "application/json";
+      headers["User-Agent"] = "grok-shell/1.0.44 (linux; x86_64)";
+      headers["x-xai-token-auth"] = "xai-grok-cli";
+      headers["x-grok-client-identifier"] = "grok-shell";
+      headers["x-grok-client-version"] = "1.0.44";
+      headers["x-grok-client-mode"] = "headless";
+      if (route.accountEmail) headers["x-email"] = route.accountEmail;
     } else {
       if (targetKey) headers["Authorization"] = `Bearer ${targetKey}`;
     }

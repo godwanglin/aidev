@@ -14,6 +14,11 @@ interface OAuthSession {
   connectionName: string;
   codeVerifier: string;
   redirectUri: string;
+  deviceCode?: string;
+  userCode?: string;
+  verificationUri?: string;
+  verificationUriComplete?: string;
+  interval?: number;
   createdAt: number;
 }
 
@@ -101,6 +106,77 @@ export async function initiateOAuthSession({
     };
   }
 
+  // Special RFC 8628 Device Code flow for Grok CLI (Grok Build)
+  if (provUpper === "GROK_CLI" || provUpper === "GROK-CLI" || provUpper === "GROK") {
+    const config = getProviderOAuthConfig("GROK_CLI");
+    const clientId = customClientId || config?.defaultClientId || "b1a00492-073a-47ea-816f-4c329264a828";
+    const scope = (config?.scopes || [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "grok-cli:access",
+      "api:access",
+      "conversations:read",
+      "conversations:write",
+    ]).join(" ");
+
+    const deviceRes = await fetch("https://auth.x.ai/oauth2/device/code", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+        "User-Agent": "grok-pager/1.0.44 grok-shell/1.0.44 (linux; x86_64)",
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        scope,
+        referrer: "grok-build",
+      }),
+    });
+
+    const deviceJson = (await deviceRes.json().catch(() => ({}))) as Record<string, any>;
+    if (!deviceRes.ok || !deviceJson.device_code || !deviceJson.user_code) {
+      throw new Error(
+        `Grok CLI device code request failed (HTTP ${deviceRes.status}): ${deviceJson.error_description || deviceJson.error || "Unknown error"}`
+      );
+    }
+
+    const state = generateOAuthState();
+    const verificationUri = deviceJson.verification_uri || "https://accounts.x.ai/oauth2/device";
+    const verificationUriComplete =
+      deviceJson.verification_uri_complete ||
+      `${verificationUri}?user_code=${encodeURIComponent(deviceJson.user_code)}`;
+    const interval = Number(deviceJson.interval) || 5;
+
+    sessions.set(state, {
+      state,
+      provider: "GROK_CLI",
+      connectionName,
+      codeVerifier: "",
+      redirectUri: "",
+      deviceCode: String(deviceJson.device_code),
+      userCode: String(deviceJson.user_code),
+      verificationUri,
+      verificationUriComplete,
+      interval,
+      createdAt: Date.now(),
+    });
+
+    return {
+      state,
+      authorizeUrl: verificationUriComplete,
+      verificationUri,
+      verificationUriComplete,
+      userCode: String(deviceJson.user_code),
+      interval,
+      codeVerifier: "",
+      redirectUri: "",
+      isPolling: true,
+      isDeviceCode: true,
+    };
+  }
+
   const config = getProviderOAuthConfig(provider);
   if (!config) {
     throw new Error(`Unsupported OAuth provider: ${provider}`);
@@ -108,7 +184,7 @@ export async function initiateOAuthSession({
 
   const effectiveRedirectUri = config.fixedRedirectUri || redirectUri;
   const state = generateOAuthState();
-  const codeVerifier = generateCodeVerifier(64);
+  const codeVerifier = generateCodeVerifier(provUpper === "XAI" ? 96 : 64);
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const clientId = customClientId || config.defaultClientId;
 
@@ -119,6 +195,10 @@ export async function initiateOAuthSession({
   authUrl.searchParams.set("redirect_uri", effectiveRedirectUri);
   authUrl.searchParams.set("scope", config.scopes.join(" "));
   authUrl.searchParams.set("state", state);
+
+  if (provUpper === "XAI") {
+    authUrl.searchParams.set("nonce", generateOAuthState().slice(0, 32));
+  }
 
   if (config.extraAuthorizeParams) {
     for (const [key, val] of Object.entries(config.extraAuthorizeParams)) {
@@ -281,6 +361,7 @@ export async function exchangeAndSaveOAuthToken({
         const email =
           payload.email ||
           payload["https://api.openai.com/profile"]?.email ||
+          payload["https://api.x.ai/email"] ||
           payload.preferred_username ||
           null;
         const sub = payload.sub || null;
@@ -361,6 +442,12 @@ export async function exchangeAndSaveOAuthToken({
 
   let connection;
   let replaced = false;
+  const defaultBaseUrl =
+    providerKey === "XAI"
+      ? "https://api.x.ai/v1"
+      : providerKey === "GROK_CLI"
+      ? "https://cli-chat-proxy.grok.com/v1"
+      : undefined;
 
   if (existingMatches.length > 0) {
     const primaryConn = existingMatches[0];
@@ -376,6 +463,7 @@ export async function exchangeAndSaveOAuthToken({
         provider: providerKey,
         name: finalName,
         authType: "OAUTH",
+        ...(defaultBaseUrl && !primaryConn.baseUrl ? { baseUrl: defaultBaseUrl } : {}),
         accessTokenEnc,
         refreshTokenEnc: refreshTokenEnc ?? primaryConn.refreshTokenEnc,
         idTokenEnc: idTokenEnc ?? primaryConn.idTokenEnc,
@@ -411,6 +499,7 @@ export async function exchangeAndSaveOAuthToken({
         provider: providerKey,
         name,
         authType: "OAUTH",
+        ...(defaultBaseUrl ? { baseUrl: defaultBaseUrl } : {}),
         accessTokenEnc,
         refreshTokenEnc,
         idTokenEnc,
@@ -678,4 +767,195 @@ export async function pollCodeBuddyOAuth({
   }
 
   return { pending: false, error: data.msg || "Gagal mendapatkan token dari CodeBuddy" };
+}
+
+/**
+ * Polls Grok CLI (auth.x.ai/oauth2/token) with device_code until the user completes authorization.
+ */
+export async function pollGrokCliOAuth({
+  state,
+  name,
+}: {
+  state: string;
+  name?: string;
+}) {
+  const session = sessions.get(state);
+  if (!session || !session.deviceCode) {
+    return { pending: false, error: "Sesi Device Code tidak ditemukan atau telah kedaluwarsa. Silakan ulangi proses login." };
+  }
+
+  const connName = name?.trim() || session.connectionName || "";
+  const config = getProviderOAuthConfig("GROK_CLI");
+  const clientId = config?.defaultClientId || "b1a00492-073a-47ea-816f-4c329264a828";
+
+  const res = await fetch("https://auth.x.ai/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      "User-Agent": "grok-pager/1.0.44 grok-shell/1.0.44 (linux; x86_64)",
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: session.deviceCode,
+      client_id: clientId,
+    }),
+  });
+
+  const json = (await res.json().catch(() => ({}))) as Record<string, any>;
+
+  if (!res.ok) {
+    const errCode = json.error;
+    if (errCode === "authorization_pending" || errCode === "slow_down") {
+      return { pending: true };
+    }
+    sessions.delete(state);
+    return {
+      pending: false,
+      error: json.error_description || errCode || `Grok CLI token polling failed (HTTP ${res.status})`,
+    };
+  }
+
+  if (!json.access_token) {
+    return { pending: true };
+  }
+
+  const accessToken = String(json.access_token);
+  const refreshToken = json.refresh_token ? String(json.refresh_token) : null;
+  const idToken = json.id_token ? String(json.id_token) : null;
+  const expiresIn = Number(json.expires_in) || 3600;
+  const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+
+  let accountEmail: string | null = null;
+  let extractedName: string | null = null;
+
+  // 1. Try JWT decoding
+  for (const tokenCandidate of [idToken, accessToken]) {
+    if (tokenCandidate && tokenCandidate.includes(".")) {
+      try {
+        const parts = tokenCandidate.split(".");
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+          const em = payload.email || payload["https://api.x.ai/email"] || payload.preferred_username;
+          if (typeof em === "string" && em.trim()) accountEmail = em.trim();
+          if (typeof payload.name === "string" && payload.name.trim()) extractedName = payload.name.trim();
+        }
+      } catch {}
+    }
+  }
+
+  // 2. Fetch Grok CLI user profile from cli-chat-proxy.grok.com/v1/user
+  try {
+    const userRes = await fetch("https://cli-chat-proxy.grok.com/v1/user", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "User-Agent": "grok-pager/1.0.44 grok-shell/1.0.44 (linux; x86_64)",
+        "x-xai-token-auth": "xai-grok-cli",
+        "x-grok-client-version": "1.0.44",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (userRes.ok) {
+      const userInfo = (await userRes.json().catch(() => ({}))) as Record<string, any>;
+      if (typeof userInfo.email === "string" && userInfo.email.trim()) {
+        accountEmail = userInfo.email.trim();
+      }
+      const fullName = [userInfo.firstName, userInfo.lastName].filter(Boolean).join(" ").trim();
+      if (fullName) {
+        extractedName = fullName;
+      }
+    }
+  } catch {}
+
+  const existingConns = await prisma.providerConnection.findMany({
+    where: { provider: "GROK_CLI" },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const matchingConn = accountEmail
+    ? existingConns.find(
+        (c) => c.accountEmail && c.accountEmail.trim().toLowerCase() === accountEmail.trim().toLowerCase()
+      )
+    : null;
+
+  const isCustomNameProvided =
+    connName !== "" &&
+    !connName.toLowerCase().startsWith("akun ") &&
+    !connName.toLowerCase().endsWith(" account") &&
+    connName.toLowerCase() !== "grok cli" &&
+    connName.toLowerCase() !== "grok-cli";
+
+  let finalName: string;
+  if (isCustomNameProvided) {
+    finalName = connName;
+  } else if (matchingConn && matchingConn.name && !matchingConn.name.toLowerCase().startsWith("akun ")) {
+    finalName = matchingConn.name;
+  } else if (extractedName) {
+    finalName = extractedName;
+  } else if (accountEmail) {
+    finalName = accountEmail;
+  } else {
+    finalName = `Grok CLI #${existingConns.length + 1}`;
+  }
+
+  let connection;
+  let replaced = false;
+
+  if (matchingConn) {
+    connection = await prisma.providerConnection.update({
+      where: { id: matchingConn.id },
+      data: {
+        name: finalName,
+        accountEmail: accountEmail || matchingConn.accountEmail,
+        accessTokenEnc: encryptCredential(accessToken),
+        refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : matchingConn.refreshTokenEnc,
+        idTokenEnc: idToken ? encryptCredential(idToken) : matchingConn.idTokenEnc,
+        tokenExpiresAt,
+        baseUrl: "https://cli-chat-proxy.grok.com/v1",
+        isActive: true,
+        syncStatus: "NORMAL",
+        cooldownUntil: null,
+      },
+    });
+    replaced = true;
+  } else {
+    connection = await prisma.providerConnection.create({
+      data: {
+        provider: "GROK_CLI",
+        name: finalName,
+        accountEmail: accountEmail || null,
+        authType: "OAUTH",
+        baseUrl: "https://cli-chat-proxy.grok.com/v1",
+        accessTokenEnc: encryptCredential(accessToken),
+        refreshTokenEnc: refreshToken ? encryptCredential(refreshToken) : null,
+        idTokenEnc: idToken ? encryptCredential(idToken) : null,
+        tokenExpiresAt,
+        isActive: true,
+        syncStatus: "NORMAL",
+        priority: existingConns.length + 1,
+        weight: 1,
+      },
+    });
+  }
+
+  sessions.delete(state);
+  invalidateProviderConnectionsCache("GROK_CLI");
+
+  try {
+    const { syncConnectionQuota } = await import("@/lib/quota-sync");
+    syncConnectionQuota(connection.id).catch(() => {});
+  } catch {}
+
+  return {
+    pending: false,
+    success: true,
+    data: {
+      id: connection.id,
+      name: connection.name,
+      accountEmail: connection.accountEmail,
+      provider: connection.provider,
+      replaced,
+    },
+  };
 }

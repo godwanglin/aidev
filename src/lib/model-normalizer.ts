@@ -127,6 +127,20 @@ export const PROVIDER_PREFIX_REGISTRY: ProviderPrefixConfig[] = [
     providerName: "Together AI",
     defaultUpstreamModel: "deepseek-ai/DeepSeek-R1",
   },
+  {
+    prefix: "xai/",
+    providerId: "XAI",
+    providerName: "xAI (Grok)",
+    aliases: ["xai-grok/"],
+    defaultUpstreamModel: "grok-4.7",
+  },
+  {
+    prefix: "grok-cli/",
+    providerId: "GROK_CLI",
+    providerName: "Grok CLI",
+    aliases: ["grok/", "grokcli/", "grok-build/"],
+    defaultUpstreamModel: "grok-build",
+  },
 ];
 
 /**
@@ -278,6 +292,12 @@ export function normalizeModelRequest(rawModel?: string | null): NormalizedModel
   } else if (lower.startsWith("qwen-")) {
     inferredProvider = "ALIBABA";
     inferredName = "Alibaba Qwen";
+  } else if (lower === "grok-build") {
+    inferredProvider = "GROK_CLI";
+    inferredName = "Grok CLI";
+  } else if (lower.startsWith("grok-")) {
+    inferredProvider = "XAI";
+    inferredName = "xAI (Grok)";
   }
 
   // 3. Dynamic Custom Provider Prefix detection (e.g. "ipeenk/gpt-5.5" or "oc-prod/gpt-4o")

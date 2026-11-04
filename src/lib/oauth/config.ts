@@ -142,6 +142,42 @@ export const OAUTH_PROVIDERS: Record<string, ProviderOAuthConfig> = {
     usePkce: true,
     color: "#0f172a",
   },
+  XAI: {
+    name: "xAI (Grok)",
+    provider: "XAI",
+    category: "OAUTH",
+    authorizeUrl: "https://auth.x.ai/oauth2/authorize",
+    tokenUrl: "https://auth.x.ai/oauth2/token",
+    defaultClientId: process.env.XAI_OAUTH_CLIENT_ID || "b1a00492-073a-47ea-816f-4c329264a828",
+    fixedRedirectUri: "http://127.0.0.1:56121/callback",
+    extraAuthorizeParams: {
+      plan: "generic",
+      referrer: "cli-proxy-api",
+    },
+    scopes: ["openid", "profile", "email", "offline_access", "grok-cli:access", "api:access"],
+    usePkce: true,
+    color: "#111827",
+  },
+  GROK_CLI: {
+    name: "Grok CLI",
+    provider: "GROK_CLI",
+    category: "OAUTH",
+    authorizeUrl: "https://accounts.x.ai/oauth2/device",
+    tokenUrl: "https://auth.x.ai/oauth2/token",
+    defaultClientId: process.env.GROK_CLI_OAUTH_CLIENT_ID || "b1a00492-073a-47ea-816f-4c329264a828",
+    scopes: [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "grok-cli:access",
+      "api:access",
+      "conversations:read",
+      "conversations:write",
+    ],
+    usePkce: false,
+    color: "#18181b",
+  },
 };
 
 export interface CatalogProviderItem {
@@ -192,6 +228,30 @@ export const FULL_PROVIDER_CATALOG: CatalogProviderItem[] = [
     defaultPrefix: "cb/",
   },
   { id: "KIMI", name: "Kimi", slug: "kimi", category: "OAUTH", color: "#0f172a", iconName: "MessageSquare", authType: "OAUTH" },
+  {
+    id: "XAI",
+    name: "xAI (Grok)",
+    slug: "xai",
+    category: "OAUTH",
+    color: "#111827",
+    iconName: "Zap",
+    authType: "OAUTH",
+    description: "xAI (Grok) via PKCE OAuth2 (auth.x.ai -> api.x.ai/v1).",
+    baseUrl: "https://api.x.ai/v1",
+    defaultPrefix: "xai/",
+  },
+  {
+    id: "GROK_CLI",
+    name: "Grok CLI",
+    slug: "grok-cli",
+    category: "OAUTH",
+    color: "#18181b",
+    iconName: "Terminal",
+    authType: "OAUTH",
+    description: "Grok CLI (Grok Build) via Device Code OAuth2 (cli-chat-proxy.grok.com/v1).",
+    baseUrl: "https://cli-chat-proxy.grok.com/v1",
+    defaultPrefix: "grok-cli/",
+  },
 
   {
     id: "GEMINI",
@@ -349,6 +409,12 @@ export function findProviderBySlugOrId(slugOrId: string): CatalogProviderItem | 
   if (norm === "chatgpt" || norm === "chatgptweb" || norm === "gptweb") {
     return FULL_PROVIDER_CATALOG.find((p) => p.id === "CHATGPT_WEB") || null;
   }
+  if (norm === "xai" || norm === "grokxai" || norm === "xaigrok") {
+    return FULL_PROVIDER_CATALOG.find((p) => p.id === "XAI") || null;
+  }
+  if (norm === "grokcli" || norm === "grok" || norm === "grokbuild") {
+    return FULL_PROVIDER_CATALOG.find((p) => p.id === "GROK_CLI") || null;
+  }
 
   return null;
 }
@@ -464,6 +530,24 @@ export const SHARED_PROVIDER_MODELS: Record<string, { id: string; name: string }
     { id: "kimi/moonshot-v1-128k", name: "Moonshot Kimi 128K" },
     { id: "kimi/moonshot-v1-32k", name: "Moonshot Kimi 32K" },
     { id: "kimi/moonshot-v1-8k", name: "Moonshot Kimi 8K" },
+  ],
+  XAI: [
+    { id: "xai/grok-4.7", name: "Grok 4.7" },
+    { id: "xai/grok-4.5", name: "Grok 4.5" },
+    { id: "xai/grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning" },
+    { id: "xai/grok-4-fast-non-reasoning", name: "Grok 4 Fast Non-Reasoning" },
+    { id: "xai/grok-3", name: "Grok 3" },
+    { id: "xai/grok-3-mini", name: "Grok 3 Mini" },
+    { id: "xai/grok-imagine-image", name: "Grok Imagine Image" },
+  ],
+  GROK_CLI: [
+    { id: "grok-cli/grok-build", name: "Grok Build" },
+    { id: "grok-cli/grok-4.7", name: "Grok 4.7" },
+    { id: "grok-cli/grok-4.5", name: "Grok 4.5" },
+    { id: "grok-cli/grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning" },
+    { id: "grok-cli/grok-4-fast-non-reasoning", name: "Grok 4 Fast Non-Reasoning" },
+    { id: "grok-cli/grok-3", name: "Grok 3" },
+    { id: "grok-cli/grok-3-mini", name: "Grok 3 Mini" },
   ],
   OPENROUTER: [
     { id: "or/openrouter/free", name: "Free Models Router (OpenRouter)" },

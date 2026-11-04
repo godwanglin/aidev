@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
-import { pollCodeBuddyOAuth } from "@/lib/oauth/service";
+import { pollCodeBuddyOAuth, pollGrokCliOAuth } from "@/lib/oauth/service";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -27,6 +27,11 @@ export async function POST(req: NextRequest) {
     const provUpper = (provider || "").toUpperCase();
     if (provUpper === "CODEBUDDY" || provUpper === "CODEBUDDY_INTL" || provUpper === "CBAI") {
       const pollResult = await pollCodeBuddyOAuth({ state, name });
+      return NextResponse.json(pollResult);
+    }
+
+    if (provUpper === "GROK_CLI" || provUpper === "GROK-CLI" || provUpper === "GROK") {
+      const pollResult = await pollGrokCliOAuth({ state, name });
       return NextResponse.json(pollResult);
     }
 

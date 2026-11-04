@@ -87,6 +87,18 @@ export async function GET(req: NextRequest) {
                 headers["Authorization"] = `Bearer ${token}`;
               }
             }
+            if (providerKey === "XAI") {
+              headers["User-Agent"] = "grok-cli/9router";
+              headers["Accept"] = "application/json";
+            } else if (providerKey === "GROK_CLI" || providerKey === "GROK") {
+              headers["User-Agent"] = "grok-shell/1.0.44 (linux; x86_64)";
+              headers["Accept"] = "application/json";
+              headers["x-xai-token-auth"] = "xai-grok-cli";
+              headers["x-grok-client-identifier"] = "grok-shell";
+              headers["x-grok-client-version"] = "1.0.44";
+              headers["x-grok-client-mode"] = "headless";
+              if (conn?.accountEmail) headers["x-email"] = conn.accountEmail;
+            }
 
             const res = await fetch(modelsUrl, { headers });
             if (res.ok) {
@@ -368,6 +380,125 @@ export async function GET(req: NextRequest) {
                 source: "LIVE_UPSTREAM",
                 count: liveModels.length,
               });
+            }
+          }
+        } else if (providerKey === "XAI") {
+          if (token) {
+            const res = await fetch("https://api.x.ai/v1/models", {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "User-Agent": "grok-cli/9router",
+                Accept: "application/json",
+              },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+              if (list.length > 0) {
+                const prefix = "xai/";
+                const liveModels = list
+                  .map((m: any) => {
+                    const rawId = typeof m === "string" ? m : m.id || m.name;
+                    return {
+                      id: !rawId.includes("/") ? `${prefix}${rawId}` : rawId,
+                      name: m.display_name || m.name || rawId,
+                    };
+                  })
+                  .sort((a: any, b: any) => a.id.localeCompare(b.id));
+
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "128k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
+                }
+
+                return NextResponse.json({
+                  success: true,
+                  provider: providerKey,
+                  models: liveModels,
+                  source: "LIVE_UPSTREAM",
+                  count: liveModels.length,
+                });
+              }
+            }
+          }
+        } else if (providerKey === "GROK_CLI" || providerKey === "GROK") {
+          if (token) {
+            const grokHeaders: Record<string, string> = {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
+              "x-xai-token-auth": "xai-grok-cli",
+              "x-grok-client-identifier": "grok-shell",
+              "x-grok-client-version": "1.0.44",
+              "x-grok-client-mode": "headless",
+            };
+            if (conn?.accountEmail) grokHeaders["x-email"] = conn.accountEmail;
+
+            const res = await fetch("https://cli-chat-proxy.grok.com/v1/models", {
+              headers: grokHeaders,
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+              if (list.length > 0) {
+                const prefix = "grok-cli/";
+                const liveModels = list
+                  .map((m: any) => {
+                    const rawId = typeof m === "string" ? m : m.id || m.name;
+                    return {
+                      id: !rawId.includes("/") ? `${prefix}${rawId}` : rawId,
+                      name: m.display_name || m.name || rawId,
+                    };
+                  })
+                  .sort((a: any, b: any) => a.id.localeCompare(b.id));
+
+                if (persistImport) {
+                  for (const m of liveModels) {
+                    await prisma.aiModel.upsert({
+                      where: { modelId: m.id },
+                      create: {
+                        modelId: m.id,
+                        name: m.name,
+                        provider: providerKey,
+                        promptCost: 0,
+                        completionCost: 0,
+                        contextWindow: "128k",
+                        isActive: true,
+                      },
+                      update: {
+                        name: m.name,
+                        provider: providerKey,
+                        isActive: true,
+                      },
+                    }).catch(() => null);
+                  }
+                }
+
+                return NextResponse.json({
+                  success: true,
+                  provider: providerKey,
+                  models: liveModels,
+                  source: "LIVE_UPSTREAM",
+                  count: liveModels.length,
+                });
+              }
             }
           }
         }

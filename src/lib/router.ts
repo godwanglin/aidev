@@ -60,7 +60,7 @@ export function normalizeModelName(m: string): string {
   return m
     .toLowerCase()
     .trim()
-    .replace(/^(ag|cx|cc|gem|copilot|cb|kimi|or|qwen|groq|mistral|together|gptweb|chatgpt|deepseek|ollama)\//i, "");
+    .replace(/^(ag|cx|cc|gem|copilot|cb|kimi|or|qwen|groq|mistral|together|gptweb|chatgpt|deepseek|ollama|xai|grok-cli|grok)\//i, "");
 }
 
 export function matchesModel(configuredModel: string, targetModel?: string): boolean {
@@ -168,6 +168,8 @@ export async function resolveUpstreamConnection(context: RouteContext): Promise<
     ...(targetProvider === 'GROQ' ? ['GROQ'] : []),
     ...(targetProvider === 'MISTRAL' ? ['MISTRAL'] : []),
     ...(targetProvider === 'TOGETHER' ? ['TOGETHER'] : []),
+    ...(targetProvider === 'XAI' ? ['XAI'] : []),
+    ...(targetProvider === 'GROK_CLI' || targetProvider === 'GROK' ? ['GROK_CLI', 'GROK'] : []),
   ];
 
   // 1. In-memory cache scan: fetch all active connections for this provider set
@@ -347,6 +349,13 @@ async function buildRouteResult(connection: any, norm?: NormalizedModelResult): 
       case 'CODEBUDDY_INTL':
       case 'CBAI':
         baseUrl = 'https://www.codebuddy.ai/v2';
+        break;
+      case 'XAI':
+        baseUrl = 'https://api.x.ai/v1';
+        break;
+      case 'GROK_CLI':
+      case 'GROK':
+        baseUrl = 'https://cli-chat-proxy.grok.com/v1';
         break;
       default:
         baseUrl = connection.baseUrl || 'https://api.openai.com/v1';

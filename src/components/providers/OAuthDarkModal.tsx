@@ -19,16 +19,21 @@ export default function OAuthDarkModal({
   onSuccess,
   onError,
 }: OAuthDarkModalProps) {
+  const isDeviceFlowProvider = provider.id === "CODEBUDDY" || provider.id === "GROK_CLI";
+
   const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState("");
   const [oauthState, setOauthState] = useState("");
   const [oauthCodeVerifier, setOauthCodeVerifier] = useState("");
+  const [oauthUserCode, setOauthUserCode] = useState("");
+  const [oauthVerificationUri, setOauthVerificationUri] = useState("");
   const [oauthCallbackInput, setOauthCallbackInput] = useState("");
   const [accountName, setAccountName] = useState(
-    provider.id === "CODEBUDDY" ? "" : `Akun ${provider.name}`
+    isDeviceFlowProvider ? "" : `Akun ${provider.name}`
   );
   const [isInitiating, setIsInitiating] = useState(false);
   const [isExchanging, setIsExchanging] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [modalError, setModalError] = useState("");
 
   async function startSession(openPopup = false) {
@@ -47,7 +52,9 @@ export default function OAuthDarkModal({
       if (json.success && json.data) {
         setOauthAuthorizeUrl(json.data.authorizeUrl);
         setOauthState(json.data.state);
-        setOauthCodeVerifier(json.data.codeVerifier);
+        setOauthCodeVerifier(json.data.codeVerifier || "");
+        setOauthUserCode(json.data.userCode || "");
+        setOauthVerificationUri(json.data.verificationUri || "");
 
         if (openPopup) {
           const width = 600;
@@ -90,11 +97,12 @@ export default function OAuthDarkModal({
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Polling effect for device-flow providers (CodeBuddy)
+  // Polling effect for device-flow providers (CodeBuddy & Grok CLI)
   useEffect(() => {
-    if (provider.id !== "CODEBUDDY" || !oauthState) return;
+    if (!isDeviceFlowProvider || !oauthState) return;
 
     let stopped = false;
+    const pollDelayMs = provider.id === "GROK_CLI" ? 4500 : 3000;
     const interval = setInterval(async () => {
       if (stopped || isExchanging) return;
       try {
@@ -111,19 +119,23 @@ export default function OAuthDarkModal({
         if (json.success) {
           stopped = true;
           clearInterval(interval);
-          onSuccess(`Berhasil menghubungkan ${provider.name} via OAuth!`);
+          onSuccess(
+            `Berhasil menghubungkan ${provider.name}${
+              json.data?.accountEmail ? ` (${json.data.accountEmail})` : ""
+            } via OAuth!`
+          );
           onClose();
         } else if (json.error && !json.pending) {
           setModalError(json.error);
         }
       } catch {}
-    }, 3000);
+    }, pollDelayMs);
 
     return () => {
       stopped = true;
       clearInterval(interval);
     };
-  }, [provider.id, oauthState, accountName, isExchanging]);
+  }, [isDeviceFlowProvider, provider.id, provider.name, oauthState, accountName, isExchanging]);
 
   async function copyUrl() {
     if (!oauthAuthorizeUrl) return;
@@ -131,6 +143,15 @@ export default function OAuthDarkModal({
       await navigator.clipboard.writeText(oauthAuthorizeUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  }
+
+  async function copyUserCode() {
+    if (!oauthUserCode) return;
+    try {
+      await navigator.clipboard.writeText(oauthUserCode);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
     } catch {}
   }
 
@@ -288,7 +309,48 @@ export default function OAuthDarkModal({
           </div>
 
           {/* Step 2: Paste Callback or Auto-Poll note */}
-          {provider.id === "CODEBUDDY" ? (
+          {provider.id === "GROK_CLI" ? (
+            <>
+              <div className="oauth-step-block">
+                <label className="oauth-step-label">
+                  Langkah 2: Masukkan Kode Perangkat (Device Code) di Browser
+                </label>
+                <div className="oauth-input-action-row">
+                  <input
+                    type="text"
+                    readOnly
+                    className="oauth-input-control readonly font-mono font-bold tracking-widest text-center text-base"
+                    value={oauthUserCode || "Memuat kode..."}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <button
+                    type="button"
+                    className="oauth-copy-btn-light"
+                    onClick={copyUserCode}
+                    disabled={!oauthUserCode}
+                  >
+                    {copiedCode ? (
+                      <>
+                        <Check size={12} className="text-[var(--green)]" />
+                        <span>Tersalin</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} />
+                        <span>Salin Kode</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="oauth-step-subtext" style={{ marginTop: "6px" }}>
+                  Buka URL di atas atau{" "}
+                  <code>{oauthVerificationUri || "https://accounts.x.ai/oauth2/device"}</code> di
+                  browser, login ke akun xAI/Grok Anda, lalu setujui otorisasi kode di atas. Sistem
+                  ini akan otomatis mendeteksi keberhasilan login dalam beberapa detik.
+                </p>
+              </div>
+            </>
+          ) : provider.id === "CODEBUDDY" ? (
             <div className="oauth-step-block">
               <label className="oauth-step-label">
                 Langkah 2: Otorisasi Otomatis
@@ -303,14 +365,27 @@ export default function OAuthDarkModal({
                 Langkah 2: Tempelkan URL Callback dari Browser
               </label>
               <p className="oauth-step-subtext">
-                Setelah login, salin seluruh URL dari address bar browser (misal: <code>http://localhost:1455/auth/callback?code=...</code> atau <code>http://localhost:443/...</code>). Abaikan jika browser menampilkan <i>&apos;This site can&apos;t be reached&apos;</i>.
+                Setelah login, salin seluruh URL dari address bar browser (misal:{" "}
+                {provider.id === "XAI" ? (
+                  <code>http://127.0.0.1:56121/callback?code=...&amp;state=...</code>
+                ) : (
+                  <>
+                    <code>http://localhost:1455/auth/callback?code=...</code> atau{" "}
+                    <code>http://localhost:443/...</code>
+                  </>
+                )}
+                ). Abaikan jika browser menampilkan <i>&apos;This site can&apos;t be reached&apos;</i>.
               </p>
               <input
                 type="text"
                 className="oauth-input-control"
                 value={oauthCallbackInput}
                 onChange={(e) => setOauthCallbackInput(e.target.value)}
-                placeholder="http://localhost:.../callback?code=...&state=..."
+                placeholder={
+                  provider.id === "XAI"
+                    ? "http://127.0.0.1:56121/callback?code=...&state=..."
+                    : "http://localhost:.../callback?code=...&state=..."
+                }
               />
             </div>
           )}
@@ -326,8 +401,8 @@ export default function OAuthDarkModal({
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
               placeholder={
-                provider.id === "CODEBUDDY"
-                  ? "Otomatis dari profil akun / Cbai (atau isi kustom)"
+                isDeviceFlowProvider
+                  ? `Otomatis dari profil akun ${provider.name} (atau isi kustom)`
                   : `Contoh: Akun ${provider.name} Utama`
               }
             />
@@ -344,7 +419,7 @@ export default function OAuthDarkModal({
           >
             Batal
           </button>
-          {provider.id === "CODEBUDDY" ? (
+          {isDeviceFlowProvider ? (
             <button
               type="button"
               className="oauth-footer-submit-btn"
@@ -363,7 +438,11 @@ export default function OAuthDarkModal({
                   });
                   const json = await res.json();
                   if (json.success) {
-                    onSuccess(`Berhasil menghubungkan ${provider.name} via OAuth!`);
+                    onSuccess(
+                      `Berhasil menghubungkan ${provider.name}${
+                        json.data?.accountEmail ? ` (${json.data.accountEmail})` : ""
+                      } via OAuth!`
+                    );
                     onClose();
                   } else if (json.pending) {
                     setModalError("Login belum selesai di browser. Silakan selesaikan login terlebih dahulu.");

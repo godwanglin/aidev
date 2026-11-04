@@ -72,7 +72,14 @@ export async function syncProviderModelsToDatabase(): Promise<{
       continue;
     }
 
-    const baseUrlRaw = conn.baseUrl || customProv?.baseUrl || "";
+    const baseUrlRaw =
+      conn.baseUrl ||
+      customProv?.baseUrl ||
+      (provUpper === "XAI"
+        ? "https://api.x.ai/v1"
+        : provUpper === "GROK_CLI" || provUpper === "GROK"
+        ? "https://cli-chat-proxy.grok.com/v1"
+        : "");
     if (baseUrlRaw && token) {
       let baseUrl = baseUrlRaw.replace(/\/+$/, "");
       if (baseUrl.endsWith("/chat/completions")) {
@@ -100,6 +107,19 @@ export async function syncProviderModelsToDatabase(): Promise<{
           headers["anthropic-version"] = "2023-06-01";
         } else {
           headers["Authorization"] = `Bearer ${token}`;
+        }
+
+        if (provUpper === "XAI") {
+          headers["User-Agent"] = "grok-cli/9router";
+          headers["Accept"] = "application/json";
+        } else if (provUpper === "GROK_CLI" || provUpper === "GROK") {
+          headers["User-Agent"] = "grok-shell/1.0.44 (linux; x86_64)";
+          headers["Accept"] = "application/json";
+          headers["x-xai-token-auth"] = "xai-grok-cli";
+          headers["x-grok-client-identifier"] = "grok-shell";
+          headers["x-grok-client-version"] = "1.0.44";
+          headers["x-grok-client-mode"] = "headless";
+          if (conn.accountEmail) headers["x-email"] = conn.accountEmail;
         }
 
         const res = await fetch(modelsUrl, { headers });
