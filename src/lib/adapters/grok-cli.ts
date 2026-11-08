@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { logUpstreamRequest, refreshConnectionOn401, markConnectionCooldown } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
 import { adminLogger } from "@/lib/admin-logger";
-import { extractAnthropicText, fixMissingToolResponsesOpenAI, fixOrphanedToolResponsesOpenAI } from "./anthropic";
+import { extractAnthropicText, fixMissingToolResponsesOpenAI, fixOrphanedToolResponsesOpenAI, sanitizeToolParameters } from "./anthropic";
 
 export const GROK_CLI_RESPONSES_ENDPOINT = "https://cli-chat-proxy.grok.com/v1/responses";
 export const GROK_CLI_VERSION = "1.0.44";
@@ -67,7 +67,7 @@ function formatGrokCliTools(tools: any[]): any[] {
         type: "function",
         name,
         description: fn.description || t.description || "",
-        parameters: schema && typeof schema === "object" ? schema : { type: "object", properties: {} },
+        parameters: sanitizeToolParameters(schema),
       });
     } else if (t.type === "custom") {
       result.push(t);
@@ -324,7 +324,7 @@ export async function dispatchGrokCliChat(params: GrokCliDispatchParams): Promis
       totalTokens: 15,
       latencyMs: Date.now() - startTime,
       statusCode: response.status,
-      isFailover: response.status === 401 || response.status === 402 || response.status === 429 || response.status >= 500,
+      isFailover: response.status === 400 || response.status === 401 || response.status === 402 || response.status === 429 || response.status >= 500,
       failoverReason: `Grok CLI HTTP ${response.status}: ${errMsg}`,
     }).catch(() => {});
 

@@ -1146,44 +1146,45 @@ export function sanitizeAnthropicInputSchema(rawSchema: any): Record<string, any
     delete schema.allOf;
   }
 
-  // 2. Process top-level anyOf / oneOf
-  const combinator = schema.anyOf || schema.oneOf;
-  if (Array.isArray(combinator) && combinator.length > 0) {
-    const nonNullVariants = combinator.filter(
-      (v: any) => v && typeof v === "object" && v.type !== "null"
-    );
+  // 2. Process top-level anyOf and oneOf
+  for (const combKey of ["anyOf", "oneOf"] as const) {
+    const combinator = schema[combKey];
+    if (Array.isArray(combinator) && combinator.length > 0) {
+      const nonNullVariants = combinator.filter(
+        (v: any) => v && typeof v === "object" && v.type !== "null"
+      );
 
-    if (nonNullVariants.length > 0) {
-      const mergedProps: Record<string, any> = {};
-      const variantReqLists: string[][] = [];
+      if (nonNullVariants.length > 0) {
+        const mergedProps: Record<string, any> = {};
+        const variantReqLists: string[][] = [];
 
-      for (const variant of nonNullVariants) {
-        const res = extractPropertiesAndRequired(variant);
-        Object.assign(mergedProps, res.properties);
-        if (res.required.length > 0) {
-          variantReqLists.push(res.required);
+        for (const variant of nonNullVariants) {
+          const res = extractPropertiesAndRequired(variant);
+          Object.assign(mergedProps, res.properties);
+          if (res.required.length > 0) {
+            variantReqLists.push(res.required);
+          }
+        }
+
+        schema.properties = { ...mergedProps, ...(schema.properties || {}) };
+
+        // For required: if all variants define required fields, take intersection
+        if (variantReqLists.length === nonNullVariants.length && variantReqLists.length > 0) {
+          const commonReq = variantReqLists[0].filter((k) =>
+            variantReqLists.every((list) => list.includes(k))
+          );
+          if (commonReq.length > 0 || Array.isArray(schema.required)) {
+            schema.required = Array.from(new Set([...(schema.required || []), ...commonReq]));
+          }
+        }
+
+        if (!schema.description && nonNullVariants[0]?.description) {
+          schema.description = nonNullVariants[0].description;
         }
       }
 
-      schema.properties = { ...mergedProps, ...(schema.properties || {}) };
-
-      // For required: if all variants define required fields, take intersection
-      if (variantReqLists.length === nonNullVariants.length && variantReqLists.length > 0) {
-        const commonReq = variantReqLists[0].filter((k) =>
-          variantReqLists.every((list) => list.includes(k))
-        );
-        if (commonReq.length > 0 || Array.isArray(schema.required)) {
-          schema.required = Array.from(new Set([...(schema.required || []), ...commonReq]));
-        }
-      }
-
-      if (!schema.description && nonNullVariants[0]?.description) {
-        schema.description = nonNullVariants[0].description;
-      }
+      delete schema[combKey];
     }
-
-    delete schema.anyOf;
-    delete schema.oneOf;
   }
 
   // 3. Ensure top-level type is strictly "object"
@@ -1217,6 +1218,8 @@ export function sanitizeAnthropicInputSchema(rawSchema: any): Record<string, any
 
   return schema;
 }
+
+export const sanitizeToolParameters = sanitizeAnthropicInputSchema;
 
 /**
  * Normalizes tool_choice for Anthropic Messages API.

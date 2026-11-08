@@ -15,6 +15,7 @@ import {
   convertOpenAiToAnthropicPayload,
   applyClaudeCodeCloaking,
   sanitizeAnthropicInputSchema,
+  sanitizeToolParameters,
   normalizeAnthropicToolChoice,
   transformAnthropicResponseToOpenAi,
   transformChatResponseToAnthropic,
@@ -1460,7 +1461,7 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
           estimatedPromptTokens,
         });
 
-        if ((response.status === 401 || response.status === 402 || response.status === 429 || response.status >= 500) && !isLastCandidate) {
+        if ((response.status === 400 || response.status === 401 || response.status === 402 || response.status === 429 || response.status >= 500) && !isLastCandidate) {
           adminLogger.fallback({
             fromModel: candidateModel,
             toModel: candidates[candIdx + 1],
@@ -1625,6 +1626,40 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         }
 
         if (modified) {
+          bodyToSend = JSON.stringify(parsed);
+        }
+      } catch {}
+    }
+
+    // Grok & xAI tool schema sanitization: strictly requires parameter root to be type "object" without anyOf/oneOf non-object branches
+    const isXaiOrGrok =
+      activeProvider === "XAI" ||
+      isGrokCliProvider(activeProvider) ||
+      candidateModel.toLowerCase().includes("grok") ||
+      candidateModel.toLowerCase().includes("xai");
+
+    if (isXaiOrGrok) {
+      try {
+        const parsed = JSON.parse(bodyToSend);
+        if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+          parsed.tools = parsed.tools.map((t: any) => {
+            if (!t || typeof t !== "object") return t;
+            if (t.function && typeof t.function === "object") {
+              return {
+                ...t,
+                function: {
+                  ...t.function,
+                  parameters: sanitizeToolParameters(t.function.parameters),
+                },
+              };
+            } else if (t.parameters) {
+              return {
+                ...t,
+                parameters: sanitizeToolParameters(t.parameters),
+              };
+            }
+            return t;
+          });
           bodyToSend = JSON.stringify(parsed);
         }
       } catch {}

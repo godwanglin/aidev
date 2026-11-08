@@ -1,5 +1,6 @@
 import { logUpstreamRequest } from "@/lib/router";
 import { logRequest } from "@/lib/logger";
+import { sanitizeToolParameters } from "./anthropic";
 
 export interface ResponsesDispatchParams {
   rawBody: string;
@@ -222,7 +223,7 @@ export function convertResponsesToolsToChatTools(tools: any[]): any[] {
             function: {
               name: bareName,
               description: inner.description || (inner.function && inner.function.description) || "",
-              parameters: inner.parameters || (inner.function && inner.function.parameters) || { type: "object", properties: {} },
+              parameters: sanitizeToolParameters(inner.parameters || (inner.function && inner.function.parameters)),
               ...(inner.strict !== undefined ? { strict: inner.strict } : {}),
             },
           });
@@ -243,7 +244,7 @@ export function convertResponsesToolsToChatTools(tools: any[]): any[] {
         function: {
           name: bareName,
           description: t.description || "",
-          parameters: t.parameters || { type: "object", properties: {} },
+          parameters: sanitizeToolParameters(t.parameters),
           ...(t.strict !== undefined ? { strict: t.strict } : {}),
         },
       });
@@ -257,6 +258,7 @@ export function convertResponsesToolsToChatTools(tools: any[]): any[] {
         function: {
           ...t.function,
           name: bareName,
+          parameters: sanitizeToolParameters(t.function.parameters),
         },
       });
     }
