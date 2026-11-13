@@ -594,13 +594,15 @@ export default function AdminQuotaTrackerPage() {
         };
       });
 
-      // Sort buckets consistently (Gemini Weekly, Gemini 5h, Claude/GPT Weekly, Claude/GPT 5h, etc.)
+      // Sort buckets consistently (Gemini 4 Argon Weekly, Gemini 4 Argon 5h, Gemini Weekly, Gemini 5h, Claude/GPT Weekly, Claude/GPT 5h, etc.)
       buckets.sort((a, b) => {
         const order: Record<string, number> = {
-          "Gemini (Weekly)": 1,
-          "Gemini (5 Hours)": 2,
-          "Claude & GPT (Weekly)": 3,
-          "Claude & GPT (5 Hours)": 4,
+          "Gemini 4 Argon (Weekly)": 1,
+          "Gemini 4 Argon (5 Hours)": 2,
+          "Gemini (Weekly)": 3,
+          "Gemini (5 Hours)": 4,
+          "Claude & GPT (Weekly)": 5,
+          "Claude & GPT (5 Hours)": 6,
         };
         const ordA = order[a.name] ?? 99;
         const ordB = order[b.name] ?? 99;

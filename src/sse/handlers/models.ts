@@ -55,7 +55,7 @@ export async function handleModelsList(req?: NextRequest): Promise<NextResponse>
       ? "openai"
       : firstItemLower.startsWith("cc/") || c.comboId.includes("claude")
       ? "anthropic"
-      : firstItemLower.startsWith("ag/") || c.comboId.includes("gemini")
+      : firstItemLower.startsWith("ag/") || c.comboId.includes("gemini") || c.comboId.includes("argon") || c.comboId.includes("carbon")
       ? "google"
       : firstItemLower.startsWith("deepseek/") || c.comboId.includes("deepseek")
       ? "deepseek"

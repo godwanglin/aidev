@@ -80,18 +80,22 @@ async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaB
 
               const is5h =
                 b.window === "5h" ||
-                b.bucketId?.includes("5h") ||
+                b.bucketId?.toLowerCase().includes("5h") ||
+                b.bucketId?.toLowerCase().includes("session") ||
+                b.displayName?.toLowerCase().includes("5h") ||
+                b.displayName?.toLowerCase().includes("session") ||
                 b.displayName?.toLowerCase().includes("five hour");
 
               let name = "";
-              if (
-                group.displayName?.toLowerCase().includes("gemini") ||
-                b.bucketId?.startsWith("gemini")
-              ) {
+              const targetStr = `${group.displayName || ""} ${b.displayName || ""} ${b.bucketId || ""}`.toLowerCase();
+
+              if (targetStr.includes("argon")) {
+                name = is5h ? "Gemini 4 Argon (5 Hours)" : "Gemini 4 Argon (Weekly)";
+              } else if (targetStr.includes("gemini")) {
                 name = is5h ? "Gemini (5 Hours)" : "Gemini (Weekly)";
               } else if (
-                group.displayName?.toLowerCase().includes("claude") ||
-                group.displayName?.toLowerCase().includes("gpt") ||
+                targetStr.includes("claude") ||
+                targetStr.includes("gpt") ||
                 b.bucketId?.startsWith("3p")
               ) {
                 name = is5h ? "Claude & GPT (5 Hours)" : "Claude & GPT (Weekly)";
@@ -131,7 +135,11 @@ async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaB
 
       if (modelsRes.ok) {
         const modelsJson = await modelsRes.json();
-        const flashModel = modelsJson.models?.["gemini-2.5-flash"] || modelsJson.models?.["gemini-3.6-flash-high"];
+        const flashModel =
+          modelsJson.models?.["gemini-2.5-flash"] ||
+          modelsJson.models?.["gemini-3.6-flash-high"] ||
+          modelsJson.models?.["gemini-4-argon"] ||
+          modelsJson.models?.["gemini-4-argon-medium"];
         if (flashModel?.quotaInfo) {
           const fraction = flashModel.quotaInfo.remainingFraction ?? 1.0;
           const pct = Math.round(fraction * 100);
@@ -154,6 +162,16 @@ async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaB
   // If still empty, return default 100% placeholder
   if (quotas.length === 0) {
     quotas.push(
+      {
+        id: "gemini-argon-weekly",
+        name: "Gemini 4 Argon (Weekly)",
+        remainingFraction: 1.0,
+        usedAmount: 0,
+        totalAmount: 1000,
+        percentage: 100,
+        resetHuman: "in 7d 0h 0m",
+        status: "HEALTHY",
+      },
       {
         id: "gemini-weekly",
         name: "Gemini (Weekly)",

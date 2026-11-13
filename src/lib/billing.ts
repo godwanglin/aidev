@@ -112,7 +112,12 @@ export async function getModelUsdRates(modelId: string): Promise<{
   } else if (normModel.includes("deepseek")) {
     rateInUsdPer1m = 0.27;
     rateOutUsdPer1m = 1.10;
-  } else if (normModel.includes("gemini-2.5-pro") || normModel.includes("gemini-3.1-pro")) {
+  } else if (
+    normModel.includes("gemini-2.5-pro") ||
+    normModel.includes("gemini-3.1-pro") ||
+    normModel.includes("argon") ||
+    normModel.includes("carbon")
+  ) {
     rateInUsdPer1m = 1.25;
     rateOutUsdPer1m = 5.00;
   }

@@ -50,10 +50,24 @@ export function getModelCapabilities(modelId: string, provider: string): {
     maxOutput = isAgClaude ? 128000 : 64000;
     reasoning = lower.includes("thinking") || lower.includes("3-7") || lower.includes("opus") || isAgClaude;
     ownedBy = "anthropic";
-  } else if (lower.startsWith("ag/") || lower.includes("gemini") || provLower.includes("gemini") || provLower.includes("google") || provLower === "antigravity") {
+  } else if (
+    lower.startsWith("ag/") ||
+    lower.includes("gemini") ||
+    lower.includes("argon") ||
+    lower.includes("carbon") ||
+    provLower.includes("gemini") ||
+    provLower.includes("google") ||
+    provLower === "antigravity"
+  ) {
     contextWindow = (lower.includes("1.5-pro") || lower.includes("2.5-pro")) ? 2000000 : 1000000;
     maxOutput = 65536;
-    reasoning = lower.includes("thinking") || lower.includes("high") || lower.includes("medium");
+    reasoning =
+      lower.includes("thinking") ||
+      lower.includes("high") ||
+      lower.includes("medium") ||
+      lower.includes("gemini-4") ||
+      lower.includes("argon") ||
+      lower.includes("carbon");
     ownedBy = "google";
   } else if (lower.startsWith("deepseek/") || lower.includes("deepseek") || provLower.includes("deepseek")) {
     if (lower.includes("v4")) {

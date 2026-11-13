@@ -22,6 +22,23 @@ export function isAntigravityProvider(provider?: string): boolean {
   return p === "ANTIGRAVITY" || p === "GOOGLE_AG";
 }
 
+/**
+ * Gemini 4 removes sampling parameters (temperature, top_p, top_k);
+ * sending them causes Cloud Code Assist to fail with HTTP 400.
+ */
+export function isGemini4Model(model: string): boolean {
+  return /(?:^|\/)gemini-4(?:$|[-.])/i.test(model) || /argon|carbon/i.test(model);
+}
+
+/**
+ * Gemini 4 rejects a merged user turn whose last part is not a functionResponse.
+ */
+export function functionResponsesLast(parts: any[]): any[] {
+  const responses = parts.filter((p) => p && p.functionResponse);
+  if (responses.length === 0) return parts;
+  return [...parts.filter((p) => !p || !p.functionResponse), ...responses];
+}
+
 export interface AntigravityDispatchParams {
   rawBody: string;
   parsedBody: any;
@@ -319,13 +336,20 @@ function convertOpenAiMessagesToGemini(messages: any[], wireModel?: string): {
     }
 
     if (contents.length === 0) {
+      if (turn.role === "user") {
+        turn.parts = functionResponsesLast(turn.parts);
+      }
       contents.push(turn);
       continue;
     }
     const lastTurn = contents[contents.length - 1];
     if (lastTurn.role === turn.role) {
-      lastTurn.parts.push(...turn.parts);
+      const mergedParts = [...lastTurn.parts, ...turn.parts];
+      lastTurn.parts = lastTurn.role === "user" ? functionResponsesLast(mergedParts) : mergedParts;
     } else {
+      if (turn.role === "user") {
+        turn.parts = functionResponsesLast(turn.parts);
+      }
       contents.push(turn);
     }
   }
@@ -510,15 +534,37 @@ function mapToWireModel(model: string, effortStr?: string): string {
     .trim()
     .toLowerCase();
 
-  // Keep Gemini 4 Argon wire model names
-  if (clean.includes("argon")) {
+  // Gemini 4 Argon
+  if (clean.includes("argon") || clean.startsWith("gemini-4-argon")) {
     if (clean.includes("low") || effortStr === "low") {
       return "gemini-4-argon-low";
     }
-    if (clean.includes("medium") || effortStr === "medium") {
-      return "gemini-4-argon-medium";
+    if (clean.includes("high") || effortStr === "high") {
+      return "gemini-4-argon-high";
     }
-    return "gemini-4-argon-high";
+    return "gemini-4-argon-medium";
+  }
+
+  // Gemini 4 Carbon
+  if (clean.includes("carbon") || clean.startsWith("gemini-4-carbon")) {
+    if (clean.includes("low") || effortStr === "low") {
+      return "gemini-4-carbon-low";
+    }
+    if (clean.includes("high") || effortStr === "high") {
+      return "gemini-4-carbon-high";
+    }
+    return "gemini-4-carbon-medium";
+  }
+
+  // Gemini 4 generic fallback
+  if (clean === "gemini-4" || clean.startsWith("gemini-4-")) {
+    if (clean.includes("low") || effortStr === "low") {
+      return "gemini-4-argon-low";
+    }
+    if (clean.includes("high") || effortStr === "high") {
+      return "gemini-4-argon-high";
+    }
+    return "gemini-4-argon-medium";
   }
 
   // Claude Opus 5.5 tiers (Pro/Ultra accounts)
@@ -611,11 +657,14 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
   } else {
     generationConfig.maxOutputTokens = isClaude ? 16384 : Math.max(wireModel.includes("thinking") ? 16384 : 4096, thinkingBudget > 0 ? thinkingBudget + 4096 : 4096);
   }
-  if (params.parsedBody.temperature !== undefined) {
-    generationConfig.temperature = Number(params.parsedBody.temperature);
-  }
-  if (params.parsedBody.top_p !== undefined) {
-    generationConfig.topP = Number(params.parsedBody.top_p);
+  const isGemini4 = isGemini4Model(wireModel);
+  if (!isGemini4) {
+    if (params.parsedBody.temperature !== undefined) {
+      generationConfig.temperature = Number(params.parsedBody.temperature);
+    }
+    if (params.parsedBody.top_p !== undefined) {
+      generationConfig.topP = Number(params.parsedBody.top_p);
+    }
   }
 
   if (thinkingBudget === 0) {
