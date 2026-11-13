@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { decryptCredential } from "@/lib/crypto";
 import { ANTIGRAVITY_ENDPOINT_DAILY } from "@/lib/adapters/antigravity";
+import { refreshOAuthToken } from "@/lib/oauth/service";
 
 export interface QuotaBucketItem {
   id: string;
@@ -48,35 +49,119 @@ function formatResetRemaining(resetIso?: string | null): string {
 /**
  * Fetches real live quota for an Antigravity account from Google Cloud Code Assist API.
  */
-async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaBucketItem[]> {
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
+async function fetchAntigravityAccountQuota(
+  accessToken: string,
+  connectionId?: string
+): Promise<QuotaBucketItem[]> {
+  let currentToken = accessToken;
+  let hasRefreshed = false;
+
+  const makeHeaders = (token: string) => ({
+    Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
-    "User-Agent": "antigravity/cli/1.1.24 (aidev_client; os_type=windows; arch=amd64; auth_method=consumer)",
-    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "Client-Metadata": '{"ideType":"ANTIGRAVITY","platform":"WINDOWS","pluginType":"GEMINI"}',
+    "User-Agent": "antigravity/hub/2.24.0 darwin/arm64",
+    "X-Client-Name": "antigravity",
+    "X-Client-Version": "2.24.0",
+  });
+
+  const tryRefreshToken = async (): Promise<boolean> => {
+    if (hasRefreshed || !connectionId) return false;
+    hasRefreshed = true;
+    try {
+      currentToken = await refreshOAuthToken(connectionId);
+      return Boolean(currentToken);
+    } catch {
+      return false;
+    }
+  };
+
+  const postWithAuth = async (url: string, bodyObj: Record<string, unknown>, timeoutMs = 6000) => {
+    let res = await fetch(url, {
+      method: "POST",
+      headers: makeHeaders(currentToken),
+      body: JSON.stringify(bodyObj),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (res.status === 401 && (await tryRefreshToken())) {
+      res = await fetch(url, {
+        method: "POST",
+        headers: makeHeaders(currentToken),
+        body: JSON.stringify(bodyObj),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    }
+
+    return res;
   };
 
   const quotas: QuotaBucketItem[] = [];
+  let projectId: string | undefined;
 
+  // 0. Discover cloudaicompanionProject via loadCodeAssist
   try {
-    // 1. Fetch retrieveUserQuotaSummary
-    const summaryRes = await fetch(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:retrieveUserQuotaSummary`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ project: "aicode-consumers" }),
-      signal: AbortSignal.timeout(6000),
-    });
+    const loadRes = await postWithAuth(
+      "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+      { metadata: { ideType: 9, platform: 3, pluginType: 2 }, mode: 1 }
+    );
+    if (loadRes.ok) {
+      const loadJson = await loadRes.json().catch(() => ({}));
+      const proj = loadJson?.cloudaicompanionProject;
+      if (typeof proj === "string" && proj.trim()) {
+        projectId = proj.trim();
+      } else if (proj && typeof proj.id === "string" && proj.id.trim()) {
+        projectId = proj.id.trim();
+      }
+    }
+  } catch {}
 
-    if (summaryRes.ok) {
-      const summaryJson = await summaryRes.json();
+  const requestBody: Record<string, unknown> = projectId ? { project: projectId } : {};
+
+  // Fetch available models in parallel with summary so we can clamp 5h quotas and provide fallback
+  const [summaryResult, modelsResult] = await Promise.allSettled([
+    postWithAuth(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:retrieveUserQuotaSummary`, requestBody),
+    postWithAuth(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:fetchAvailableModels`, requestBody),
+  ]);
+
+  let modelsMap: Record<string, any> = {};
+  if (modelsResult.status === "fulfilled" && modelsResult.value.ok) {
+    try {
+      const modelsJson = await modelsResult.value.json();
+      if (modelsJson?.models && typeof modelsJson.models === "object") {
+        modelsMap = modelsJson.models;
+      }
+    } catch {}
+  }
+
+  // Classify models from fetchAvailableModels for 5h clamping & fallback
+  const modelEntries = Object.entries(modelsMap).filter(
+    ([modelId, info]) =>
+      info &&
+      !info.isInternal &&
+      !modelId.startsWith("chat_") &&
+      !modelId.startsWith("tab_") &&
+      !modelId.endsWith("-disabled")
+  );
+
+  const isGroupExhaustedInModels = (groupType: "argon" | "gemini" | "3p"): boolean => {
+    const matching = modelEntries.filter(([modelId]) => {
+      const lower = modelId.toLowerCase();
+      if (groupType === "argon") return lower.includes("argon") || lower.includes("carbon") || lower.includes("hydrogen");
+      if (groupType === "gemini") return lower.includes("gemini") && !lower.includes("argon") && !lower.includes("carbon") && !lower.includes("hydrogen");
+      return lower.includes("claude") || lower.includes("gpt") || lower.includes("oss");
+    });
+    const withQuota = matching.filter(([, info]) => info?.quotaInfo && typeof info.quotaInfo.remainingFraction === "number");
+    return withQuota.length > 0 && withQuota.every(([, info]) => info.quotaInfo.remainingFraction === 0);
+  };
+
+  if (summaryResult.status === "fulfilled" && summaryResult.value.ok) {
+    try {
+      const summaryJson = await summaryResult.value.json();
       if (Array.isArray(summaryJson.groups)) {
         for (const group of summaryJson.groups) {
           if (Array.isArray(group.buckets)) {
             for (const b of group.buckets) {
-              const fraction = typeof b.remainingFraction === "number" ? b.remainingFraction : 1.0;
-              const pct = Math.round(fraction * 100);
-              const used = Math.round((1 - fraction) * 1000);
+              const targetStr = `${group.displayName || ""} ${b.displayName || ""} ${b.bucketId || ""}`.toLowerCase();
 
               const is5h =
                 b.window === "5h" ||
@@ -86,24 +171,54 @@ async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaB
                 b.displayName?.toLowerCase().includes("session") ||
                 b.displayName?.toLowerCase().includes("five hour");
 
+              const isWeekly =
+                b.window === "weekly" ||
+                (!is5h &&
+                  (b.bucketId?.toLowerCase().includes("weekly") ||
+                    b.displayName?.toLowerCase().includes("weekly") ||
+                    !b.window));
+
+              if ((!isWeekly && !is5h) || (b.disabled && isWeekly)) {
+                continue;
+              }
+
+              let fraction: number;
+              if (typeof b.remainingFraction === "number") {
+                fraction = b.remainingFraction;
+              } else if (b.disabled && is5h) {
+                fraction = 0;
+              } else {
+                continue;
+              }
+
+              let groupType: "argon" | "gemini" | "3p" | "other" = "other";
               let name = "";
-              const targetStr = `${group.displayName || ""} ${b.displayName || ""} ${b.bucketId || ""}`.toLowerCase();
 
               if (targetStr.includes("argon")) {
+                groupType = "argon";
                 name = is5h ? "Gemini 4 Argon (5 Hours)" : "Gemini 4 Argon (Weekly)";
               } else if (targetStr.includes("gemini")) {
+                groupType = "gemini";
                 name = is5h ? "Gemini (5 Hours)" : "Gemini (Weekly)";
               } else if (
                 targetStr.includes("claude") ||
                 targetStr.includes("gpt") ||
                 b.bucketId?.startsWith("3p")
               ) {
+                groupType = "3p";
                 name = is5h ? "Claude & GPT (5 Hours)" : "Claude & GPT (Weekly)";
               } else {
                 name = is5h
                   ? `${b.displayName || group.displayName || "Quota"} (5 Hours)`
                   : `${b.displayName || group.displayName || "Quota"} (Weekly)`;
               }
+
+              if (is5h && groupType !== "other" && isGroupExhaustedInModels(groupType)) {
+                fraction = 0;
+              }
+
+              const pct = Math.round(fraction * 100);
+              const used = Math.round((1 - fraction) * 1000);
 
               quotas.push({
                 id: b.bucketId || `bucket_${quotas.length}`,
@@ -120,79 +235,73 @@ async function fetchAntigravityAccountQuota(accessToken: string): Promise<QuotaB
           }
         }
       }
-    }
-  } catch {}
-
-  // Fallback to fetchAvailableModels if summary gave no buckets
-  if (quotas.length === 0) {
-    try {
-      const modelsRes = await fetch(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:fetchAvailableModels`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ project: "aicode-consumers" }),
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (modelsRes.ok) {
-        const modelsJson = await modelsRes.json();
-        const flashModel =
-          modelsJson.models?.["gemini-2.5-flash"] ||
-          modelsJson.models?.["gemini-3.6-flash-high"] ||
-          modelsJson.models?.["gemini-4-argon"] ||
-          modelsJson.models?.["gemini-4-argon-medium"];
-        if (flashModel?.quotaInfo) {
-          const fraction = flashModel.quotaInfo.remainingFraction ?? 1.0;
-          const pct = Math.round(fraction * 100);
-          quotas.push({
-            id: "gemini-weekly",
-            name: "Gemini (Weekly)",
-            remainingFraction: fraction,
-            usedAmount: Math.round((1 - fraction) * 1000),
-            totalAmount: 1000,
-            percentage: pct,
-            resetTime: flashModel.quotaInfo.resetTime,
-            resetHuman: formatResetRemaining(flashModel.quotaInfo.resetTime),
-            status: pct > 50 ? "HEALTHY" : pct > 0 ? "LOW" : "EMPTY",
-          });
-        }
-      }
     } catch {}
   }
 
-  // If still empty, return default 100% placeholder
-  if (quotas.length === 0) {
-    quotas.push(
-      {
+  // Fallback to fetchAvailableModels if summary gave no buckets
+  if (quotas.length === 0 && modelEntries.length > 0) {
+    const argonModel = modelEntries.find(([id, info]) => {
+      const l = id.toLowerCase();
+      return (l.includes("argon") || l.includes("gemini-4")) && typeof info?.quotaInfo?.remainingFraction === "number";
+    })?.[1];
+    if (argonModel?.quotaInfo) {
+      const fraction = argonModel.quotaInfo.remainingFraction;
+      const pct = Math.round(fraction * 100);
+      quotas.push({
         id: "gemini-argon-weekly",
         name: "Gemini 4 Argon (Weekly)",
-        remainingFraction: 1.0,
-        usedAmount: 0,
+        remainingFraction: fraction,
+        usedAmount: Math.round((1 - fraction) * 1000),
         totalAmount: 1000,
-        percentage: 100,
-        resetHuman: "in 7d 0h 0m",
-        status: "HEALTHY",
-      },
-      {
+        percentage: pct,
+        resetTime: argonModel.quotaInfo.resetTime,
+        resetHuman: formatResetRemaining(argonModel.quotaInfo.resetTime),
+        status: pct > 50 ? "HEALTHY" : pct > 0 ? "LOW" : "EMPTY",
+      });
+    }
+
+    const flashModel =
+      modelsMap["gemini-2.5-flash"] ||
+      modelsMap["gemini-3.6-flash-high"] ||
+      modelEntries.find(([id, info]) => {
+        const l = id.toLowerCase();
+        return l.includes("gemini") && !l.includes("argon") && !l.includes("carbon") && !l.includes("hydrogen") && typeof info?.quotaInfo?.remainingFraction === "number";
+      })?.[1];
+    if (flashModel?.quotaInfo && typeof flashModel.quotaInfo.remainingFraction === "number") {
+      const fraction = flashModel.quotaInfo.remainingFraction;
+      const pct = Math.round(fraction * 100);
+      quotas.push({
         id: "gemini-weekly",
         name: "Gemini (Weekly)",
-        remainingFraction: 1.0,
-        usedAmount: 0,
+        remainingFraction: fraction,
+        usedAmount: Math.round((1 - fraction) * 1000),
         totalAmount: 1000,
-        percentage: 100,
-        resetHuman: "in 7d 0h 0m",
-        status: "HEALTHY",
-      },
-      {
+        percentage: pct,
+        resetTime: flashModel.quotaInfo.resetTime,
+        resetHuman: formatResetRemaining(flashModel.quotaInfo.resetTime),
+        status: pct > 50 ? "HEALTHY" : pct > 0 ? "LOW" : "EMPTY",
+      });
+    }
+
+    const thirdPartyModel = modelEntries.find(([id, info]) => {
+      const l = id.toLowerCase();
+      return (l.includes("claude") || l.includes("gpt")) && typeof info?.quotaInfo?.remainingFraction === "number";
+    })?.[1];
+    if (thirdPartyModel?.quotaInfo) {
+      const fraction = thirdPartyModel.quotaInfo.remainingFraction;
+      const pct = Math.round(fraction * 100);
+      quotas.push({
         id: "3p-weekly",
         name: "Claude & GPT (Weekly)",
-        remainingFraction: 1.0,
-        usedAmount: 0,
+        remainingFraction: fraction,
+        usedAmount: Math.round((1 - fraction) * 1000),
         totalAmount: 1000,
-        percentage: 100,
-        resetHuman: "in 7d 0h 0m",
-        status: "HEALTHY",
-      }
-    );
+        percentage: pct,
+        resetTime: thirdPartyModel.quotaInfo.resetTime,
+        resetHuman: formatResetRemaining(thirdPartyModel.quotaInfo.resetTime),
+        status: pct > 50 ? "HEALTHY" : pct > 0 ? "LOW" : "EMPTY",
+      });
+    }
   }
 
   return quotas;
@@ -1575,10 +1684,16 @@ export async function getSingleAccountQuota(
     const isXai =
       provUpper === "XAI";
 
-    if (isAntigravity && conn.accessTokenEnc) {
+    if (isAntigravity && (conn.accessTokenEnc || conn.refreshTokenEnc)) {
       try {
-        const accessToken = decryptCredential(conn.accessTokenEnc);
-        quotas = await fetchAntigravityAccountQuota(accessToken);
+        let accessToken = conn.accessTokenEnc ? decryptCredential(conn.accessTokenEnc) : "";
+        const isExpiredOrSoon =
+          !accessToken ||
+          (conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() <= Date.now() + 60_000);
+        if (isExpiredOrSoon && conn.refreshTokenEnc) {
+          accessToken = await refreshOAuthToken(conn.id);
+        }
+        quotas = accessToken ? await fetchAntigravityAccountQuota(accessToken, conn.id) : [];
       } catch {
         quotas = [];
       }

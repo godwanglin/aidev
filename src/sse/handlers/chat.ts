@@ -1241,40 +1241,58 @@ export async function handleChat(req: NextRequest, options: ChatHandlerOptions):
         });
 
         let finalAgResponse = response;
+        let currentAgConnId = activeConnectionId || "";
+        const triedAgConnIds: string[] = currentAgConnId ? [currentAgConnId] : [];
+        const maxAgFailovers = 5;
 
-        if (response.status === 429 && activeConnectionId) {
+        for (
+          let attempt = 0;
+          attempt < maxAgFailovers && (finalAgResponse.status === 429 || finalAgResponse.status >= 500);
+          attempt++
+        ) {
+          if (finalAgResponse.status === 429 && currentAgConnId) {
+            markConnectionCooldown(currentAgConnId, 300).catch(() => {});
+            prisma.providerConnection.update({
+              where: { id: currentAgConnId },
+              data: { syncStatus: "EXHAUSTED" },
+            }).catch(() => {});
+          }
+
+          const nextRoute = await resolveUpstreamConnection({
+            model: candidateModel,
+            provider: activeProvider,
+            excludeConnectionIds: triedAgConnIds,
+          });
+          if (!nextRoute || !nextRoute.apiKey || triedAgConnIds.includes(nextRoute.connectionId)) {
+            break;
+          }
+
           adminLogger.fallback({
             fromModel: candidateModel,
-            reason: `Antigravity HTTP 429 on connection ${activeConnectionId} -> switching to backup connection`,
-            account: upstreamAccount,
+            reason: `Antigravity HTTP ${finalAgResponse.status} on connection ${currentAgConnId} -> switching to backup connection ${nextRoute.connectionId}`,
+            account: nextRoute.accountEmail || upstreamAccount,
           });
-          markConnectionCooldown(activeConnectionId, 300).catch(() => {});
-          prisma.providerConnection.update({
-            where: { id: activeConnectionId },
-            data: { syncStatus: "EXHAUSTED" },
-          }).catch(() => {});
 
-          const nextRoute = await resolveUpstreamConnection({ model: candidateModel, provider: activeProvider });
-          if (nextRoute && nextRoute.connectionId !== activeConnectionId && nextRoute.apiKey) {
-            const retryResponse = await dispatchAntigravityChat({
-              rawBody: candidateChatBody || "{}",
-              parsedBody: parsedCandidateJson,
-              accessToken: nextRoute.apiKey,
-              connectionId: nextRoute.connectionId,
-              model: candidateModel || "gemini-2.5-flash",
-              clientRequestedModel,
-              upstreamLogModel,
-              clientApiKeyId: apiKeyId,
-              clientUserId,
-              clientUserEmail: userEmail,
-              reasoningEffort: candidateReasoningEffort,
-              rawHeaders: rawHeadersObj,
-              reqPath,
-              clientWantsStream,
-              tokensSavedRtk,
-            });
-            finalAgResponse = retryResponse;
-          }
+          triedAgConnIds.push(nextRoute.connectionId);
+          currentAgConnId = nextRoute.connectionId;
+
+          finalAgResponse = await dispatchAntigravityChat({
+            rawBody: candidateChatBody || "{}",
+            parsedBody: parsedCandidateJson,
+            accessToken: nextRoute.apiKey,
+            connectionId: nextRoute.connectionId,
+            model: candidateModel || "gemini-2.5-flash",
+            clientRequestedModel,
+            upstreamLogModel,
+            clientApiKeyId: apiKeyId,
+            clientUserId,
+            clientUserEmail: userEmail,
+            reasoningEffort: candidateReasoningEffort,
+            rawHeaders: rawHeadersObj,
+            reqPath,
+            clientWantsStream,
+            tokensSavedRtk,
+          });
         }
 
         if ((finalAgResponse.status === 429 || finalAgResponse.status >= 500) && !isLastCandidate) {

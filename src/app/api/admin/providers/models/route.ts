@@ -7,6 +7,7 @@ import { SHARED_PROVIDER_MODELS, findProviderBySlugOrId } from "@/lib/oauth/conf
 
 import { getCustomProviderBySlug } from "@/lib/custom-providers";
 import { validateModelForProvider } from "@/lib/model-normalizer";
+import { fetchAntigravityAvailableModels } from "@/lib/adapters/antigravity";
 
 async function verifyAdmin() {
   const user = await getCurrentUser();
@@ -500,6 +501,58 @@ export async function GET(req: NextRequest) {
                 });
               }
             }
+          }
+        } else if (providerKey === "ANTIGRAVITY") {
+          const mergedModels = new Map<string, { id: string; name: string }>();
+          for (const agConn of connections) {
+            let agToken = agConn.accessTokenEnc ? decryptCredential(agConn.accessTokenEnc) : "";
+            if (!agToken && agConn.refreshTokenEnc) {
+              try {
+                agToken = await refreshOAuthToken(agConn.id);
+              } catch {}
+            }
+            if (!agToken && !agConn.refreshTokenEnc) continue;
+            const list = await fetchAntigravityAvailableModels(agToken, agConn.id).catch(() => []);
+            for (const m of list) {
+              if (!mergedModels.has(m.id)) {
+                mergedModels.set(m.id, m);
+              }
+            }
+          }
+
+          const liveModels = Array.from(mergedModels.values()).sort((a, b) => a.id.localeCompare(b.id));
+          if (liveModels.length > 0) {
+            if (persistImport) {
+              for (const m of liveModels) {
+                await prisma.aiModel
+                  .upsert({
+                    where: { modelId: m.id },
+                    create: {
+                      modelId: m.id,
+                      name: m.name,
+                      provider: providerKey,
+                      promptCost: 0,
+                      completionCost: 0,
+                      contextWindow: "1M",
+                      isActive: true,
+                    },
+                    update: {
+                      name: m.name,
+                      provider: providerKey,
+                      isActive: true,
+                    },
+                  })
+                  .catch(() => null);
+              }
+            }
+
+            return NextResponse.json({
+              success: true,
+              provider: providerKey,
+              models: liveModels,
+              source: "LIVE_UPSTREAM",
+              count: liveModels.length,
+            });
           }
         }
       }

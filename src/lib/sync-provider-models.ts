@@ -3,6 +3,7 @@ import { invalidateModelsCache } from "@/lib/models-cache";
 import { decryptCredential } from "@/lib/crypto";
 import { getCustomProviders } from "@/lib/custom-providers";
 import { findProviderBySlugOrId } from "@/lib/oauth/config";
+import { fetchAntigravityAvailableModels } from "@/lib/adapters/antigravity";
 
 /**
  * Syncs real models ONLY from active upstream provider endpoints currently connected in the system.
@@ -240,6 +241,37 @@ export async function syncProviderModelsToDatabase(): Promise<{
           }
         }
       } catch {}
+    }
+
+    // Antigravity live models pull (all active connections; Pro accounts expose Gemini 4 Argon/Hydrogen)
+    if (provUpper === "ANTIGRAVITY" && (token || conn.refreshTokenEnc)) {
+      try {
+        const agModels = await fetchAntigravityAvailableModels(token || "", conn.id);
+        for (const m of agModels) {
+          try {
+            await prisma.aiModel.upsert({
+              where: { modelId: m.id },
+              update: { name: m.name, provider: provUpper, isActive: true },
+              create: {
+                modelId: m.id,
+                name: m.name,
+                provider: provUpper,
+                contextWindow: "1M",
+                promptCost: 0,
+                completionCost: 0,
+                isActive: true,
+                isPublic: true,
+              },
+            });
+            synced++;
+            models.push(m.id);
+          } catch {
+            errors++;
+          }
+        }
+      } catch (err) {
+        console.error("Live Antigravity models sync failed:", err);
+      }
     }
   }
 

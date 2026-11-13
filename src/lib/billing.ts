@@ -116,7 +116,8 @@ export async function getModelUsdRates(modelId: string): Promise<{
     normModel.includes("gemini-2.5-pro") ||
     normModel.includes("gemini-3.1-pro") ||
     normModel.includes("argon") ||
-    normModel.includes("carbon")
+    normModel.includes("carbon") ||
+    normModel.includes("hydrogen")
   ) {
     rateInUsdPer1m = 1.25;
     rateOutUsdPer1m = 5.00;

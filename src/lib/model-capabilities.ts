@@ -55,6 +55,7 @@ export function getModelCapabilities(modelId: string, provider: string): {
     lower.includes("gemini") ||
     lower.includes("argon") ||
     lower.includes("carbon") ||
+    lower.includes("hydrogen") ||
     provLower.includes("gemini") ||
     provLower.includes("google") ||
     provLower === "antigravity"
@@ -67,7 +68,8 @@ export function getModelCapabilities(modelId: string, provider: string): {
       lower.includes("medium") ||
       lower.includes("gemini-4") ||
       lower.includes("argon") ||
-      lower.includes("carbon");
+      lower.includes("carbon") ||
+      lower.includes("hydrogen");
     ownedBy = "google";
   } else if (lower.startsWith("deepseek/") || lower.includes("deepseek") || provLower.includes("deepseek")) {
     if (lower.includes("v4")) {
@@ -95,7 +97,14 @@ export function getModelCapabilities(modelId: string, provider: string): {
     search: true,
     tools: true,
     reasoning,
-    thinkingFormat: reasoning ? "openai" : undefined,
+    thinkingFormat: reasoning
+      ? lower.includes("gemini") ||
+        lower.includes("argon") ||
+        lower.includes("carbon") ||
+        lower.includes("hydrogen")
+        ? "gemini-level"
+        : "openai"
+      : undefined,
     thinkingCanDisable: reasoning,
     contextWindow,
     maxOutput,

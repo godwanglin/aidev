@@ -8,9 +8,9 @@ export const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis
 export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 
 const ANTIGRAVITY_HEADERS = {
-  "User-Agent": "antigravity/cli/1.1.24 (aidev_client; os_type=windows; arch=amd64; auth_method=consumer)",
-  "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-  "Client-Metadata": '{"ideType":"ANTIGRAVITY","platform":"WINDOWS","pluginType":"GEMINI"}',
+  "User-Agent": "antigravity/hub/2.24.0 darwin/arm64",
+  "X-Client-Name": "antigravity",
+  "X-Client-Version": "2.24.0",
 };
 
 // In-memory cache for discovered project IDs by access token prefix
@@ -27,7 +27,103 @@ export function isAntigravityProvider(provider?: string): boolean {
  * sending them causes Cloud Code Assist to fail with HTTP 400.
  */
 export function isGemini4Model(model: string): boolean {
-  return /(?:^|\/)gemini-4(?:$|[-.])/i.test(model) || /argon|carbon/i.test(model);
+  return /(?:^|\/)gemini-4(?:$|[-.])/i.test(model) || /argon|carbon|hydrogen/i.test(model);
+}
+
+/**
+ * Fetches live non-internal, enabled models from Antigravity fetchAvailableModels.
+ */
+export async function fetchAntigravityAvailableModels(
+  accessToken: string,
+  connectionId?: string
+): Promise<{ id: string; name: string }[]> {
+  let currentToken = accessToken;
+  if (!currentToken && connectionId) {
+    try {
+      currentToken = await refreshConnectionOn401(connectionId);
+    } catch {
+      return [];
+    }
+  }
+  if (!currentToken) return [];
+  let projectId: string | undefined;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const loadRes = await fetch(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:loadCodeAssist`, {
+        method: "POST",
+        headers: {
+          ...ANTIGRAVITY_HEADERS,
+          Authorization: `Bearer ${currentToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ metadata: { ideType: 9, platform: 3, pluginType: 2 }, mode: 1 }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (loadRes.status === 401 && attempt === 0 && connectionId) {
+        currentToken = await refreshConnectionOn401(connectionId);
+        continue;
+      }
+      if (loadRes.ok) {
+        const loadData = await loadRes.json().catch(() => ({}));
+        const proj =
+          typeof loadData?.cloudaicompanionProject === "string"
+            ? loadData.cloudaicompanionProject.trim()
+            : typeof loadData?.cloudaicompanionProject?.id === "string"
+            ? loadData.cloudaicompanionProject.id.trim()
+            : undefined;
+        if (proj) projectId = proj;
+      }
+    } catch {}
+    break;
+  }
+
+  let res = await fetch(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:fetchAvailableModels`, {
+    method: "POST",
+    headers: {
+      ...ANTIGRAVITY_HEADERS,
+      Authorization: `Bearer ${currentToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(projectId ? { project: projectId } : {}),
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (res.status === 401 && connectionId) {
+    currentToken = await refreshConnectionOn401(connectionId);
+    res = await fetch(`${ANTIGRAVITY_ENDPOINT_DAILY}/v1internal:fetchAvailableModels`, {
+      method: "POST",
+      headers: {
+        ...ANTIGRAVITY_HEADERS,
+        Authorization: `Bearer ${currentToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(projectId ? { project: projectId } : {}),
+      signal: AbortSignal.timeout(8000),
+    });
+  }
+
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({}));
+  const modelsObj = data?.models;
+  if (!modelsObj || typeof modelsObj !== "object") return [];
+
+  const results: { id: string; name: string }[] = [];
+  for (const [rawId, meta] of Object.entries<any>(modelsObj)) {
+    if (!meta || meta.isInternal) continue;
+    if (rawId.startsWith("chat_") || rawId.startsWith("tab_") || rawId.endsWith("-disabled")) continue;
+    if (meta.quotaInfo?.disabled === true) continue;
+    const displayName =
+      typeof meta.displayName === "string" && meta.displayName.trim()
+        ? meta.displayName.trim()
+        : rawId;
+    results.push({
+      id: rawId.startsWith("ag/") ? rawId : `ag/${rawId}`,
+      name: displayName,
+    });
+  }
+
+  return results;
 }
 
 /**
@@ -75,12 +171,15 @@ async function getEffectiveProjectId(accessToken: string): Promise<string> {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ metadata: { ideType: "ANTIGRAVITY" } }),
+      body: JSON.stringify({ metadata: { ideType: 9, platform: 3, pluginType: 2 }, mode: 1 }),
     });
 
     if (res.ok) {
       const data = await res.json();
-      const project = data.cloudaicompanionProject || data.cloudaicompanionProject?.id;
+      const project =
+        typeof data.cloudaicompanionProject === "string"
+          ? data.cloudaicompanionProject
+          : data.cloudaicompanionProject?.id;
       if (project) {
         projectCache.set(tokenPrefix, project);
         return project;
@@ -534,12 +633,26 @@ function mapToWireModel(model: string, effortStr?: string): string {
     .trim()
     .toLowerCase();
 
-  // Gemini 4 Argon
-  if (clean.includes("argon") || clean.startsWith("gemini-4-argon")) {
-    if (clean.includes("low") || effortStr === "low") {
-      return "gemini-4-argon-low";
+  // Gemini 4 Hydrogen
+  if (clean.includes("hydrogen") || clean.startsWith("gemini-4-hydrogen")) {
+    if (clean.includes("xhigh") || effortStr === "xhigh" || effortStr === "ultra" || effortStr === "max") {
+      return "gemini-4-hydrogen-xhigh";
+    }
+    if (clean.includes("low") || effortStr === "low" || effortStr === "minimal") {
+      return "gemini-4-hydrogen-low";
     }
     if (clean.includes("high") || effortStr === "high") {
+      return "gemini-4-hydrogen-high";
+    }
+    return "gemini-4-hydrogen-medium";
+  }
+
+  // Gemini 4 Argon
+  if (clean.includes("argon") || clean.startsWith("gemini-4-argon")) {
+    if (clean.includes("low") || effortStr === "low" || effortStr === "minimal") {
+      return "gemini-4-argon-low";
+    }
+    if (clean.includes("xhigh") || clean.includes("high") || effortStr === "high" || effortStr === "xhigh" || effortStr === "ultra") {
       return "gemini-4-argon-high";
     }
     return "gemini-4-argon-medium";
@@ -547,10 +660,10 @@ function mapToWireModel(model: string, effortStr?: string): string {
 
   // Gemini 4 Carbon
   if (clean.includes("carbon") || clean.startsWith("gemini-4-carbon")) {
-    if (clean.includes("low") || effortStr === "low") {
+    if (clean.includes("low") || effortStr === "low" || effortStr === "minimal") {
       return "gemini-4-carbon-low";
     }
-    if (clean.includes("high") || effortStr === "high") {
+    if (clean.includes("xhigh") || clean.includes("high") || effortStr === "high" || effortStr === "xhigh" || effortStr === "ultra") {
       return "gemini-4-carbon-high";
     }
     return "gemini-4-carbon-medium";
@@ -558,10 +671,10 @@ function mapToWireModel(model: string, effortStr?: string): string {
 
   // Gemini 4 generic fallback
   if (clean === "gemini-4" || clean.startsWith("gemini-4-")) {
-    if (clean.includes("low") || effortStr === "low") {
+    if (clean.includes("low") || effortStr === "low" || effortStr === "minimal") {
       return "gemini-4-argon-low";
     }
-    if (clean.includes("high") || effortStr === "high") {
+    if (clean.includes("xhigh") || clean.includes("high") || effortStr === "high" || effortStr === "xhigh" || effortStr === "ultra") {
       return "gemini-4-argon-high";
     }
     return "gemini-4-argon-medium";
@@ -658,25 +771,47 @@ export async function dispatchAntigravityChat(params: AntigravityDispatchParams)
     generationConfig.maxOutputTokens = isClaude ? 16384 : Math.max(wireModel.includes("thinking") ? 16384 : 4096, thinkingBudget > 0 ? thinkingBudget + 4096 : 4096);
   }
   const isGemini4 = isGemini4Model(wireModel);
-  if (!isGemini4) {
+  if (isGemini4) {
+    let thinkingLevel = "medium";
+    if (effortStr === "none" || effortStr === "minimal" || effortStr === "low") {
+      thinkingLevel = "low";
+    } else if (effortStr === "medium") {
+      thinkingLevel = "medium";
+    } else if (effortStr === "xhigh" || effortStr === "ultra" || effortStr === "max") {
+      thinkingLevel = wireModel.includes("hydrogen") ? "xhigh" : "high";
+    } else if (effortStr === "high") {
+      thinkingLevel = "high";
+    } else if (wireModel.includes("xhigh")) {
+      thinkingLevel = wireModel.includes("hydrogen") ? "xhigh" : "high";
+    } else if (wireModel.includes("high")) {
+      thinkingLevel = "high";
+    } else if (wireModel.includes("low")) {
+      thinkingLevel = "low";
+    }
+
+    generationConfig.thinkingConfig = {
+      thinkingLevel,
+      includeThoughts: effortStr !== "none",
+    };
+  } else {
     if (params.parsedBody.temperature !== undefined) {
       generationConfig.temperature = Number(params.parsedBody.temperature);
     }
     if (params.parsedBody.top_p !== undefined) {
       generationConfig.topP = Number(params.parsedBody.top_p);
     }
-  }
 
-  if (thinkingBudget === 0) {
-    generationConfig.thinkingConfig = {
-      includeThoughts: false,
-      thinkingBudget: 0,
-    };
-  } else {
-    generationConfig.thinkingConfig = {
-      includeThoughts: true,
-      thinkingBudget,
-    };
+    if (thinkingBudget === 0) {
+      generationConfig.thinkingConfig = {
+        includeThoughts: false,
+        thinkingBudget: 0,
+      };
+    } else {
+      generationConfig.thinkingConfig = {
+        includeThoughts: true,
+        thinkingBudget,
+      };
+    }
   }
 
   let geminiTools: any[] | undefined = undefined;
